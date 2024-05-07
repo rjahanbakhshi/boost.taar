@@ -1,0 +1,13 @@
+# Output files
+out
+build
+CMakeLists.txt.user
+
+# Clang-Tidy
+.cache
+compile_commands.json
+
+# pyenv and pipenv
+.python-version
+Pipfile
+Pipfile.lock
