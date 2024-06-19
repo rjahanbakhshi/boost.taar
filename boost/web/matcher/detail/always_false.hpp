@@ -7,8 +7,8 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-web
 //
 
-#ifndef BOOST_WEB_HTTP_MATCHER_DETAIL_ALWAYS_FALSE_HPP
-#define BOOST_WEB_HTTP_MATCHER_DETAIL_ALWAYS_FALSE_HPP
+#ifndef BOOST_WEB_MATCHER_DETAIL_ALWAYS_FALSE_HPP
+#define BOOST_WEB_MATCHER_DETAIL_ALWAYS_FALSE_HPP
 
 #include <type_traits>
 
@@ -22,4 +22,4 @@ template <class...> constexpr static std::false_type always_false {};
 } // detail
 } // namespace boost::web::matcher
 
-#endif // BOOST_WEB_HTTP_MATCHER_DETAIL_ALWAYS_FALSE_HPP
+#endif // BOOST_WEB_MATCHER_DETAIL_ALWAYS_FALSE_HPP

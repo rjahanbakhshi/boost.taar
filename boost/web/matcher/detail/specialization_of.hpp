@@ -7,8 +7,8 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-web
 //
 
-#ifndef BOOST_WEB_HTTP_MATCHER_DETAIL_SPECIALIZATION_OF_HPP
-#define BOOST_WEB_HTTP_MATCHER_DETAIL_SPECIALIZATION_OF_HPP
+#ifndef BOOST_WEB_MATCHER_DETAIL_SPECIALIZATION_OF_HPP
+#define BOOST_WEB_MATCHER_DETAIL_SPECIALIZATION_OF_HPP
 
 #include <type_traits>
 
@@ -33,4 +33,4 @@ concept specialization_of =
 } // detail
 } // namespace boost::web::matcher
 
-#endif // BOOST_WEB_HTTP_MATCHER_DETAIL_SPECIALIZATION_OF_HPP
+#endif // BOOST_WEB_MATCHER_DETAIL_SPECIALIZATION_OF_HPP

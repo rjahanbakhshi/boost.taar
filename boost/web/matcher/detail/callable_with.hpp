@@ -7,8 +7,8 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-web
 //
 
-#ifndef BOOST_WEB_HTTP_MATCHER_DETAIL_CALLABLE_WITH_HPP
-#define BOOST_WEB_HTTP_MATCHER_DETAIL_CALLABLE_WITH_HPP
+#ifndef BOOST_WEB_MATCHER_DETAIL_CALLABLE_WITH_HPP
+#define BOOST_WEB_MATCHER_DETAIL_CALLABLE_WITH_HPP
 
 #include <concepts>
 #include <type_traits>
@@ -25,4 +25,4 @@ concept callable_with =
 } // detail
 } // namespace boost::web::matcher
 
-#endif // BOOST_WEB_HTTP_MATCHER_DETAIL_CALLABLE_WITH_HPP
+#endif // BOOST_WEB_MATCHER_DETAIL_CALLABLE_WITH_HPP

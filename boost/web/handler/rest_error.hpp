@@ -7,18 +7,20 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-web
 //
 
-#ifndef BOOST_WEB_MATCHER_ERROR_TYPES_HPP
-#define BOOST_WEB_MATCHER_ERROR_TYPES_HPP
+#ifndef BOOST_WEB_HANDLER_REST_ERROR_HPP
+#define BOOST_WEB_HANDLER_REST_ERROR_HPP
 
 #include <boost/system/error_category.hpp>
 
-namespace boost::web::matcher {
+namespace boost::web::handler {
 
-enum class error
+enum class rest_error
 {
     success = 0,
-    no_absolute_template,
-    invalid_template,
+    argument_not_found = 10,
+    invalid_request_format,
+    invalid_url_format,
+    invalid_content_type,
 };
 
 inline constexpr boost::system::error_category const& error_category() noexcept
@@ -27,19 +29,23 @@ inline constexpr boost::system::error_category const& error_category() noexcept
     {
         [[nodiscard]] const char* name() const noexcept override
         {
-            return "boost::web::matcher";
+            return "boost::web::handler::rest";
         }
 
         [[nodiscard]] std::string message(int ev) const override
         {
-            switch (static_cast<error>(ev))
+            switch (static_cast<rest_error>(ev))
             {
-            case error::success:
+            case rest_error::success:
                 return "Success.";
-            case error::no_absolute_template:
-                return "Specified template is not an absolute path.";
-            case error::invalid_template:
-                return "Invalid template path.";
+            case rest_error::argument_not_found:
+                return "Argument not found";
+            case rest_error::invalid_request_format:
+                return "Invalid request format";
+            case rest_error::invalid_url_format:
+                return "Invalid url format";
+            case rest_error::invalid_content_type:
+                return "Invalid content type";
             }
 
             return "(Unknown error)";
@@ -50,11 +56,11 @@ inline constexpr boost::system::error_category const& error_category() noexcept
     return instance;
 }
 
-inline constexpr boost::system::error_code make_error_code(error ev) noexcept
+inline constexpr boost::system::error_code make_error_code(rest_error ev) noexcept
 {
     return boost::system::error_code {
         static_cast<std::underlying_type<
-            error>::type>(ev),
+            rest_error>::type>(ev),
         error_category()};
 }
 
@@ -63,11 +69,11 @@ inline constexpr boost::system::error_code make_error_code(error ev) noexcept
 namespace boost::system {
 
 template<>
-struct is_error_code_enum<::boost::web::matcher::error>
+struct is_error_code_enum<::boost::web::handler::rest_error>
 {
     static bool const value = true;
 };
 
 } // namespace boost::system
 
-#endif // BOOST_WEB_MATCHER_ERROR_TYPES_HPP
+#endif // BOOST_WEB_HANDLER_REST_ERROR_HPP

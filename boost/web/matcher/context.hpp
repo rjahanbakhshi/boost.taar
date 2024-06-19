@@ -7,8 +7,8 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-web
 //
 
-#ifndef BOOST_WEB_HTTP_MATCHER_CONTEXT_HPP
-#define BOOST_WEB_HTTP_MATCHER_CONTEXT_HPP
+#ifndef BOOST_WEB_MATCHER_CONTEXT_HPP
+#define BOOST_WEB_MATCHER_CONTEXT_HPP
 
 #include <unordered_map>
 #include <string>
@@ -22,4 +22,4 @@ struct context
 
 } // namespace boost::web::matcher
 
-#endif // BOOST_WEB_HTTP_MATCHER_CONTEXT_HPP
+#endif // BOOST_WEB_MATCHER_CONTEXT_HPP

@@ -7,11 +7,11 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-web
 //
 
-#ifndef BOOST_WEB_HTTP_MATCHER_HEADER_HPP
-#define BOOST_WEB_HTTP_MATCHER_HEADER_HPP
+#ifndef BOOST_WEB_MATCHER_HEADER_HPP
+#define BOOST_WEB_MATCHER_HEADER_HPP
 
-#include "context.hpp"
-#include "operand.hpp"
+#include <boost/web/matcher/context.hpp>
+#include <boost/web/matcher/operand.hpp>
 #include <boost/beast/http/message.hpp>
 
 namespace boost::web::matcher {
@@ -63,4 +63,4 @@ constexpr auto header = basic_header<boost::beast::http::fields>;
 
 } // namespace boost::web::matcher
 
-#endif // BOOST_WEB_HTTP_MATCHER_HEADER_HPP
+#endif // BOOST_WEB_MATCHER_HEADER_HPP

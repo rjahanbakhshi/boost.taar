@@ -7,15 +7,15 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-web
 //
 
-#ifndef BOOST_WEB_HTTP_MATCHER_TARGET_HPP
-#define BOOST_WEB_HTTP_MATCHER_TARGET_HPP
+#ifndef BOOST_WEB_MATCHER_TARGET_HPP
+#define BOOST_WEB_MATCHER_TARGET_HPP
 
-#include <boost/web/matcher/segments_view.hpp>
 #include <boost/web/matcher/context.hpp>
 #include <boost/web/matcher/operand.hpp>
-#include <boost/web/matcher/target_parser.hpp>
+#include <boost/web/matcher/template_parser.hpp>
 #include <boost/web/matcher/detail/ranges_to.hpp>
 #include <boost/beast/http/message.hpp>
+#include <boost/url/url_view.hpp>
 #include <iterator>
 #include <ranges>
 #include <vector>
@@ -30,22 +30,23 @@ struct target_t
 
     friend auto operator==(target_t, std::string_view target_template)
     {
-        auto ptt = parse_target(target_template, true);
+        auto ptt = parse_template(target_template);
         std::vector<std::string> ptt_segments {ptt.value().begin(), ptt.value().end()};
         return matcher::operand
         {
             [ptt_segments = std::move(ptt_segments)](
                 const request_type& request,
                 context& context,
-                const segments_view& parsed_target)
+                const boost::urls::url_view& parsed_target)
             {
-                auto target_iter = parsed_target.begin();
+                auto target_iter = parsed_target.segments().begin();
                 auto template_iter = ptt_segments.begin();
-                while (
-                    target_iter != parsed_target.end() &&
-                    template_iter != ptt_segments.end())
+                for (;;)
                 {
-                    auto const& target_value = *target_iter;
+                    if (template_iter == ptt_segments.end())
+                    {
+                        break;
+                    }
                     auto const& template_value = *template_iter;
 
                     if (template_value == "{*}")
@@ -54,12 +55,19 @@ struct target_t
                         using namespace std::views;
                         context.path_args.emplace(
                             "*",
-                            subrange(target_iter, parsed_target.end()) |
+                            subrange(target_iter, parsed_target.segments().end()) |
                                 join_with('/') |
-                                detail::to_container<std::string>);
+                                std::ranges::to<std::string>());
                         return true;
                     }
-                    else if (template_value.size() >= 2 &&
+
+                    if (target_iter == parsed_target.segments().end())
+                    {
+                        break;
+                    }
+                    auto const& target_value = *target_iter;
+
+                    if (template_value.size() >= 2 &&
                         template_value.front() == '{' &&
                         template_value.back() == '}')
                     {
@@ -79,7 +87,7 @@ struct target_t
                 }
 
                 return
-                    target_iter == parsed_target.end() &&
+                    target_iter == parsed_target.segments().end() &&
                     template_iter == ptt_segments.end();
             }
         };
@@ -108,4 +116,4 @@ constexpr auto target = basic_target<boost::beast::http::fields>;
 
 } // namespace boost::web::matcher
 
-#endif // BOOST_WEB_HTTP_MATCHER_TARGET_HPP
+#endif // BOOST_WEB_MATCHER_TARGET_HPP

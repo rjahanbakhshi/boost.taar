@@ -7,8 +7,8 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-web
 //
 
-#ifndef BOOST_WEB_HTTP_MATCHER_DETAIL_SUPER_TYPE_HPP
-#define BOOST_WEB_HTTP_MATCHER_DETAIL_SUPER_TYPE_HPP
+#ifndef BOOST_WEB_MATCHER_DETAIL_SUPER_TYPE_HPP
+#define BOOST_WEB_MATCHER_DETAIL_SUPER_TYPE_HPP
 
 #include <type_traits>
 
@@ -35,4 +35,4 @@ using super_type_t = typename super_type<T, U>::type;
 } // detail
 } // namespace boost::web::matcher
 
-#endif // BOOST_WEB_HTTP_MATCHER_DETAIL_SUPER_TYPE_HPP
+#endif // BOOST_WEB_MATCHER_DETAIL_SUPER_TYPE_HPP

@@ -7,7 +7,6 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-web
 //
 
-#include "boost/web/matcher/segments_view.hpp"
 #include <boost/web/matcher/operand.hpp>
 #include <boost/web/matcher/context.hpp>
 #include <boost/test/unit_test.hpp>
@@ -35,9 +34,9 @@ std::optional<int> contextual_bool(
 bool free_function_target(
     const request_base& /*request*/,
     boost::web::matcher::context& /*context*/,
-    const boost::web::matcher::segments_view& parsed_target)
+    const boost::urls::url_view& parsed_target)
 {
-    return !parsed_target.empty();
+    return !parsed_target.segments().empty();
 }
 
 BOOST_AUTO_TEST_CASE(test_matcher_operand_free_function)
@@ -78,7 +77,7 @@ BOOST_AUTO_TEST_CASE(test_matcher_operand_free_function_with_target)
     operand free_function_target_operand {free_function_target};
 
     BOOST_TEST(!free_function_target_operand({}, ctx));
-    BOOST_TEST(free_function_target_operand({}, ctx, {""}));
+    BOOST_TEST(free_function_target_operand({}, ctx, {"/test"}));
     BOOST_TEST(!(free_function_target_operand)({}, ctx));
     BOOST_TEST((!free_function_target_operand && free_function_operand)({}, ctx));
     BOOST_TEST(!(free_function_target_operand && free_function_operand)({}, ctx));

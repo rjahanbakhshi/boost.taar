@@ -7,15 +7,15 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-web
 //
 
-#ifndef BOOST_WEB_HTTP_MATCHER_MATCHER_HPP
-#define BOOST_WEB_HTTP_MATCHER_MATCHER_HPP
+#ifndef BOOST_WEB_MATCHER_MATCHER_HPP
+#define BOOST_WEB_MATCHER_MATCHER_HPP
 
 #include <boost/web/matcher/context.hpp>
-#include <boost/web/matcher/segments_view.hpp>
-#include <boost/web/matcher/detail/callable_traits.hpp>
+#include <boost/web/core/callable_traits.hpp>
 #include <boost/web/matcher/detail/callable_with.hpp>
 #include <boost/web/matcher/detail/specialization_of.hpp>
 #include <boost/web/matcher/detail/super_type.hpp>
+#include <boost/url/url_view.hpp>
 #include <type_traits>
 #include <utility>
 
@@ -24,14 +24,14 @@ namespace boost::web::matcher {
 template <typename RequestType, typename CallableType>
 requires (
     detail::callable_with<CallableType, bool, const RequestType&, context&> ||
-    detail::callable_with<CallableType, bool, const RequestType&, context&, const segments_view&>)
+    detail::callable_with<CallableType, bool, const RequestType&, context&, const boost::urls::url_view&>)
 class operand
 {
 public:
     using request_type = RequestType;
     using callable_type = CallableType;
     static constexpr auto with_parsed_target = detail::callable_with<
-        CallableType, bool, const RequestType&, context&, const segments_view&>;
+        CallableType, bool, const RequestType&, context&, const boost::urls::url_view&>;
 
 public:
     operand(callable_type callable)
@@ -41,7 +41,7 @@ public:
     auto operator()(
         const request_type& request,
         context& context,
-        const segments_view& parsed_target = {}) const
+        const boost::urls::url_view& parsed_target = {}) const
     {
         if constexpr (with_parsed_target)
         {
@@ -61,7 +61,7 @@ public:
                 [opr = std::move(opr)](
                     const request_type& request,
                     context& context,
-                    const segments_view& parsed_target)
+                    const boost::urls::url_view& parsed_target)
                 {
                     return !opr.operator()(request, context, parsed_target);
                 }
@@ -95,7 +95,7 @@ public:
                 [lhs_operand = std::move(lhs_operand), rhs_operand = std::move(rhs_operand)](
                     const super_request_type& request,
                     context& context,
-                    const segments_view& parsed_target)
+                    const boost::urls::url_view& parsed_target)
                 {
                     return
                         lhs_operand(request, context, parsed_target) &&
@@ -136,7 +136,7 @@ public:
                 [lhs_operand = std::move(lhs_operand), rhs_operand = std::move(rhs_operand)](
                     const super_request_type& request,
                     context& context,
-                    const segments_view& parsed_target)
+                    const boost::urls::url_view& parsed_target)
                 {
                     return
                         lhs_operand(request, context, parsed_target) &&
@@ -177,7 +177,7 @@ public:
                 [lhs_operand = std::move(lhs_operand), rhs_operand = std::move(rhs_operand)](
                     const super_request_type& request,
                     context& context,
-                    const segments_view& parsed_target)
+                    const boost::urls::url_view& parsed_target)
                 {
                     return
                         lhs_operand(request, context, parsed_target) ||
@@ -218,7 +218,7 @@ public:
                 [lhs_operand = std::move(lhs_operand), rhs_operand = std::move(rhs_operand)](
                     const super_request_type& request,
                     context& context,
-                    const segments_view& parsed_target)
+                    const boost::urls::url_view& parsed_target)
                 {
                     return
                         lhs_operand(request, context, parsed_target) ||
@@ -246,14 +246,14 @@ private:
     callable_type callable_;
 };
 
-template <typename RequestType, typename ResultType, typename... ArgsType>
-operand(ResultType(*)(const RequestType&, ArgsType...))
-    -> operand<RequestType, ResultType(*)(const RequestType&, ArgsType...)>;
-
 template <typename ObjectType>
-operand(ObjectType)
-    -> operand<detail::arg1_t<decltype(&ObjectType::operator())>, ObjectType>;
+operand(ObjectType) ->
+    operand<
+        std::remove_cvref_t<
+            typename callable_traits<std::remove_cvref_t<ObjectType>
+        >::template arg_type<0>
+    >, ObjectType>;
 
 } // namespace boost::web::matcher
 
-#endif // BOOST_WEB_HTTP_MATCHER_MATCHER_HPP
+#endif // BOOST_WEB_MATCHER_MATCHER_HPP

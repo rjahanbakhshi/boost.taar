@@ -20,8 +20,16 @@ set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 23)
 target_sources(
     ${PROJECT_NAME}
     PUBLIC FILE_SET HEADERS BASE_DIRS . FILES
+        boost/web/core/awaitable.hpp
+        boost/web/core/callable_traits.hpp
+        boost/web/core/cancellation_signals.hpp
+        boost/web/core/ignore_and_rethrow.hpp
+        boost/web/core/rebind_executor.hpp
+        boost/web/handler/htdocs.hpp
+        boost/web/handler/rest.hpp
+        boost/web/handler/rest_arg.hpp
+        boost/web/handler/rest_error.hpp
         boost/web/matcher/detail/always_false.hpp
-        boost/web/matcher/detail/callable_traits.hpp
         boost/web/matcher/detail/callable_with.hpp
         boost/web/matcher/detail/ranges_to.hpp
         boost/web/matcher/detail/specialization_of.hpp
@@ -31,16 +39,19 @@ target_sources(
         boost/web/matcher/header.hpp
         boost/web/matcher/method.hpp
         boost/web/matcher/operand.hpp
-        boost/web/matcher/segments_view.hpp
         boost/web/matcher/target.hpp
-        boost/web/matcher/target_parser.hpp
+        boost/web/matcher/template_parser.hpp
         boost/web/matcher/version.hpp
+        boost/web/server/tcp.hpp
+        boost/web/session/http.hpp
 )
 
 target_link_libraries(
     ${PROJECT_NAME}
     INTERFACE
         Boost::boost
+        Boost::url
+        Boost::json
 )
 
 install(TARGETS ${PROJECT_NAME} FILE_SET HEADERS)
@@ -53,3 +64,7 @@ endif()
 # enable testing
 include(CTest)
 add_subdirectory(test)
+
+# examples
+add_subdirectory(examples)
+

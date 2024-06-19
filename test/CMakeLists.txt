@@ -7,6 +7,7 @@ set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 23)
 target_sources(
     ${PROJECT_NAME}
     PRIVATE
+        test_callable_traits.cpp
         test_callable_with.cpp
         test_header.cpp
         test_matcher.cpp
@@ -15,7 +16,7 @@ target_sources(
         test_specialization_of.cpp
         test_super_type.cpp
         test_target.cpp
-        test_target_parser.cpp
+        test_template_parser.cpp
         test_version.cpp
 )
 

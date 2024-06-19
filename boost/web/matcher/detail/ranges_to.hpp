@@ -7,8 +7,8 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-web
 //
 
-#ifndef BOOST_WEB_HTTP_MATCHER_DETAIL_RANGES_TO_HPP
-#define BOOST_WEB_HTTP_MATCHER_DETAIL_RANGES_TO_HPP
+#ifndef BOOST_WEB_MATCHER_DETAIL_RANGES_TO_HPP
+#define BOOST_WEB_MATCHER_DETAIL_RANGES_TO_HPP
 
 #include <utility>
 
@@ -40,4 +40,4 @@ constexpr to_container_t<ContainerType> to_container {};
 } // detail
 } // namespace boost::web::matcher
 
-#endif // BOOST_WEB_HTTP_MATCHER_DETAIL_RANGES_TO_HPP
+#endif // BOOST_WEB_MATCHER_DETAIL_RANGES_TO_HPP
