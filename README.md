@@ -23,6 +23,7 @@ of other boost libraries like boost.beast, boost.asio, boost.url, boost.json, et
   - [To run the unit-tests after the build](#to-run-the-unit-tests-after-the-build)
   - [To install under the local prefix directory ./out](#to-install-under-the-local-prefix-directory-out)
   - [To build and run the examples](#to-build-and-run-the-examples)
+  - [License](#license)
 <!--toc:end-->
 
 ## Overview
@@ -239,3 +240,10 @@ cmake --install build --prefix out
 ```bash
 cmake --build build -j --target http_server && build/examples/http_server 8082 ./
 ```
+
+## License
+
+Copyright © 2021, 2024 Reza Jahanbakhshi
+
+Distributed under the Boost Software License, Version 1.0. (See accompanying
+file LICENSE or copy at [http://www.boost.org/LICENSE_1_0.txt](http://www.boost.org/LICENSE_1_0.txt))
