@@ -2,6 +2,7 @@
 out
 build
 CMakeLists.txt.user
+CMakeUserPresets.json
 
 # Clang-Tidy
 .cache

@@ -241,6 +241,14 @@ cmake --install build --prefix out
 cmake --build build -j --target http_server && build/examples/http_server 8082 ./
 ```
 
+## Creating and uploading the Conaan
+
+```bash
+version=$(git describe | grep -o '[0-9]\+.[0-9]\+.[0-9]\+')
+conan create . --version "$version" --build=missing
+conan upload "boost-web/$version" --only-recipe --remote your_conan_remote
+```
+
 ## License
 
 Copyright © 2021, 2024 Reza Jahanbakhshi
