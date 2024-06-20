@@ -44,7 +44,7 @@ private:
 
     static auto response_of(
         const rest_arg_types::request_type& request,
-        std::string_view& string_result)
+        const std::string_view& string_result)
     {
         namespace http = boost::beast::http;
         http::response<http::string_body> res {
@@ -77,7 +77,7 @@ private:
         : invoker_ {
             [=, callable = std::forward<Callable>(callable)](
                 const rest_arg_types::request_type& request,
-                const matcher::context& context)
+                const matcher::context& context) mutable
             {
                 namespace http = boost::beast::http;
 

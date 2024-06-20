@@ -9,6 +9,7 @@ target_sources(
     PRIVATE
         test_callable_traits.cpp
         test_callable_with.cpp
+        test_handler_rest.cpp
         test_header.cpp
         test_matcher.cpp
         test_method.cpp
