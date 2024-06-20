@@ -47,7 +47,7 @@ public:
         {
             return callable_(request, context, parsed_target);
         }
-        else //if constexpr (detail::always_false<callable_type>)
+        else
         {
             return callable_(request, context);
         }
@@ -67,7 +67,7 @@ public:
                 }
             };
         }
-        else //if constexpr (detail::always_false<callable_type>)
+        else
         {
             return matcher::operand {
                 [opr = std::move(opr)](const request_type& request, context& context)
@@ -103,7 +103,7 @@ public:
                 }
             };
         }
-        else //if constexpr (detail::always_false<callable_type>)
+        else
         {
             return matcher::operand
             {
@@ -144,7 +144,7 @@ public:
                 }
             };
         }
-        else //if constexpr (detail::always_false<callable_type>)
+        else
         {
             return matcher::operand
             {
@@ -185,7 +185,7 @@ public:
                 }
             };
         }
-        else //if constexpr (detail::always_false<callable_type>)
+        else
         {
             return matcher::operand
             {
@@ -226,7 +226,7 @@ public:
                 }
             };
         }
-        else //if constexpr (detail::always_false<callable_type>)
+        else
         {
             return matcher::operand
             {

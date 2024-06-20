@@ -10,15 +10,17 @@
 #ifndef BOOST_WEB_HANDLER_REST_HPP
 #define BOOST_WEB_HANDLER_REST_HPP
 
-#include "boost/web/core/callable_traits.hpp"
 #include <boost/web/handler/rest_arg.hpp>
 #include <boost/web/matcher/context.hpp>
+#include "boost/web/core/always_false.hpp"
+#include "boost/web/core/callable_traits.hpp"
 #include <boost/beast/http/string_body.hpp>
 #include <boost/beast/http/message.hpp>
 #include <boost/beast/http/message_generator.hpp>
 #include <boost/json/value.hpp>
 #include <boost/json/serialize.hpp>
 #include <boost/system/result.hpp>
+#include <concepts>
 #include <utility>
 #include <type_traits>
 
@@ -29,47 +31,57 @@ class rest
 private:
     struct internal_tag {};
 
+    // TODO: the response_of mechanism should be revised. Perhaps using tag_invoke
+    // and other tools for more flexibility and robustness.
     static auto response_of(const rest_arg_types::request_type& request)
     {
         namespace http = boost::beast::http;
         http::response<http::string_body> res {
             boost::beast::http::status::ok,
             request.version()};
-        res.set(boost::beast::http::field::content_type, "text/html");
+        res.set(boost::beast::http::field::content_type, "text/plain");
         res.keep_alive(request.keep_alive());
         res.body() = "Success.";
         res.prepare_payload();
         return res;
     }
 
+    template <typename ResultType>
     static auto response_of(
         const rest_arg_types::request_type& request,
-        const std::string_view& string_result)
+        const ResultType& result)
     {
         namespace http = boost::beast::http;
-        http::response<http::string_body> res {
-            boost::beast::http::status::ok,
-            request.version()};
-        res.set(boost::beast::http::field::content_type, "text/html");
-        res.keep_alive(request.keep_alive());
-        res.body() = string_result;
-        res.prepare_payload();
-        return res;
-    }
 
-    static auto response_of(
-        const rest_arg_types::request_type& request,
-        const boost::json::value& json_result)
-    {
-        namespace http = boost::beast::http;
-        http::response<http::string_body> res {
-            boost::beast::http::status::ok,
-            request.version()};
-        res.set(boost::beast::http::field::content_type, "application/json");
-        res.keep_alive(request.keep_alive());
-        res.body() = boost::json::serialize(json_result);
-        res.prepare_payload();
-        return res;
+        if constexpr (std::convertible_to<const ResultType&, std::string_view>)
+        {
+            http::response<http::string_body> res {
+                boost::beast::http::status::ok,
+                request.version()};
+            res.set(boost::beast::http::field::content_type, "text/plain");
+            res.keep_alive(request.keep_alive());
+            res.body() = result;
+            res.prepare_payload();
+            return res;
+        }
+        else if constexpr (std::constructible_from<boost::json::value, const ResultType&>)
+        {
+            namespace http = boost::beast::http;
+            http::response<http::string_body> res {
+                boost::beast::http::status::ok,
+                request.version()};
+            res.set(boost::beast::http::field::content_type, "application/json");
+            res.keep_alive(request.keep_alive());
+            res.body() = boost::json::serialize(result);
+            res.prepare_payload();
+            return res;
+        }
+        else
+        {
+            static_assert(
+                always_false<ResultType>,
+                "The result type of the rest handler function is unsupported.");
+        }
     }
 
     template <typename Callable, typename... Args>

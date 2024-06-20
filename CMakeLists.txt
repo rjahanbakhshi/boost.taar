@@ -20,6 +20,7 @@ set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 23)
 target_sources(
     ${PROJECT_NAME}
     PUBLIC FILE_SET HEADERS BASE_DIRS . FILES
+        boost/web/core/always_false.hpp
         boost/web/core/awaitable.hpp
         boost/web/core/callable_traits.hpp
         boost/web/core/cancellation_signals.hpp
@@ -29,7 +30,6 @@ target_sources(
         boost/web/handler/rest.hpp
         boost/web/handler/rest_arg.hpp
         boost/web/handler/rest_error.hpp
-        boost/web/matcher/detail/always_false.hpp
         boost/web/matcher/detail/callable_with.hpp
         boost/web/matcher/detail/ranges_to.hpp
         boost/web/matcher/detail/specialization_of.hpp

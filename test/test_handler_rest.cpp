@@ -100,7 +100,7 @@ BOOST_AUTO_TEST_CASE(test_handler_rest_sum_target)
     auto mg_sum = rh_sum(req, ctx);
     auto resp_sum = to_response<http::string_body>(mg_sum);
     BOOST_TEST(resp_sum.body() == "55");
-    BOOST_TEST(resp_sum[http::field::content_type] == "text/html");
+    BOOST_TEST(resp_sum[http::field::content_type] == "text/plain");
 }
 
 BOOST_AUTO_TEST_CASE(test_handler_rest_sum_query)
@@ -117,7 +117,7 @@ BOOST_AUTO_TEST_CASE(test_handler_rest_sum_query)
     auto mg_sum = rh_sum(req, ctx);
     auto resp_sum = to_response<http::string_body>(mg_sum);
     BOOST_TEST(resp_sum.body() == "55");
-    BOOST_TEST(resp_sum[http::field::content_type] == "text/html");
+    BOOST_TEST(resp_sum[http::field::content_type] == "text/plain");
 }
 
 BOOST_AUTO_TEST_CASE(test_handler_rest_sum_header)
@@ -136,7 +136,29 @@ BOOST_AUTO_TEST_CASE(test_handler_rest_sum_header)
     auto mg_sum = rh_sum(req, ctx);
     auto resp_sum = to_response<http::string_body>(mg_sum);
     BOOST_TEST(resp_sum.body() == "55");
-    BOOST_TEST(resp_sum[http::field::content_type] == "text/html");
+    BOOST_TEST(resp_sum[http::field::content_type] == "text/plain");
+}
+
+auto stock_string()
+{
+    return "This is a stock string.";
+}
+
+BOOST_AUTO_TEST_CASE(test_handler_rest_stock_string)
+{
+    namespace http = boost::beast::http;
+    namespace web = boost::web;
+    using web::matcher::context;
+    using web::handler::header_arg;
+
+    http::request<http::string_body> req;
+    context ctx;
+
+    web::handler::rest rh {stock_string};
+    auto mg = rh(req, ctx);
+    auto resp = to_response<http::string_body>(mg);
+    BOOST_TEST(resp.body() == stock_string());
+    BOOST_TEST(resp[http::field::content_type] == "text/plain");
 }
 
 auto to_json(std::string value)

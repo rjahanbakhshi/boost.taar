@@ -7,19 +7,17 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-web
 //
 
-#ifndef BOOST_WEB_MATCHER_DETAIL_ALWAYS_FALSE_HPP
-#define BOOST_WEB_MATCHER_DETAIL_ALWAYS_FALSE_HPP
+#ifndef BOOST_WEB_CORE_ALWAYS_FALSE_HPP
+#define BOOST_WEB_CORE_ALWAYS_FALSE_HPP
 
 #include <type_traits>
 
-namespace boost::web::matcher {
-namespace detail {
+namespace boost::web {
 
 // A dependent type always evaluating to false_type. This is necessary due to
 // a limitation in C++20 which is addressed with P2593 and accepted in C++23
 template <class...> constexpr static std::false_type always_false {};
 
-} // detail
-} // namespace boost::web::matcher
+} // namespace boost::web
 
-#endif // BOOST_WEB_MATCHER_DETAIL_ALWAYS_FALSE_HPP
+#endif // BOOST_WEB_CORE_ALWAYS_FALSE_HPP

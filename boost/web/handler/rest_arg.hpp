@@ -12,6 +12,7 @@
 
 #include <boost/web/matcher/context.hpp>
 #include <boost/web/handler/rest_error.hpp>
+#include <boost/web/core/always_false.hpp>
 #include <boost/beast/http/string_body.hpp>
 #include <boost/beast/http/message.hpp>
 #include <boost/url/parse.hpp>
@@ -60,10 +61,6 @@ concept convertible_from_json_value = requires
 };
 
 namespace detail {
-
-// A dependent type always evaluating to false_type. This is necessary due to
-// a limitation in C++20 which is addressed with P2593 and accepted in C++23
-template <class...> constexpr static std::false_type always_false {};
 
 result_type<bool> inline bool_cast(const std::string& str)
 {
