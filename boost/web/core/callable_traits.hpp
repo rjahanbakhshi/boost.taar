@@ -10,6 +10,7 @@
 #ifndef BOOST_WEB_CORE_CALLABLE_TRAITS_HPP
 #define BOOST_WEB_CORE_CALLABLE_TRAITS_HPP
 
+#include <boost/web/core/always_false.hpp>
 #include <tuple>
 
 namespace boost::web {
@@ -23,7 +24,10 @@ concept has_call_operator = requires(T t)
 
 // Primary template for retrieving the nth argument type (unspecialized)
 template <typename CallableType>
-struct callable_traits;
+struct callable_traits
+{
+    static_assert(always_false<CallableType>, "Not a callble type!");
+};
 
 // Specialization for function pointers
 template <typename ResultType, typename... ArgsType>

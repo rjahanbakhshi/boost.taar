@@ -255,3 +255,13 @@ Copyright © 2021, 2024 Reza Jahanbakhshi
 
 Distributed under the Boost Software License, Version 1.0. (See accompanying
 file LICENSE or copy at [http://www.boost.org/LICENSE_1_0.txt](http://www.boost.org/LICENSE_1_0.txt))
+
+## TODO
+
+- http session needs full unit-test coverage.
+- htdocs handler needs full unit-test-coverage.
+- curl -v 127.0.0.1:8082/api/sum/1/2 doesn't match
+- rest should only handle its own internal errors and leave the rest to the
+http handler.
+- rest_arg content-type interpretation could be wrong.
+- encoded and decoded option for rest arg providers.

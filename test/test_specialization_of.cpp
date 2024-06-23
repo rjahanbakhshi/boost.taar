@@ -7,7 +7,7 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-web
 //
 
-#include <boost/web/matcher/detail/specialization_of.hpp>
+#include <boost/web/core/specialization_of.hpp>
 #include <boost/test/unit_test.hpp>
 
 namespace {
@@ -17,9 +17,9 @@ struct template_class {};
 
 using specialization_class = template_class<int, float>;
 
-BOOST_AUTO_TEST_CASE(test_matcher_specialization_of)
+BOOST_AUTO_TEST_CASE(test_specialization_of)
 {
-    using namespace boost::web::matcher::detail;
+    using namespace boost::web;
     static_assert(is_specialization_of_v<template_class, specialization_class>);
     static_assert(specialization_of<template_class, specialization_class>);
 }

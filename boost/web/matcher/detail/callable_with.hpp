@@ -18,7 +18,7 @@ namespace detail {
 
 // Concept to check if the callable is compatible with the signature.
 template <typename CallableType, typename ResultType, typename... ArgsType>
-concept callable_with = 
+concept callable_with =
     std::same_as<std::result_of_t<CallableType(ArgsType...)>, ResultType> ||
     std::constructible_from<std::result_of_t<CallableType(ArgsType...)>, ResultType>;
 

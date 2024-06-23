@@ -10,16 +10,20 @@
 #ifndef BOOST_WEB_HANDLER_REST_ARG_HPP
 #define BOOST_WEB_HANDLER_REST_ARG_HPP
 
+#include "boost/web/core/callable_traits.hpp"
 #include <boost/web/matcher/context.hpp>
 #include <boost/web/handler/rest_error.hpp>
 #include <boost/web/core/always_false.hpp>
+#include <boost/web/core/specialization_of.hpp>
 #include <boost/beast/http/string_body.hpp>
 #include <boost/beast/http/message.hpp>
 #include <boost/url/parse.hpp>
+#include <boost/url/ignore_case.hpp>
 #include <boost/json/parse.hpp>
 #include <boost/json/value.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/system/result.hpp>
+#include <iterator>
 #include <unordered_set>
 #include <optional>
 #include <string>
@@ -29,42 +33,23 @@
 #include <type_traits>
 
 namespace boost::web::handler {
-namespace rest_arg_types {
-
-using request_body_type = boost::beast::http::string_body;
-using request_type = boost::beast::http::request<request_body_type>;
-
-template <typename T>
-using result_type = boost::system::result<T>;
-
-template <typename T>
-using getter_signature = result_type<T>(const request_type&, const matcher::context&);
-
-template <typename T>
-using getter_type = std::function<getter_signature<T>>;
-
-using string_result = result_type<std::string>;
-using string_getter = getter_type<std::string>;
-using json_result = result_type<boost::json::value>;
-using json_getter = getter_type<boost::json::value>;
+namespace detail {
 
 template <typename From, typename To>
 concept lexical_castable = requires(From&& from)
 {
-    { boost::lexical_cast<To>(std::forward<From>(from)) } -> std::convertible_to<To>;
+    { boost::lexical_cast<To>(std::forward<From>(from)) } -> std::same_as<To>;
 };
 
 template <typename To>
 concept convertible_from_json_value = requires
 {
-    { boost::json::value_to<To>(std::declval<boost::json::value>()) } -> std::convertible_to<To>;
+    { boost::json::value_to<To>(std::declval<boost::json::value>()) } -> std::same_as<To>;
 };
 
-namespace detail {
-
-result_type<bool> inline bool_cast(const std::string& str)
+boost::system::result<bool> inline bool_cast(std::string_view str)
 {
-    static const std::unordered_map<std::string, bool> MAP = {
+    static const std::unordered_map<std::string_view, bool> bool_map = {
         {"true", true},
         {"TRUE", true},
         {"yes", true},
@@ -76,8 +61,8 @@ result_type<bool> inline bool_cast(const std::string& str)
         {"NO", false},
         {"0", false},
     };
-    auto iter = MAP.find(str);
-    if (iter != MAP.end())
+    auto iter = bool_map.find(str);
+    if (iter != bool_map.end())
     {
         return iter-> second;
     }
@@ -86,203 +71,168 @@ result_type<bool> inline bool_cast(const std::string& str)
 }
 
 // Convert the getter into another one by applying possible cast and conversions.
-template <typename FromType, typename ToType>
-[[nodiscard]] auto convert_getter(getter_type<FromType> getter)
+template <typename ToType, typename FromType>
+[[nodiscard]] auto rest_arg_cast(FromType&& from)
 {
-    if constexpr (std::same_as<FromType, ToType>)
+    if constexpr (std::same_as<std::remove_cvref_t<FromType>, ToType>)
     {
-        return std::move(getter);
+        return std::forward<FromType>(from);
     }
     else if constexpr (
-        std::same_as<FromType, std::string> &&
+        std::constructible_from<std::string_view, std::remove_cvref_t<FromType>> &&
         std::same_as<ToType, bool>)
     {
-        return
-            [getter = std::move(getter)](
-                const request_type& request,
-                const matcher::context& context) -> result_type<ToType>
-            {
-                auto result = getter(request, context);
-                if (!result)
-                {
-                    return result.error();
-                }
-
-                return bool_cast(result.value());
-            };
+        return bool_cast(std::forward<FromType>(from)).value();
     }
-    else if constexpr (std::convertible_to<FromType, ToType>)
+    else if constexpr (std::convertible_to<std::remove_cvref_t<FromType>, ToType>)
     {
-        return
-            [getter = std::move(getter)](
-                const request_type& request,
-                const matcher::context& context) -> result_type<ToType>
-            {
-                auto result = getter(request, context);
-                if (result)
-                {
-                    return static_cast<ToType>(result.value());
-                }
-
-                return result.error();
-            };
+        return static_cast<ToType>(std::forward<FromType>(from));
     }
     else if constexpr (
-        std::same_as<FromType, boost::json::value> &&
+        std::same_as<std::remove_cvref_t<FromType>, boost::json::value> &&
         convertible_from_json_value<ToType>)
     {
-        return
-            [getter = std::move(getter)](
-                const request_type& request,
-                const matcher::context& context) -> result_type<ToType>
-            {
-                auto result = getter(request, context);
-                if (!result)
-                {
-                    return result.error();
-                }
-
-                auto json = boost::json::try_value_to<ToType>(result.value());
-                if (!json)
-                {
-                    return json.error();
-                }
-
-                return json.value();
-            };
+        auto json = boost::json::value_to<ToType>(std::forward<FromType>(from));
     }
-    else if constexpr (lexical_castable<std::string, ToType>)
+    else if constexpr (lexical_castable<std::remove_cvref_t<FromType>, ToType>)
     {
-        return
-            [getter = std::move(getter)](
-                const request_type& request,
-                const matcher::context& context) -> result_type<ToType>
-            {
-                auto result = getter(request, context);
-                if (result)
-                {
-                    return boost::lexical_cast<ToType>(result.value());
-                }
-
-                return result.error();
-            };
+        return boost::lexical_cast<ToType>(std::forward<FromType>(from));
     }
     else
     {
         static_assert(
             always_false<FromType, ToType>,
-            "Function argument type isn't constructible from rest requests.");
+            "Function argument type is incompatible with the used rest arg type.");
     }
 }
 
-// Constructing a lazy getter from a value.
-template <typename FromType, typename ToType> requires
-    std::convertible_to<FromType, ToType>
-auto getter_from_value(FromType&& value) // NOLINT
+template <typename FromType, typename ToType>
+concept rest_arg_castable = requires (FromType&& from)
 {
-    return
-        [value = std::forward<FromType>(value)](
-            const rest_arg_types::request_type&,
-            const matcher::context&) -> result_type<ToType>
-        {
-            return static_cast<ToType>(value);
-        };
-}
+    {rest_arg_cast<ToType>(std::forward<FromType>(from))} -> std::same_as<ToType>;
+};
+
+template <typename ArgProviderType>
+concept is_rest_arg_provider = requires
+{
+    requires (
+        std::is_function_v<std::remove_pointer_t<ArgProviderType>> ||
+        has_call_operator<ArgProviderType>);
+    typename callable_result_type<ArgProviderType>;
+    requires callable_args_count<ArgProviderType> == 2;
+    typename callable_arg_type<ArgProviderType, 0>;
+    typename callable_arg_type<ArgProviderType, 1>;
+    requires std::is_convertible_v<callable_arg_type<ArgProviderType, 1>, const matcher::context&>;
+};
+
+template <typename ArgProviderType>
+using arg_provider_request = std::conditional_t<
+    is_rest_arg_provider<ArgProviderType>,
+    std::remove_cvref_t<callable_arg_type<ArgProviderType, 0>>,
+    boost::beast::http::request_header<>>;
+
+template <typename ArgProviderType>
+using arg_provider_result = std::conditional_t<
+    is_rest_arg_provider<ArgProviderType>,
+    callable_result_type<ArgProviderType>,
+    ArgProviderType>;
 
 } // namespace detail
-} // namespace rest_arg_types
 
 // Generic rest_arg
-template <typename ArgType> requires
-    (!std::is_reference_v<ArgType>) &&
-    (!std::is_const_v<ArgType>)
+template <typename ArgType, typename ArgProviderType>
 struct rest_arg
 {
-    rest_arg_types::getter_type<ArgType> get_value;
+    using arg_type = std::remove_cvref_t<ArgType>;
+    using arg_provider_type = std::remove_cvref_t<ArgProviderType>;
+    using arg_provider_request_type = detail::arg_provider_request<arg_provider_type>;
+    using arg_provider_result_type = detail::arg_provider_result<arg_provider_type>;
 
-    // Constructing a generic lazy getter.
-    template <typename T>
-    rest_arg(rest_arg_types::getter_type<T> getter)
-        : get_value {
-            rest_arg_types::detail::convert_getter<T, ArgType>(std::move(getter))
-        }
+    rest_arg(arg_provider_type arg_provider)
+        : arg_provider_ {std::move(arg_provider)}
     {}
 
-    // Getter getter from a value.
-    template <typename T> requires
-        // Any type convertible to the actual arg type is acceptable.
-        std::convertible_to<std::remove_cvref_t<T>, ArgType> &&
-        // Avoid hiding copy and move constructor.
-        (!std::same_as<std::remove_cvref_t<T>, rest_arg>)
-    rest_arg(T&& value) // NOLINT
-        : get_value {
-            rest_arg_types::detail::getter_from_value<T, ArgType>(std::forward<T>(value))
-        }
-    {}
-};
-
-// Specialization for std::optional argument type
-template <typename ArgType>
-struct rest_arg<std::optional<ArgType>>
-{
-    rest_arg_types::getter_type<std::optional<ArgType>> get_value;
-
-    template <typename T>
-    rest_arg(rest_arg_types::getter_type<T> getter)
-        : get_value {
-            [getter = rest_arg_types::detail::convert_getter<T, ArgType>(std::move(getter))](
-                const rest_arg_types::request_type& request,
-                const matcher::context& context) -> rest_arg_types::result_type<std::optional<ArgType>>
-            {
-                auto result = getter(request, context);
-                if (!result.has_error())
-                {
-                    return result.value();
-                }
-
-                if (result.error() == rest_error::argument_not_found)
-                {
-                    return std::nullopt;
-                }
-
-                return result.error();
-            }
-        }
-    {}
-
-    // Getter from a value.
-    template <typename T> requires
-        // Any type convertible to the actual arg type is acceptable.
-        std::convertible_to<T&&, std::optional<ArgType>> &&
-        // Avoid hiding copy and move constructor.
-        (!std::same_as<std::remove_cvref_t<T>, rest_arg>)
-    rest_arg(T&& value) // NOLINT
-        : get_value {
-            rest_arg_types::detail::getter_from_value<T, ArgType>(std::forward<T>(value))
-        }
-    {}
-};
-
-inline rest_arg_types::string_getter path_arg(std::string path_key)
-{
-    return [path_key = std::move(path_key)](
-        const rest_arg_types::request_type&,
-        const matcher::context& context) -> rest_arg_types::string_result
+    arg_type operator()(
+        const arg_provider_request_type& request,
+        const matcher::context& context)
     {
-        auto iter = context.path_args.find(path_key);
+        if constexpr (
+            specialization_of<std::optional, arg_type> &&
+            detail::is_rest_arg_provider<arg_provider_type> &&
+            detail::rest_arg_castable<typename arg_provider_result_type::value_type, arg_type>)
+        {
+            // It's necessary to store the retrieved value to make sure it outlives
+            // the call operator. Case in point, std::string -> std::string_view
+            provider_result_ = arg_provider_(request, context);
+            if (provider_result_.has_error() &&
+                provider_result_.error() == rest_error::argument_not_found)
+            {
+                return std::nullopt;
+            }
+
+            return detail::rest_arg_cast<arg_type>(std::move(provider_result_.value()));
+        }
+        if constexpr (
+            detail::is_rest_arg_provider<arg_provider_type> &&
+            detail::rest_arg_castable<typename arg_provider_result_type::value_type, arg_type>)
+        {
+            // It's necessary to store the retrieved value to make sure it outlives
+            // the call operator. Case in point, std::string -> std::string_view
+            provider_result_ = arg_provider_(request, context);
+            return detail::rest_arg_cast<arg_type>(std::move(provider_result_.value()));
+        }
+        else if constexpr (detail::rest_arg_castable<arg_provider_type, arg_type>)
+        {
+            return detail::rest_arg_cast<arg_type>(std::move(arg_provider_));
+            provider_result_ = arg_provider_;
+        }
+        else
+        {
+            static_assert(
+                always_false<arg_provider_type, arg_type>,
+                "Not a compatible rest arg provider!");
+        }
+    }
+
+    arg_provider_type arg_provider_;
+    arg_provider_result_type provider_result_;
+};
+
+// REST arg provider from the request path
+struct path_arg
+{
+    path_arg(std::string path_key)
+        : path_key_ {std::move(path_key)}
+    {}
+
+    boost::system::result<std::string> operator()(
+        const boost::beast::http::request_header<>&,
+        const matcher::context& context) const
+    {
+        auto iter = context.path_args.find(path_key_);
         if (iter != context.path_args.end())
         {
-            return iter->second;
+            return std::string {iter->second};
         }
         return rest_error::argument_not_found;
-    };
-}
+    }
 
-inline rest_arg_types::string_getter query_arg(std::string query_key)
+    std::string path_key_;
+};
+
+// REST arg provider from the request query params
+struct query_arg
 {
-    return [query_key = std::move(query_key)](
-        const rest_arg_types::request_type& request,
-        const matcher::context&) -> rest_arg_types::string_result
+    query_arg(
+            std::string query_key,
+            boost::urls::ignore_case_param ic = {})
+        : query_key_ {std::move(query_key)}
+        , ic_ {std::move(ic)}
+    {}
+
+    boost::system::result<std::string> operator()(
+        const boost::beast::http::request_header<>& request,
+        const matcher::context&) const
     {
         auto url_view = boost::urls::parse_origin_form(request.target());
         if (!url_view)
@@ -291,53 +241,99 @@ inline rest_arg_types::string_getter query_arg(std::string query_key)
         }
 
         auto params = url_view->params();
-        auto iter = params.find(query_key);
+
+        if (params.count(query_key_, ic_) > 1)
+        {
+            return rest_error::argument_ambiguous;
+        }
+
+        auto iter = params.find(query_key_, ic_);
         if (iter != params.end())
         {
-            // TODO: Check to see if there's more then it's a failure due to ambiguity.
             const auto& param = *iter;
-            return param.value;
+            return std::string {param.value};
         }
         return rest_error::argument_not_found;
-    };
-}
+    }
 
-inline rest_arg_types::string_getter string_body_arg(
-    std::unordered_set<std::string> content_types)
+    std::string query_key_;
+    boost::urls::ignore_case_param ic_;
+};
+
+// REST arg provider from the request headers
+struct header_arg
 {
-    return [content_types = std::move(content_types)](
-        const rest_arg_types::request_type& request,
-        const matcher::context&) -> rest_arg_types::string_result
+    header_arg(std::string header_name)
+        : header_name_ {std::move(header_name)}
+    {}
+
+    boost::system::result<std::string> operator()(
+        const boost::beast::http::request_header<>& request,
+        const matcher::context&) const
     {
-        if (!content_types.empty())
+        auto iter_range = request.equal_range(header_name_);
+        if (iter_range.first == request.end())
+        {
+            return rest_error::argument_not_found;
+        }
+        else if (std::distance(iter_range.first, iter_range.second) == 1)
+        {
+            return std::string {iter_range.first->value()};
+        }
+
+        // More than one instance of the header with the same name found.
+        return rest_error::argument_ambiguous;
+    }
+
+    std::string header_name_;
+};
+
+// REST arg provider from the request body as string
+struct string_body_arg
+{
+    string_body_arg(std::unordered_set<std::string> content_types = {"text/plain"})
+        : content_types_ {std::move(content_types)}
+    {}
+
+    boost::system::result<std::string> operator()(
+        const boost::beast::http::request<boost::beast::http::string_body>& request,
+        const matcher::context&) const
+    {
+        if (!content_types_.empty())
         {
             auto range = request.equal_range(boost::beast::http::field::content_type);
             if (std::find_if(range.first, range.second, [&](auto const& elem)
                 {
-                    return content_types.contains(elem.value());
+                    return content_types_.contains(elem.value());
                 }) == range.second)
             {
                 return rest_error::invalid_content_type;
             }
         }
 
-        return request.body();
-    };
-}
+        return std::string {request.body()};
+    }
 
-inline rest_arg_types::json_getter json_body_arg(
-    std::unordered_set<std::string> content_types = {"application/json"})
+    std::unordered_set<std::string> content_types_;
+};
+
+// REST arg provider from the request body as json value
+struct json_body_arg
 {
-    return [content_types = std::move(content_types)](
-        const rest_arg_types::request_type& request,
-        const matcher::context&) -> rest_arg_types::json_result
+    json_body_arg(std::unordered_set<std::string> content_types = {"application/json"})
+        : content_types_ {std::move(content_types)}
+    {}
+
+    boost::system::result<boost::json::value> operator()(
+        const boost::beast::http::request<boost::beast::http::string_body>& request,
+        const matcher::context&) const
     {
-        if (!content_types.empty())
+        if (!content_types_.empty())
         {
             auto range = request.equal_range(boost::beast::http::field::content_type);
             if (std::find_if(range.first, range.second, [&](auto const& elem)
                 {
-                    return content_types.contains(elem.value());
+                    return content_types_.contains(elem.value());
                 }) == range.second)
             {
                 return rest_error::invalid_content_type;
@@ -356,24 +352,10 @@ inline rest_arg_types::json_getter json_body_arg(
             return rest_error::invalid_request_format;
         }
         return json;
-    };
-}
+    }
 
-inline rest_arg_types::string_getter header_arg(std::string header_name)
-{
-    return [header_name = std::move(header_name)](
-        const rest_arg_types::request_type& request,
-        const matcher::context&) -> rest_arg_types::string_result
-    {
-        auto iter = request.find(header_name);
-        if (iter != request.end())
-        {
-            // TODO: Check to see if there's more then it's failure due to ambiguity.
-            return iter->value();
-        }
-        return rest_error::argument_not_found;
-    };
-}
+    std::unordered_set<std::string> content_types_;
+};
 
 } // boost::web::handler
 

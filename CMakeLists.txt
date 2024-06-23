@@ -25,15 +25,17 @@ target_sources(
         boost/web/core/callable_traits.hpp
         boost/web/core/cancellation_signals.hpp
         boost/web/core/ignore_and_rethrow.hpp
+        boost/web/core/invoke_response.hpp
+        boost/web/core/member_function_of.hpp
         boost/web/core/rebind_executor.hpp
+        boost/web/core/specialization_of.hpp
+        boost/web/core/super_type.hpp
         boost/web/handler/htdocs.hpp
         boost/web/handler/rest.hpp
         boost/web/handler/rest_arg.hpp
         boost/web/handler/rest_error.hpp
         boost/web/matcher/detail/callable_with.hpp
         boost/web/matcher/detail/ranges_to.hpp
-        boost/web/matcher/detail/specialization_of.hpp
-        boost/web/matcher/detail/super_type.hpp
         boost/web/matcher/context.hpp
         boost/web/matcher/error.hpp
         boost/web/matcher/header.hpp

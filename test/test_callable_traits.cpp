@@ -13,14 +13,21 @@
 namespace {
 
 void void_fn();
-void my_function(int, double, float) {}
+void my_function(int, double&, const float&) {}
 
-struct functor {
+struct functor
+{
     double operator()(float, int, char) { return {}; }
 };
 
-struct functor_const {
+struct functor_const
+{
     double operator()(float, int, char) { return {}; }
+};
+
+struct memfn_type
+{
+    int fn(char, double) { return {}; }
 };
 
 BOOST_AUTO_TEST_CASE(test_matcher_callable_traits)
@@ -36,7 +43,7 @@ BOOST_AUTO_TEST_CASE(test_matcher_callable_traits)
     static_assert(callable_traits<decltype(&my_function)>::args_count == 3);
     static_assert(std::is_same_v<
         callable_traits<decltype(&my_function)>::signature_type,
-        void(int, double, float)>);
+        void(int, double&, const float&)>);
     static_assert(std::is_same_v<
         callable_traits<decltype(&my_function)>::result_type,
         void>);
@@ -45,15 +52,15 @@ BOOST_AUTO_TEST_CASE(test_matcher_callable_traits)
         int>);
     static_assert(std::is_same_v<
         callable_traits<decltype(&my_function)>::arg_type<1>,
-        double>);
+        double&>);
     static_assert(std::is_same_v<
         callable_traits<decltype(&my_function)>::arg_type<2>,
-        float>);
+        const float&>);
 
     static_assert(callable_traits<decltype(my_function)>::args_count == 3);
     static_assert(std::is_same_v<
         callable_traits<decltype(my_function)>::signature_type,
-        void(int, double, float)>);
+        void(int, double&, const float&)>);
     static_assert(std::is_same_v<
         callable_traits<decltype(my_function)>::result_type,
         void>);
@@ -62,10 +69,10 @@ BOOST_AUTO_TEST_CASE(test_matcher_callable_traits)
         int>);
     static_assert(std::is_same_v<
         callable_traits<decltype(my_function)>::arg_type<1>,
-        double>);
+        double&>);
     static_assert(std::is_same_v<
         callable_traits<decltype(my_function)>::arg_type<2>,
-        float>);
+        const float&>);
 
     functor f;
     static_assert(callable_traits<decltype(f)>::args_count == 3);
@@ -114,6 +121,20 @@ BOOST_AUTO_TEST_CASE(test_matcher_callable_traits)
     static_assert(std::is_same_v<
         callable_traits<decltype(l)>::arg_type<0>,
         char>);
+
+    static_assert(callable_traits<decltype(&memfn_type::fn)>::args_count == 2);
+    static_assert(std::is_same_v<
+        callable_traits<decltype(&memfn_type::fn)>::signature_type,
+        int(char, double)>);
+    static_assert(std::is_same_v<
+        callable_traits<decltype(&memfn_type::fn)>::result_type,
+        int>);
+    static_assert(std::is_same_v<
+        callable_traits<decltype(&memfn_type::fn)>::arg_type<0>,
+        char>);
+    static_assert(std::is_same_v<
+        callable_traits<decltype(&memfn_type::fn)>::arg_type<1>,
+        double>);
 }
 
 BOOST_AUTO_TEST_CASE(test_matcher_callable_traits_aliases)
@@ -123,7 +144,7 @@ BOOST_AUTO_TEST_CASE(test_matcher_callable_traits_aliases)
     static_assert(callable_args_count<decltype(my_function)> == 3);
     static_assert(std::is_same_v<
         callable_signature_type<decltype(my_function)>,
-        void(int, double, float)>);
+        void(int, double&, const float&)>);
     static_assert(std::is_same_v<
         callable_result_type<decltype(my_function)>,
         void>);
@@ -132,10 +153,10 @@ BOOST_AUTO_TEST_CASE(test_matcher_callable_traits_aliases)
         int>);
     static_assert(std::is_same_v<
         callable_arg_type<decltype(my_function), 1>,
-        double>);
+        double&>);
     static_assert(std::is_same_v<
         callable_arg_type<decltype(my_function), 2>,
-        float>);
+        const float&>);
 }
 
 } // namespace

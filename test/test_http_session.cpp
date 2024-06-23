@@ -7,48 +7,20 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-web
 //
 
-#include <boost/json/value.hpp>
-#include <boost/web/handler/htdocs.hpp>
-#include <boost/web/handler/rest.hpp>
 #include <boost/web/session/http.hpp>
-#include <boost/web/server/tcp.hpp>
-#include "boost/web/handler/rest_arg.hpp"
-#include "boost/web/matcher/method.hpp"
-#include "boost/web/matcher/target.hpp"
-#include <boost/web/core/cancellation_signals.hpp>
-#include <boost/web/core/ignore_and_rethrow.hpp>
-#include <boost/beast/http.hpp>
-#include <boost/asio/ip/tcp.hpp>
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/signal_set.hpp>
-#include <boost/asio/bind_cancellation_slot.hpp>
-#include <boost/asio/io_context.hpp>
-#include <exception>
-#include <iostream>
-#include <cstdlib>
-#include <stdexcept>
+#include <boost/web/handler/rest.hpp>
+#include <boost/web/matcher/method.hpp>
+#include <boost/web/matcher/target.hpp>
+#include <boost/test/unit_test.hpp>
 
-int main(int argc, char* argv[])
+namespace {
+
+BOOST_AUTO_TEST_CASE(test_http_session)
 {
-    if (argc != 3)
-    {
-        std::cerr << "Usage: http_server port /example/document/root\n";
-        return EXIT_FAILURE;
-    }
-
-    namespace net = boost::asio;
     namespace http = boost::beast::http;
     namespace web = boost::web;
-    using net::co_spawn;
-    using net::bind_cancellation_slot;
-    using net::detached;
     using web::matcher::method;
     using web::matcher::target;
-
-    net::io_context io_context;
-
-    net::signal_set os_signals(io_context, SIGINT, SIGTERM);
-    os_signals.async_wait([&](auto, auto) { io_context.stop(); });
 
     web::session::http http_session;
 
@@ -70,22 +42,9 @@ int main(int argc, char* argv[])
         });
 
     http_session.set_soft_error_handler(
-        [](std::exception_ptr eptr)
+        [](std::exception_ptr)
         {
-            try
-            {
-                std::rethrow_exception(eptr);
-            }
-            catch (const std::exception& e)
-            {
-                std::cerr << e.what() << '\n';
-                return boost::json::value{{"Error", e.what()}};
-            }
-            catch (...)
-            {
-                std::cerr << "Unknown error!\n";
-                return boost::json::value{{"Error", "Unknown error!"}};
-            }
+            return boost::json::value{{"Error", "Oops!"}};
         }
     );
 
@@ -108,13 +67,13 @@ int main(int argc, char* argv[])
 
     http_session.register_request_handler(
         method == http::verb::get && target == "/api/version",
-        web::handler::rest([]{ return "1.0"; }
-    ));
+        web::handler::rest([]{ return "1.0"; })
+    );
 
     http_session.register_request_handler(
         method == http::verb::get && target == "/api/throw",
-        web::handler::rest([]{ throw std::runtime_error{"Error"}; }
-    ));
+        web::handler::rest([]{ throw std::runtime_error{"Error"}; })
+    );
 
     http_session.register_request_handler(
         method == http::verb::get && target == "/api/sum/{a}/{b}",
@@ -127,8 +86,8 @@ int main(int argc, char* argv[])
             };
         },
         web::handler::path_arg("a"),
-        web::handler::path_arg("b")
-    ));
+        web::handler::path_arg("b"))
+    );
 
     http_session.register_request_handler(
         method == http::verb::post && target == "/api/store/",
@@ -136,30 +95,8 @@ int main(int argc, char* argv[])
         {
             std::cout << "Storing value = " << value << '\n';
         },
-        web::handler::query_arg("value")
-    ));
-
-    http_session.register_request_handler(
-        method == http::verb::get && target == "/{*}",
-        web::handler::htdocs {argv[2]}
+        web::handler::query_arg("value"))
     );
-
-    web::cancellation_signals cancellation_signals;
-    co_spawn(
-        io_context,
-        web::server::tcp(
-            "0.0.0.0",
-            argv[1],
-            http_session,
-            cancellation_signals,
-            [](const net::ip::tcp::endpoint& endpoint)
-            {
-                std::clog << "HTTP server is listening on port " << endpoint.port() << '\n';
-            }),
-        bind_cancellation_slot(cancellation_signals.slot(), web::ignore_and_rethrow));
-
-    io_context.run();
-
-    return EXIT_SUCCESS;
 }
 
+} // namespace

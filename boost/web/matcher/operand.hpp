@@ -12,9 +12,9 @@
 
 #include <boost/web/matcher/context.hpp>
 #include <boost/web/core/callable_traits.hpp>
+#include <boost/web/core/specialization_of.hpp>
 #include <boost/web/matcher/detail/callable_with.hpp>
-#include <boost/web/matcher/detail/specialization_of.hpp>
-#include <boost/web/matcher/detail/super_type.hpp>
+#include <boost/web/core/super_type.hpp>
 #include <boost/url/url_view.hpp>
 #include <type_traits>
 #include <utility>
@@ -79,14 +79,14 @@ public:
     }
 
     template <typename RHSType>
-    requires (!detail::specialization_of<matcher::operand, std::remove_cvref_t<RHSType>>)
+    requires (!specialization_of<matcher::operand, std::remove_cvref_t<RHSType>>)
     friend auto operator&&(
         operand lhs_operand,
         RHSType&& rhs)
     {
         matcher::operand rhs_operand {std::forward<RHSType&&>(rhs)};
         using rhs_request_type = typename decltype(rhs_operand)::request_type;
-        using super_request_type = detail::super_type_t<request_type, rhs_request_type>;
+        using super_request_type = super_type_t<request_type, rhs_request_type>;
 
         if constexpr (with_parsed_target || decltype(rhs_operand)::with_parsed_target)
         {
@@ -120,14 +120,14 @@ public:
     }
 
     template <typename LHSType>
-    requires (!detail::specialization_of<matcher::operand, std::remove_cvref<LHSType>>)
+    requires (!specialization_of<matcher::operand, std::remove_cvref<LHSType>>)
     friend auto operator&&(
         LHSType&& lhs,
         operand rhs_operand)
     {
         matcher::operand lhs_operand {std::forward<LHSType&&>(lhs)};
         using lhs_request_type = typename decltype(lhs_operand)::request_type;
-        using super_request_type = detail::super_type_t<request_type, lhs_request_type>;
+        using super_request_type = super_type_t<request_type, lhs_request_type>;
 
         if constexpr (with_parsed_target || decltype(lhs_operand)::with_parsed_target)
         {
@@ -161,14 +161,14 @@ public:
     }
 
     template <typename RHSType>
-    requires (!detail::specialization_of<matcher::operand, std::remove_cvref_t<RHSType>>)
+    requires (!specialization_of<matcher::operand, std::remove_cvref_t<RHSType>>)
     friend auto operator||(
         operand lhs_operand,
         RHSType&& rhs)
     {
         matcher::operand rhs_operand {std::forward<RHSType&&>(rhs)};
         using rhs_request_type = typename decltype(rhs_operand)::request_type;
-        using super_request_type = detail::super_type_t<request_type, rhs_request_type>;
+        using super_request_type = super_type_t<request_type, rhs_request_type>;
 
         if constexpr (with_parsed_target || decltype(rhs_operand)::with_parsed_target)
         {
@@ -202,14 +202,14 @@ public:
     }
 
     template <typename LHSType>
-    requires (!detail::specialization_of<matcher::operand, std::remove_cvref<LHSType>>)
+    requires (!specialization_of<matcher::operand, std::remove_cvref<LHSType>>)
     friend auto operator||(
         LHSType&& lhs,
         operand rhs_operand)
     {
         matcher::operand lhs_operand {std::forward<LHSType&&>(lhs)};
         using lhs_request_type = typename decltype(lhs_operand)::request_type;
-        using super_request_type = detail::super_type_t<request_type, lhs_request_type>;
+        using super_request_type = super_type_t<request_type, lhs_request_type>;
 
         if constexpr (with_parsed_target || decltype(lhs_operand)::with_parsed_target)
         {

@@ -7,13 +7,12 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-web
 //
 
-#ifndef BOOST_WEB_MATCHER_DETAIL_SPECIALIZATION_OF_HPP
-#define BOOST_WEB_MATCHER_DETAIL_SPECIALIZATION_OF_HPP
+#ifndef BOOST_WEB_CORE_SPECIALIZATION_OF_HPP
+#define BOOST_WEB_CORE_SPECIALIZATION_OF_HPP
 
 #include <type_traits>
 
-namespace boost::web::matcher {
-namespace detail {
+namespace boost::web {
 
 template <template <typename...> class, typename>
 struct is_specialization_of : std::false_type {};
@@ -30,7 +29,6 @@ template <template <typename...> class TemplateType, typename SpecializationType
 concept specialization_of =
     is_specialization_of_v<TemplateType, SpecializationType>;
 
-} // detail
 } // namespace boost::web::matcher
 
-#endif // BOOST_WEB_MATCHER_DETAIL_SPECIALIZATION_OF_HPP
+#endif // BOOST_WEB_CORE_SPECIALIZATION_OF_HPP

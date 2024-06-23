@@ -18,6 +18,7 @@ enum class rest_error
 {
     success = 0,
     argument_not_found = 10,
+    argument_ambiguous,
     invalid_request_format,
     invalid_url_format,
     invalid_content_type,
@@ -40,6 +41,8 @@ inline constexpr boost::system::error_category const& error_category() noexcept
                 return "Success.";
             case rest_error::argument_not_found:
                 return "Argument not found";
+            case rest_error::argument_ambiguous:
+                return "Argument not ambiguous";
             case rest_error::invalid_request_format:
                 return "Invalid request format";
             case rest_error::invalid_url_format:

@@ -10,9 +10,11 @@
 #ifndef BOOST_WEB_SESSION_HTTP_HPP
 #define BOOST_WEB_SESSION_HTTP_HPP
 
-#include "boost/web/core/callable_traits.hpp"
 #include <boost/web/matcher/context.hpp>
 #include <boost/web/matcher/operand.hpp>
+#include "boost/web/core/invoke_response.hpp"
+#include <boost/web/core/callable_traits.hpp>
+#include <boost/web/core/specialization_of.hpp>
 #include <boost/web/core/cancellation_signals.hpp>
 #include <boost/web/core/awaitable.hpp>
 #include <boost/web/core/rebind_executor.hpp>
@@ -29,6 +31,8 @@
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/url/url_view.hpp>
+#include <concepts>
+#include <exception>
 #include <vector>
 #include <functional>
 #include <utility>
@@ -37,7 +41,40 @@ namespace boost::web::session {
 
 class http
 {
+private:
+    using matcher_type = std::function<
+        bool(
+            const boost::beast::http::request_header<>&,
+            matcher::context&,
+            const boost::urls::url_view&)>;
+
+    using request_handler_wrapper_type = std::function<
+        awaitable<bool>(
+            const matcher::context&,
+            rebind_executor<boost::beast::tcp_stream>&,
+            boost::beast::flat_buffer&,
+            boost::beast::http::request_parser<boost::beast::http::buffer_body>&,
+            cancellation_signals&)>;
+
+    using soft_error_handler_type = std::function<
+        awaitable<bool>(
+            std::exception_ptr,
+            rebind_executor<boost::beast::tcp_stream>&,
+            boost::beast::http::request_header<>&,
+            cancellation_signals&)>;
+
+    using hard_error_handler_type = std::function<void(std::exception_ptr)>;
+
+    static void default_soft_error_handler(std::exception_ptr eptr)
+    {
+        std::rethrow_exception(eptr);
+    }
+
 public:
+    http()
+    {
+        set_soft_error_handler(&default_soft_error_handler);
+    }
     awaitable<void> operator()(
         rebind_executor<boost::asio::ip::tcp::socket> socket,
         cancellation_signals& signals) const
@@ -50,11 +87,11 @@ public:
 
         rebind_executor<tcp_stream> stream {std::move(socket)};
 
-        for (auto cs = co_await this_coro::cancellation_state;
-             cs.cancelled() == net::cancellation_type::none;
-             cs = co_await this_coro::cancellation_state)
+        try
         {
-            try
+            for (auto cs = co_await this_coro::cancellation_state;
+                cs.cancelled() == net::cancellation_type::none;
+                cs = co_await this_coro::cancellation_state)
             {
                 // Read and parse the header and use the target to find the handler.
                 flat_buffer buffer;
@@ -71,24 +108,23 @@ public:
                     break;
                 }
 
-                auto& header = header_parser.get();
+                auto& req_header = header_parser.get();
                 matcher::context context;
                 boost::urls::url_view parsed_target;
 
                 if (needs_parsed_target_)
                 {
-                    parsed_target = boost::urls::url_view(header.target());
-                    // TODO: check parsed result.
+                    parsed_target = boost::urls::url_view(req_header.target());
                 }
 
-                auto iter = std::ranges::find_if(matchers_,
+                auto iter = std::ranges::find_if(matcher_handlers_,
                     [&](auto const& matcher) -> bool
                     {
                         context.path_args.clear();
-                        return matcher.first(header, context, parsed_target);
+                        return matcher.first(req_header, context, parsed_target);
                     });
 
-                if (iter != matchers_.cend())
+                if (iter != matcher_handlers_.cend())
                 {
                     auto const& handler = iter->second;
                     if (!co_await handler(context, stream, buffer, header_parser, signals))
@@ -96,14 +132,18 @@ public:
                         // Handler instructed to close the session.
                         break;
                     }
+
+                    // Done with this request. Proceeding with the next one.
+                    continue;
                 }
 
                 // No handler found for this request. Reply with not found error.
                 // But before sending the error response, it is necessary to read
                 // the full buffer.
-                auto keep_alive = header.keep_alive();
-                auto version = header.version();
-                if (header.payload_size().has_value() && header.payload_size().value() > 0)
+                auto keep_alive = req_header.keep_alive();
+                auto version = req_header.version();
+                if (req_header.payload_size().has_value() &&
+                    req_header.payload_size().value() > 0)
                 {
                     http::request_parser<http::string_body> body_parser {std::move(header_parser)};
                     auto [req_ec, req_sz] = co_await async_read(stream, buffer, body_parser);
@@ -132,11 +172,11 @@ public:
                     break;
                 }
             }
-            catch (...)
-            {
-                // Session will be closed.
-                break;
-            }
+        }
+        catch (...)
+        {
+            // Unrecoverable error.
+            hard_error_handler_(std::current_exception());
         }
 
         // Send a TCP shutdown
@@ -156,20 +196,20 @@ public:
         matcher::operand operand {std::forward<MatcherType&&>(matcher)};
         needs_parsed_target_ |= decltype(operand)::with_parsed_target;
 
-        matchers_.emplace_back(
-            [operand = std::move(operand)](
+        matcher_handlers_.emplace_back(
+            [this, operand = std::move(operand)](
                 const http::request_header<>& request,
                 matcher::context& context,
                 const boost::urls::url_view& parsed_target)
             {
                 return operand(request, context, parsed_target);
             },
-            [request_handler = std::move(request_handler)](
+            [this, request_handler = std::move(request_handler)](
                 const matcher::context& context,
                 rebind_executor<boost::beast::tcp_stream>& stream,
                 boost::beast::flat_buffer& buffer,
                 boost::beast::http::request_parser<boost::beast::http::buffer_body>& header_parser,
-                cancellation_signals& signals)
+                cancellation_signals& signals) mutable
             -> awaitable<bool>
             {
                 using request_type = std::remove_cvref_t<callable_arg_type<RequestHandler, 0>>;
@@ -178,34 +218,68 @@ public:
                 http::request_parser<body_type> body_parser {std::move(header_parser)};
                 auto [req_ec, req_sz] = co_await async_read(stream, buffer, body_parser);
 
-                auto response = request_handler(
-                    std::move(body_parser.get()),
-                    context);
+                std::exception_ptr ex;
+                try
+                {
+                    auto response = request_handler(
+                        body_parser.get(),
+                        context);
 
-                const bool keep_alive = response.keep_alive();
-                co_await boost::beast::async_write(stream, std::move(response));
-                co_return keep_alive;
+                    const bool keep_alive = response.keep_alive();
+                    co_await boost::beast::async_write(stream, std::move(response));
+                    co_return keep_alive;
+                }
+                catch (...)
+                {
+                    ex = std::current_exception();
+                }
+
+                // An exception is thrown within the request handler.
+                co_return co_await soft_error_handler_(
+                    ex,
+                    stream,
+                    body_parser.get(),
+                    signals);
             }
         );
     }
 
-private:
-    using matcher_type = std::function<
-        bool(
-            const boost::beast::http::request_header<>&,
-            matcher::context&,
-            const boost::urls::url_view&)>;
+    template <typename Handler> requires
+        // TODO: need a concept to make sure Handler is compatible
+        std::constructible_from<callable_arg_type<Handler, 0>, std::exception_ptr>
+    void set_soft_error_handler(Handler handler)
+    {
+        namespace http = boost::beast::http;
 
-    using handler_type = std::function<
-        awaitable<bool>(
-            const matcher::context&,
-            rebind_executor<boost::beast::tcp_stream>&,
-            boost::beast::flat_buffer&,
-            boost::beast::http::request_parser<boost::beast::http::buffer_body>&,
-            cancellation_signals&)>;
+        soft_error_handler_ =
+            [handler = std::move(handler)](
+                std::exception_ptr ex,
+                rebind_executor<boost::beast::tcp_stream>& stream,
+                boost::beast::http::request_header<>& request_header,
+                cancellation_signals& signals) mutable
+            -> awaitable<bool>
+            {
+                auto rg = invoke_response(
+                    request_header,
+                    http::status::internal_server_error,
+                    handler,
+                    ex);
+
+                const bool keep_alive = rg.keep_alive();
+                co_await boost::beast::async_write(stream, std::move(rg));
+                co_return keep_alive;
+            };
+    }
+
+    void set_hard_error_handler(hard_error_handler_type handler)
+    {
+        hard_error_handler_ = std::move(handler);
+    }
 
 private:
-    std::vector<std::pair<matcher_type, handler_type>> matchers_;
+    std::vector<std::pair<matcher_type, request_handler_wrapper_type>> matcher_handlers_;
+    soft_error_handler_type soft_error_handler_;
+    hard_error_handler_type hard_error_handler_ = [](std::exception_ptr){};
     bool needs_parsed_target_ = false;
 };
 

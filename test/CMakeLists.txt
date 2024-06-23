@@ -9,11 +9,14 @@ target_sources(
     PRIVATE
         test_callable_traits.cpp
         test_callable_with.cpp
-        test_handler_rest.cpp
         test_header.cpp
+        test_http_session.cpp
         test_matcher.cpp
+        test_member_function_of.cpp
         test_method.cpp
         test_operand.cpp
+        test_rest.cpp
+        test_rest_arg.cpp
         test_specialization_of.cpp
         test_super_type.cpp
         test_target.cpp

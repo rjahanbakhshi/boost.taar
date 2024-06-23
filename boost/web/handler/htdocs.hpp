@@ -149,7 +149,7 @@ private:
     {
         namespace http = boost::beast::http;
         http::response<http::string_body> response {
-            http::status::bad_request,
+            status,
             request.version()};
 
         response.set(http::field::content_type, "text/html");
