@@ -32,7 +32,7 @@ int main(int argc, char* argv[])
 {
     if (argc != 3)
     {
-        std::cerr << "Usage: http_server port /example/document/root\n";
+        std::cerr << "Usage: mixed_server port /example/document/root\n";
         return EXIT_FAILURE;
     }
 
