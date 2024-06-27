@@ -14,6 +14,7 @@
 #include <boost/web/matcher/operand.hpp>
 #include <boost/web/matcher/template_parser.hpp>
 #include <boost/web/matcher/detail/ranges_to.hpp>
+#include <boost/web/matcher/detail/join_with.hpp>
 #include <boost/beast/http/message.hpp>
 #include <boost/url/url_view.hpp>
 #include <iterator>
@@ -57,8 +58,8 @@ struct target_t
                         context.path_args.emplace(
                             "*",
                             subrange(target_iter, parsed_target.segments().end()) |
-                                join_with('/') |
-                                detail::to_container<std::string>);
+                                detail::join_with('/') |
+                                detail::to<std::string>());
                         return true;
                     }
 

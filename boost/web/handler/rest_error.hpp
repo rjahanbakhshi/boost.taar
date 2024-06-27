@@ -24,7 +24,10 @@ enum class rest_error
     invalid_content_type,
 };
 
-inline constexpr boost::system::error_category const& error_category() noexcept
+#if (__cpp_constexpr >= 202211L)
+constexpr
+#endif
+inline boost::system::error_category const& error_category() noexcept
 {
     struct error_category_type : boost::system::error_category
     {
@@ -55,11 +58,17 @@ inline constexpr boost::system::error_category const& error_category() noexcept
         }
     };
 
-    static constexpr error_category_type instance;
+#if (__cpp_constexpr >= 202211L)
+    constexpr
+#endif
+    static error_category_type instance;
     return instance;
 }
 
-inline constexpr boost::system::error_code make_error_code(rest_error ev) noexcept
+#if (__cpp_constexpr >= 202211L)
+constexpr
+#endif
+inline boost::system::error_code make_error_code(rest_error ev) noexcept
 {
     return boost::system::error_code {
         static_cast<std::underlying_type<

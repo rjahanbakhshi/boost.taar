@@ -23,7 +23,10 @@ of other boost libraries like boost.beast, boost.asio, boost.url, boost.json, et
   - [To run the unit-tests after the build](#to-run-the-unit-tests-after-the-build)
   - [To install under the local prefix directory ./out](#to-install-under-the-local-prefix-directory-out)
   - [To build and run the examples](#to-build-and-run-the-examples)
+  - [Conan: creating and uploading](#conan-creating-and-uploading)
+  - [Tested compilers and platforms](#tested-compilers-and-platforms)
   - [License](#license)
+  - [TODO](#todo)
 <!--toc:end-->
 
 ## Overview
@@ -38,6 +41,7 @@ like Boost.ASIO, Boost.Beast, Boost.URL, and Boost.JSON, and Boost.system.
 - Other boost libraries like  Boost.ASIO, Boost.Beast, Boost.URL, and Boost.JSON,
 and Boost.system.
 - CMake 3.28 or a more recent version
+  - Note: Lower versions might also work but I'm not able to test that now.
 
 ### Quick Look
 
@@ -242,7 +246,7 @@ cmake --install build --prefix out
 cmake --build build -j --target http_server && build/examples/http_server 8082 ./
 ```
 
-## Creating and uploading the Conaan
+## Conan: creating and uploading
 
 ```bash
 version=$(git describe --abbrev=0 | grep -o '[0-9]\+.[0-9]\+.[0-9]\+')
@@ -254,6 +258,9 @@ conan upload "boost-web/$version" --only-recipe --remote your_conan_remote
 
 - GCC 14.1.1 on Arch Linux
 - GCC 13.2.0 on Ubuntu 24.04
+- GCC 11.2.0 on Ubuntu 22.04
+  - Note: The required CMake version is 3.28 which is newer than 3.22 shipped
+with Ubuntu 22.04
 
 ## License
 

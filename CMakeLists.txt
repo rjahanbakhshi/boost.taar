@@ -35,6 +35,7 @@ target_sources(
         boost/web/handler/rest_arg.hpp
         boost/web/handler/rest_error.hpp
         boost/web/matcher/detail/callable_with.hpp
+        boost/web/matcher/detail/join_with.hpp
         boost/web/matcher/detail/ranges_to.hpp
         boost/web/matcher/context.hpp
         boost/web/matcher/error.hpp

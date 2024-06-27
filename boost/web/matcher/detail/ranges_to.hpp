@@ -10,17 +10,27 @@
 #ifndef BOOST_WEB_MATCHER_DETAIL_RANGES_TO_HPP
 #define BOOST_WEB_MATCHER_DETAIL_RANGES_TO_HPP
 
-#include <string>
-#include <utility>
+#include <ranges>
+
+#if (__cpp_lib_ranges_to_container < 202202L)
+#    include <string>
+#    include <utility>
+#endif
 
 namespace boost::web::matcher {
 namespace detail {
 
-// std::ranges::to is not available everywhere yet.
+#if (__cpp_lib_ranges_to_container >= 202202L)
+
+using std::ranges::to;
+
+#else
+
+// A sloppy implementation of std::ranges::to.
 template<typename ContainerType>
 struct to_container_t
 {
-    template<typename RangeType>
+    template<std::ranges::input_range RangeType>
     ContainerType operator()(RangeType&& range) const
     {
         return ContainerType(
@@ -28,7 +38,7 @@ struct to_container_t
             end(std::forward<RangeType>(range)) );
     }
 
-    template<typename RangeType>
+    template<std::ranges::input_range RangeType>
     friend ContainerType operator|(RangeType&& range, to_container_t self)
     {
         return self(std::forward<RangeType>(range));
@@ -38,7 +48,7 @@ struct to_container_t
 template<typename... T>
 struct to_container_t<std::basic_string<T...>>
 {
-    template<typename RangeType>
+    template<std::ranges::input_range RangeType>
     std::basic_string<T...> operator()(RangeType&& range) const
     {
         std::basic_string<T...> result;
@@ -49,7 +59,7 @@ struct to_container_t<std::basic_string<T...>>
         return result;
     }
 
-    template<typename RangeType>
+    template<std::ranges::input_range RangeType>
     friend std::basic_string<T...> operator|(RangeType&& range, to_container_t self)
     {
         return self(std::forward<RangeType>(range));
@@ -57,7 +67,12 @@ struct to_container_t<std::basic_string<T...>>
 };
 
 template<typename ContainerType>
-constexpr to_container_t<ContainerType> to_container {};
+inline constexpr auto to()
+{
+    return to_container_t<ContainerType>{};
+};
+
+#endif
 
 } // detail
 } // namespace boost::web::matcher
