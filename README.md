@@ -51,8 +51,8 @@ Accepts an HTTP GET request for specific target and respond with a stock text.
 web::session::http http_session;
 http_session.register_request_handler(
     method == http::verb::get && target == "/api/version",
-    web::handler::rest {[]{ return "1.0"; }
-});
+    web::handler::rest([]{ return "1.0"; }
+));
 
 web::cancellation_signals cancellation_signals;
 co_spawn(
@@ -76,7 +76,7 @@ the path arguments and respond with a JSON value.
 web::session::http http_session;
 http_session.register_request_handler(
     method == http::verb::get && target == "/api/sum/{a}/{b}",
-    web::handler::rest {[](int a, int b)
+    web::handler::rest([](int a, int b)
     {
         return boost::json::value {
             {"a", a},
@@ -86,7 +86,7 @@ http_session.register_request_handler(
     },
     web::handler::path_arg("a"),
     web::handler::path_arg("b")
-});
+));
 
 web::cancellation_signals cancellation_signals;
 co_spawn(
@@ -110,12 +110,12 @@ called "test_arg" to be present and passes the value of it to the handler lambda
 web::session::http http_session;
 http_session.register_request_handler(
     method == http::verb::post && target == "/api/store/",
-    web::handler::rest {[](const std::string& test_arg)
+    web::handler::rest([](const std::string& test_arg)
     {
         std::cout << "Received test_arg = " << test_arg << '\n';
     },
     web::handler::query_arg("test_arg")
-});
+));
 
 web::cancellation_signals cancellation_signals;
 co_spawn(
