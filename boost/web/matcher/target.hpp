@@ -53,11 +53,12 @@ struct target_t
                     {
                         using namespace std::ranges;
                         using namespace std::views;
+
                         context.path_args.emplace(
                             "*",
                             subrange(target_iter, parsed_target.segments().end()) |
                                 join_with('/') |
-                                std::ranges::to<std::string>());
+                                detail::to_container<std::string>);
                         return true;
                     }
 

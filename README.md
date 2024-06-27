@@ -37,6 +37,7 @@ like Boost.ASIO, Boost.Beast, Boost.URL, and Boost.JSON, and Boost.system.
 - A C++ compiler supporting C++23 and above.
 - Other boost libraries like  Boost.ASIO, Boost.Beast, Boost.URL, and Boost.JSON,
 and Boost.system.
+- CMake 3.28 or a more recent version
 
 ### Quick Look
 
@@ -248,6 +249,11 @@ version=$(git describe --abbrev=0 | grep -o '[0-9]\+.[0-9]\+.[0-9]\+')
 conan create . --version "$version" --build=missing
 conan upload "boost-web/$version" --only-recipe --remote your_conan_remote
 ```
+
+## Tested compilers and platforms
+
+- GCC 14.1.1 on Arch Linux
+- GCC 13.2.0 on Ubuntu 24.04
 
 ## License
 
