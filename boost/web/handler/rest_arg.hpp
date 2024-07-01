@@ -23,6 +23,7 @@
 #include <boost/json/value.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/system/result.hpp>
+#include <initializer_list>
 #include <iterator>
 #include <unordered_set>
 #include <optional>
@@ -136,6 +137,9 @@ using arg_provider_result = std::conditional_t<
     is_rest_arg_provider<ArgProviderType>,
     callable_result_type<ArgProviderType>,
     ArgProviderType>;
+
+template <typename T>
+concept string_like = std::constructible_from<std::string, T>;
 
 } // namespace detail
 
@@ -288,11 +292,23 @@ struct header_arg
     std::string header_name_;
 };
 
+struct all_content_types_t {};
+constexpr all_content_types_t all_content_types {};
+
 // REST arg provider from the request body as string
 struct string_body_arg
 {
-    string_body_arg(std::unordered_set<std::string> content_types = {"text/plain"})
-        : content_types_ {std::move(content_types)}
+    template <detail::string_like... T>
+    string_body_arg(T&&... content_types)
+        : content_types_ {std::forward<T>(content_types)...}
+    {
+        if constexpr (sizeof...(T) == 0)
+        {
+            content_types_.emplace("text/plain");
+        }
+    }
+
+    string_body_arg(all_content_types_t)
     {}
 
     boost::system::result<std::string> operator()(
@@ -320,8 +336,17 @@ struct string_body_arg
 // REST arg provider from the request body as json value
 struct json_body_arg
 {
-    json_body_arg(std::unordered_set<std::string> content_types = {"application/json"})
-        : content_types_ {std::move(content_types)}
+    template <detail::string_like... T>
+    json_body_arg(T&&... content_types)
+        : content_types_ {std::forward<T>(content_types)...}
+    {
+        if constexpr (sizeof...(T) == 0)
+        {
+            content_types_.emplace("application/json");
+        }
+    }
+
+    json_body_arg(all_content_types_t)
     {}
 
     boost::system::result<boost::json::value> operator()(
@@ -338,11 +363,6 @@ struct json_body_arg
             {
                 return rest_error::invalid_content_type;
             }
-        }
-
-        if (request.body().empty())
-        {
-            return rest_error::argument_not_found;
         }
 
         std::error_code ec;

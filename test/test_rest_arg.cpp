@@ -10,6 +10,7 @@
 #include <boost/web/handler/rest_arg.hpp>
 #include <boost/test/unit_test.hpp>
 #include <boost/json/value_from.hpp>
+#include <boost/system/system_error.hpp>
 
 namespace {
 
@@ -99,10 +100,6 @@ BOOST_AUTO_TEST_CASE(test_rest_arg)
     req.insert("header2", "value2");
     req.insert("header3", "value3");
     req.insert("pi", "3.14");
-    req.insert(http::field::content_type, "text/plain");
-    req.insert(http::field::content_type, "application/json");
-    req.body() = R"({"everything": 42})";
-    req.prepare_payload();
     context ctx;
     ctx.path_args = {{"a", "13"}, {"b", "42"}};
 
@@ -118,13 +115,84 @@ BOOST_AUTO_TEST_CASE(test_rest_arg)
     BOOST_TEST((rest_arg<std::string_view, header_arg>{header_arg("header2")}(req, ctx) == "value2"));
     BOOST_TEST((rest_arg<std::string_view, header_arg>{header_arg("pi")}(req, ctx) == "3.14"));
     BOOST_TEST((rest_arg<float, header_arg>{header_arg("pi")}(req, ctx) == 3.14f));
+}
 
-    BOOST_TEST((rest_arg<std::string, string_body_arg>{string_body_arg()}(req, ctx) == R"({"everything": 42})"));
-    BOOST_TEST((rest_arg<std::string_view, string_body_arg>{string_body_arg()}(req, ctx) == R"({"everything": 42})"));
+BOOST_AUTO_TEST_CASE(test_rest_arg_string_body)
+{
+    namespace http = boost::beast::http;
+    namespace web = boost::web;
+    using web::matcher::context;
+    using web::handler::rest_arg;
+    using web::handler::query_arg;
+    using web::handler::string_body_arg;
+    using web::handler::all_content_types;
+
+    http::request<http::string_body> req{http::verb::get, "/", 10};
+    req.insert(http::field::content_type, "text/plain");
+    req.body() = "Hello world!";
+    req.prepare_payload();
+    context ctx;
+
+    BOOST_TEST((
+        rest_arg<std::string, string_body_arg>{string_body_arg()}(req, ctx) ==
+        "Hello world!"));
+
+    BOOST_TEST((
+        rest_arg<std::string_view, string_body_arg>{string_body_arg()}(req, ctx) ==
+        "Hello world!"));
+
+    BOOST_TEST((
+        rest_arg<std::string, string_body_arg>{string_body_arg("text/plain")}(req, ctx) ==
+        "Hello world!"));
+
+    BOOST_TEST((
+        rest_arg<std::string, string_body_arg>{string_body_arg("text/plain", "application/json")}(req, ctx) ==
+        "Hello world!"));
+
+    BOOST_TEST((
+        rest_arg<std::string, string_body_arg>{string_body_arg(all_content_types)}(req, ctx) ==
+        "Hello world!"));
+
+    BOOST_CHECK_THROW(
+        (rest_arg<std::string, string_body_arg>{string_body_arg("image/png")}(req, ctx)),
+        boost::system::system_error);
+}
+
+BOOST_AUTO_TEST_CASE(test_rest_arg_json_body)
+{
+    namespace http = boost::beast::http;
+    namespace web = boost::web;
+    using web::matcher::context;
+    using web::handler::rest_arg;
+    using web::handler::query_arg;
+    using web::handler::json_body_arg;
+    using web::handler::all_content_types;
+
+    http::request<http::string_body> req{http::verb::get, "/", 10};
+    req.insert(http::field::content_type, "application/json");
+    req.body() = R"({"everything": 42})";
+    req.prepare_payload();
+    context ctx;
 
     BOOST_TEST((
       rest_arg<boost::json::value, json_body_arg>{json_body_arg()}(req, ctx) ==
       boost::json::value{{"everything", 42}}));
+
+    BOOST_TEST((
+      rest_arg<boost::json::value, json_body_arg>{json_body_arg("application/json")}(req, ctx) ==
+      boost::json::value{{"everything", 42}}));
+
+    BOOST_TEST((
+      rest_arg<boost::json::value, json_body_arg>{json_body_arg(all_content_types)}(req, ctx) ==
+      boost::json::value{{"everything", 42}}));
+
+    BOOST_TEST((
+      rest_arg<boost::json::value, json_body_arg>{json_body_arg("application/json", "text/plain")}(req, ctx) ==
+      boost::json::value{{"everything", 42}}));
+
+    BOOST_CHECK_THROW(
+        (rest_arg<boost::json::value, json_body_arg>{json_body_arg("text/plain")}(req, ctx)),
+        boost::system::system_error);
 }
 
 } // namespace
