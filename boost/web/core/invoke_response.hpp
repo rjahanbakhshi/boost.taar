@@ -19,6 +19,7 @@
 #include <boost/beast/http/string_body.hpp>
 #include <boost/json/serialize.hpp>
 #include <boost/json/value.hpp>
+#include <boost/json/value_from.hpp>
 #include <type_traits>
 
 namespace boost::web {
@@ -36,6 +37,12 @@ void copy_header_field(
         to.insert(field, iter->value());
     }
 }
+
+template <typename From>
+concept convertible_to_json_value = requires
+{
+    { boost::json::value_from(std::declval<From>()) } -> std::same_as<boost::json::value>;
+};
 
 } // namespace detail
 
@@ -72,6 +79,18 @@ static boost::beast::http::message_generator invoke_response(
         detail::copy_header_field(request_header, response, http::field::keep_alive);
         response.set(boost::beast::http::field::content_type, "text/plain");
         response.body() = std::invoke(std::forward<CallableType>(callable), std::forward<ArgsType>(args)...);
+        response.prepare_payload();
+        return response;
+    }
+    else if constexpr (detail::convertible_to_json_value<result_type>)
+    {
+        http::response<http::string_body> response {response_status, request_header.version()};
+        detail::copy_header_field(request_header, response, http::field::connection);
+        detail::copy_header_field(request_header, response, http::field::keep_alive);
+        response.set(boost::beast::http::field::content_type, "application/json");
+        response.body() = boost::json::serialize(
+            boost::json::value_from(
+                std::invoke(std::forward<CallableType>(callable), std::forward<ArgsType>(args)...)));
         response.prepare_payload();
         return response;
     }

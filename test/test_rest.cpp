@@ -256,7 +256,7 @@ auto to_json(std::string value)
     return boost::json::value {{"value", value}};
 }
 
-BOOST_AUTO_TEST_CASE(test_rest_json_response)
+BOOST_AUTO_TEST_CASE(test_rest_string_to_json_response)
 {
     namespace http = boost::beast::http;
     namespace web = boost::web;
@@ -271,6 +271,43 @@ BOOST_AUTO_TEST_CASE(test_rest_json_response)
     auto mg = rh(req, ctx);
     auto resp = to_response<http::string_body>(mg);
     BOOST_TEST(resp.body() == R"({"value":"Hello"})");
+    BOOST_TEST(resp[http::field::content_type] == "application/json");
+}
+
+struct jsonable
+{
+    int i;
+    std::string s;
+};
+void tag_invoke(
+    const boost::json::value_from_tag&,
+    boost::json::value& jv,
+    const jsonable& obj)
+{
+    // Store the IP address as a 4-element array of octets
+    jv = { {{"i", obj.i}, {"s", obj.s}} };
+}
+
+BOOST_AUTO_TEST_CASE(test_rest_object_to_json_response)
+{
+    namespace http = boost::beast::http;
+    namespace web = boost::web;
+    using web::matcher::context;
+    using web::handler::header_arg;
+
+    http::request<http::empty_body> req;
+    context ctx;
+    req.insert("value", "Hello");
+
+    auto rh = web::handler::rest(
+        [](std::string_view s)
+        {
+            return jsonable{.i = 13, .s = std::string{s}};
+        },
+        header_arg("value"));
+    auto mg = rh(req, ctx);
+    auto resp = to_response<http::string_body>(mg);
+    BOOST_TEST(resp.body() == R"({"i":13,"s":"Hello"})");
     BOOST_TEST(resp[http::field::content_type] == "application/json");
 }
 
