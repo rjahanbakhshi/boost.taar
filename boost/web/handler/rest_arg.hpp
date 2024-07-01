@@ -21,6 +21,7 @@
 #include <boost/url/ignore_case.hpp>
 #include <boost/json/parse.hpp>
 #include <boost/json/value.hpp>
+#include <boost/json/value_to.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/system/result.hpp>
 #include <initializer_list>
@@ -93,7 +94,7 @@ template <typename ToType, typename FromType>
         std::same_as<std::remove_cvref_t<FromType>, boost::json::value> &&
         convertible_from_json_value<ToType>)
     {
-        auto json = boost::json::value_to<ToType>(std::forward<FromType>(from));
+        return boost::json::value_to<ToType>(std::forward<FromType>(from));
     }
     else if constexpr (lexical_castable<std::remove_cvref_t<FromType>, ToType>)
     {
@@ -188,7 +189,6 @@ struct rest_arg
         else if constexpr (detail::rest_arg_castable<arg_provider_type, arg_type>)
         {
             return detail::rest_arg_cast<arg_type>(std::move(arg_provider_));
-            provider_result_ = arg_provider_;
         }
         else
         {

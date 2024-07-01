@@ -14,6 +14,29 @@
 
 namespace {
 
+struct jsonable
+{
+    int i;
+    std::string s;
+};
+
+jsonable tag_invoke(const boost::json::value_to_tag<jsonable>&, const boost::json::value& jv)
+{
+    auto const& obj = jv.as_object();
+    return jsonable {
+        .i = boost::json::value_to<int>(obj.at("i")),
+        .s = boost::json::value_to<std::string>(obj.at("s")),
+    };
+}
+void tag_invoke(
+    const boost::json::value_from_tag&,
+    boost::json::value& jv,
+    const jsonable& obj)
+{
+    // Store the IP address as a 4-element array of octets
+    jv = { {{"i", obj.i}, {"s", obj.s}} };
+}
+
 BOOST_AUTO_TEST_CASE(test_rest_arg_traits)
 {
     using namespace boost::web::handler::detail;
@@ -24,6 +47,7 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_traits)
     static_assert(convertible_from_json_value<std::string>);
     static_assert(convertible_from_json_value<std::string_view>);
     static_assert(convertible_from_json_value<int>);
+    static_assert(convertible_from_json_value<jsonable>);
 
     BOOST_TEST(bool_cast("true").value());
     BOOST_TEST(bool_cast("TRUE").value());
@@ -44,6 +68,7 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_traits)
     static_assert(rest_arg_castable<std::string, float>);
     static_assert(rest_arg_castable<float, std::string>);
     static_assert(rest_arg_castable<std::string, std::string_view>);
+    static_assert(rest_arg_castable<boost::json::value, jsonable>);
 }
 
 BOOST_AUTO_TEST_CASE(test_rest_arg_cast)

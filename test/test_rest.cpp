@@ -279,6 +279,16 @@ struct jsonable
     int i;
     std::string s;
 };
+
+jsonable tag_invoke(const boost::json::value_to_tag<jsonable>&, const boost::json::value& jv)
+{
+    auto const& obj = jv.as_object();
+    return jsonable {
+        .i = boost::json::value_to<int>(obj.at("i")),
+        .s = boost::json::value_to<std::string>(obj.at("s")),
+    };
+}
+
 void tag_invoke(
     const boost::json::value_from_tag&,
     boost::json::value& jv,
@@ -309,6 +319,31 @@ BOOST_AUTO_TEST_CASE(test_rest_object_to_json_response)
     auto resp = to_response<http::string_body>(mg);
     BOOST_TEST(resp.body() == R"({"i":13,"s":"Hello"})");
     BOOST_TEST(resp[http::field::content_type] == "application/json");
+}
+
+std::string accepts_jsonable(const jsonable& j)
+{
+    return j.s + " = " + std::to_string(j.i);
+}
+
+BOOST_AUTO_TEST_CASE(test_rest_invoke_with_jsonable)
+{
+    namespace http = boost::beast::http;
+    namespace web = boost::web;
+    using web::matcher::context;
+    using web::handler::json_body_arg;
+
+    http::request<http::string_body> req;
+    context ctx;
+    req.body() = R"({"i":13, "s":"Hello"})";
+    req.insert(http::field::content_type, "application/json");
+    req.prepare_payload();
+
+    auto rh = web::handler::rest(accepts_jsonable, json_body_arg());
+    auto mg = rh(req, ctx);
+    auto resp = to_response<http::string_body>(mg);
+    BOOST_TEST(resp.body() == "Hello = 13");
+    BOOST_TEST(resp[http::field::content_type] == "text/plain");
 }
 
 struct concat_handler
