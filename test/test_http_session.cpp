@@ -4,25 +4,49 @@
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
-// Official repository: https://github.com/rjahanbakhshi/boost-web
+// Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
 
-#include <boost/web/session/http.hpp>
-#include <boost/web/handler/rest.hpp>
-#include <boost/web/matcher/method.hpp>
-#include <boost/web/matcher/target.hpp>
+#include <boost/taar/session/http.hpp>
+#include <boost/taar/handler/rest.hpp>
+#include <boost/taar/matcher/method.hpp>
+#include <boost/taar/matcher/target.hpp>
 #include <boost/test/unit_test.hpp>
 
 namespace {
 
+namespace http = boost::beast::http;
+namespace taar = boost::taar;
+using taar::matcher::method;
+using taar::matcher::target;
+
+struct object_type
+{
+    http::message_generator fn1_const(
+        const http::request<boost::beast::http::empty_body>& request,
+        const boost::taar::matcher::context&) const
+    {
+        http::response<http::string_body> res {
+            boost::beast::http::status::ok,
+            request.version()};
+        res.set(boost::beast::http::field::content_type, "text/html");
+        res.keep_alive(request.keep_alive());
+        res.body() = "Hello";
+        res.prepare_payload();
+        return res;
+    }
+
+    http::message_generator fn1(
+        const http::request<boost::beast::http::empty_body>& request,
+        const boost::taar::matcher::context& context)
+    {
+        return fn1_const(request, context);
+    }
+};
+
 BOOST_AUTO_TEST_CASE(test_http_session)
 {
-    namespace http = boost::beast::http;
-    namespace web = boost::web;
-    using web::matcher::method;
-    using web::matcher::target;
-
-    web::session::http http_session;
+    taar::session::http http_session;
 
     http_session.set_hard_error_handler(
         [](std::exception_ptr eptr)
@@ -52,7 +76,7 @@ BOOST_AUTO_TEST_CASE(test_http_session)
         method == http::verb::get && target == "/special/{*}",
         [](
             const http::request<http::empty_body>& request,
-            const web::matcher::context& context) -> http::message_generator
+            const taar::matcher::context& context) -> http::message_generator
         {
             http::response<http::string_body> res {
                 boost::beast::http::status::ok,
@@ -67,17 +91,17 @@ BOOST_AUTO_TEST_CASE(test_http_session)
 
     http_session.register_request_handler(
         method == http::verb::get && target == "/api/version",
-        web::handler::rest([]{ return "1.0"; })
+        taar::handler::rest([]{ return "1.0"; })
     );
 
     http_session.register_request_handler(
         method == http::verb::get && target == "/api/throw",
-        web::handler::rest([]{ throw std::runtime_error{"Error"}; })
+        taar::handler::rest([]{ throw std::runtime_error{"Error"}; })
     );
 
     http_session.register_request_handler(
         method == http::verb::get && target == "/api/sum/{a}/{b}",
-        web::handler::rest([](int a, int b)
+        taar::handler::rest([](int a, int b)
         {
             return boost::json::value {
                 {"a", a},
@@ -85,17 +109,35 @@ BOOST_AUTO_TEST_CASE(test_http_session)
                 {"result", a + b}
             };
         },
-        web::handler::path_arg("a"),
-        web::handler::path_arg("b"))
+        taar::handler::path_arg("a"),
+        taar::handler::path_arg("b"))
     );
 
     http_session.register_request_handler(
         method == http::verb::post && target == "/api/store/",
-        web::handler::rest([](const std::string& value)
+        taar::handler::rest([](const std::string& value)
         {
-            std::cout << "Storing value = " << value << '\n';
         },
-        web::handler::query_arg("value"))
+        taar::handler::query_arg("value"))
+    );
+
+    object_type object;
+    http_session.register_request_handler(
+        method == http::verb::post && target == "/api/custom",
+        &object_type::fn1,
+        &object
+    );
+    http_session.register_request_handler(
+        method == http::verb::post && target == "/api/custom",
+        &object_type::fn1_const,
+        &object
+    );
+
+    const object_type const_object;
+    http_session.register_request_handler(
+        method == http::verb::post && target == "/api/custom",
+        &object_type::fn1_const,
+        &const_object
     );
 }
 

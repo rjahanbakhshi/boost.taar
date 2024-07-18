@@ -7,9 +7,9 @@ endif()
 set(ENABLE_CLANG_TIDY OFF CACHE BOOL "Enable clang-tidy for supported targets.")
 
 project(
-    boost-web
+    boost-taar
     VERSION 1.0
-    DESCRIPTION "A collection of tools to facilitate web server development."
+    DESCRIPTION "A collection of tools to facilitate web server and client development."
 )
 
 find_package(Boost 1.84 COMPONENTS system REQUIRED)
@@ -20,33 +20,33 @@ set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 23)
 target_sources(
     ${PROJECT_NAME}
     PUBLIC FILE_SET HEADERS BASE_DIRS . FILES
-        boost/web/core/always_false.hpp
-        boost/web/core/awaitable.hpp
-        boost/web/core/callable_traits.hpp
-        boost/web/core/cancellation_signals.hpp
-        boost/web/core/ignore_and_rethrow.hpp
-        boost/web/core/invoke_response.hpp
-        boost/web/core/member_function_of.hpp
-        boost/web/core/rebind_executor.hpp
-        boost/web/core/specialization_of.hpp
-        boost/web/core/super_type.hpp
-        boost/web/handler/htdocs.hpp
-        boost/web/handler/rest.hpp
-        boost/web/handler/rest_arg.hpp
-        boost/web/handler/rest_error.hpp
-        boost/web/matcher/detail/callable_with.hpp
-        boost/web/matcher/detail/join_with.hpp
-        boost/web/matcher/detail/ranges_to.hpp
-        boost/web/matcher/context.hpp
-        boost/web/matcher/error.hpp
-        boost/web/matcher/header.hpp
-        boost/web/matcher/method.hpp
-        boost/web/matcher/operand.hpp
-        boost/web/matcher/target.hpp
-        boost/web/matcher/template_parser.hpp
-        boost/web/matcher/version.hpp
-        boost/web/server/tcp.hpp
-        boost/web/session/http.hpp
+        boost/taar/core/always_false.hpp
+        boost/taar/core/awaitable.hpp
+        boost/taar/core/callable_traits.hpp
+        boost/taar/core/cancellation_signals.hpp
+        boost/taar/core/ignore_and_rethrow.hpp
+        boost/taar/core/invoke_response.hpp
+        boost/taar/core/member_function_of.hpp
+        boost/taar/core/rebind_executor.hpp
+        boost/taar/core/specialization_of.hpp
+        boost/taar/core/super_type.hpp
+        boost/taar/handler/htdocs.hpp
+        boost/taar/handler/rest.hpp
+        boost/taar/handler/rest_arg.hpp
+        boost/taar/handler/rest_error.hpp
+        boost/taar/matcher/detail/callable_with.hpp
+        boost/taar/matcher/detail/join_with.hpp
+        boost/taar/matcher/detail/ranges_to.hpp
+        boost/taar/matcher/context.hpp
+        boost/taar/matcher/error.hpp
+        boost/taar/matcher/header.hpp
+        boost/taar/matcher/method.hpp
+        boost/taar/matcher/operand.hpp
+        boost/taar/matcher/target.hpp
+        boost/taar/matcher/template_parser.hpp
+        boost/taar/matcher/version.hpp
+        boost/taar/server/tcp.hpp
+        boost/taar/session/http.hpp
 )
 
 target_link_libraries(

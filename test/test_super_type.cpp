@@ -4,10 +4,10 @@
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
-// Official repository: https://github.com/rjahanbakhshi/boost-web
+// Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
 
-#include <boost/web/core/super_type.hpp>
+#include <boost/taar/core/super_type.hpp>
 #include <boost/test/unit_test.hpp>
 #include <type_traits>
 
@@ -20,7 +20,7 @@ struct derrived3 : base {};
 
 BOOST_AUTO_TEST_CASE(test_matcher_super_type)
 {
-    using namespace boost::web;
+    using namespace boost::taar;
     static_assert(have_super_type_v<base>);
     static_assert(have_super_type_v<base, derrived>);
     static_assert(have_super_type_v<base, derrived, derrived2>);

@@ -4,17 +4,17 @@
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
-// Official repository: https://github.com/rjahanbakhshi/boost-web
+// Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
 
-#include <boost/web/matcher/template_parser.hpp>
+#include <boost/taar/matcher/template_parser.hpp>
 #include <boost/test/unit_test.hpp>
 
 namespace {
 
 BOOST_AUTO_TEST_CASE(test_matcher_template_parser_invalid)
 {
-    using namespace boost::web::matcher;
+    using namespace boost::taar::matcher;
 
     BOOST_TEST((parse_template("") == error::no_absolute_template));
     BOOST_TEST((parse_template("blah") == error::no_absolute_template));
@@ -33,7 +33,7 @@ BOOST_AUTO_TEST_CASE(test_matcher_template_parser_invalid)
 
 BOOST_AUTO_TEST_CASE(test_matcher_template_parser)
 {
-    using namespace boost::web::matcher;
+    using namespace boost::taar::matcher;
 
     auto result = parse_template("/");
     BOOST_TEST(!result.has_error());

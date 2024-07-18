@@ -1,4 +1,4 @@
-project(boost-web-test)
+project(boost-taar-test)
 
 find_package(Boost 1.83 COMPONENTS test REQUIRED)
 
@@ -26,7 +26,7 @@ target_sources(
 
 target_link_libraries(
     ${PROJECT_NAME}
-    PRIVATE boost-web
+    PRIVATE boost-taar
 )
 
 add_test(

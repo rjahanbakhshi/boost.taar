@@ -7,5 +7,19 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
 
-#define BOOST_TEST_MODULE test_matcher
-#include <boost/test/included/unit_test.hpp>
+#ifndef BOOST_TAAR_MATCHER_CONTEXT_HPP
+#define BOOST_TAAR_MATCHER_CONTEXT_HPP
+
+#include <unordered_map>
+#include <string>
+
+namespace boost::taar::matcher {
+
+struct context
+{
+    std::unordered_map<std::string, std::string> path_args;
+};
+
+} // namespace boost::taar::matcher
+
+#endif // BOOST_TAAR_MATCHER_CONTEXT_HPP

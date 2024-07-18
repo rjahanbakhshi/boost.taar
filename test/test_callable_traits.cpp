@@ -4,10 +4,10 @@
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
-// Official repository: https://github.com/rjahanbakhshi/boost-web
+// Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
 
-#include <boost/web/core/callable_traits.hpp>
+#include <boost/taar/core/callable_traits.hpp>
 #include <boost/test/unit_test.hpp>
 
 namespace {
@@ -32,7 +32,7 @@ struct memfn_type
 
 BOOST_AUTO_TEST_CASE(test_matcher_callable_traits)
 {
-    using namespace boost::web;
+    using namespace boost::taar;
 
     static_assert(callable_traits<decltype(&void_fn)>::args_count == 0);
     static_assert(std::is_same_v<callable_traits<decltype(&void_fn)>::result_type, void>);
@@ -139,7 +139,7 @@ BOOST_AUTO_TEST_CASE(test_matcher_callable_traits)
 
 BOOST_AUTO_TEST_CASE(test_matcher_callable_traits_aliases)
 {
-    using namespace boost::web;
+    using namespace boost::taar;
 
     static_assert(callable_args_count<decltype(my_function)> == 3);
     static_assert(std::is_same_v<

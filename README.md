@@ -1,13 +1,14 @@
-# boost.web
+# boost.taar
 
 ***⚠️ Warning: This library is not production ready and is a work in progress. Use
 with care.***
 
-A header-only library created to facilitate web server development built on top
-of other boost libraries like boost.beast, boost.asio, boost.url, boost.json, etc.
+A header-only library created to facilitate web server and client development
+built on top of other boost libraries like boost.beast, boost.asio, boost.url,
+boost.json, etc.
 
 <!--toc:start-->
-- [boost.web](#boostweb)
+- [boost.taar](#boosttaar)
   - [Overview](#overview)
     - [Requirements](#requirements)
     - [Quick Look](#quick-look)
@@ -31,9 +32,9 @@ of other boost libraries like boost.beast, boost.asio, boost.url, boost.json, et
 
 ## Overview
 
-Boost.web is a portable C++ header-only library which provides convenient tools
-for web server development. This library is built on top of other boost libraries,
-like Boost.ASIO, Boost.Beast, Boost.URL, and Boost.JSON, and Boost.system.
+Boost.taar is a portable C++ header-only library which provides convenient tools
+for web server and client development. This library is built on top of other boost
+libraries, like Boost.ASIO, Boost.Beast, Boost.URL, and Boost.JSON, and Boost.system.
 
 ### Requirements
 
@@ -53,21 +54,21 @@ complete examples, look under the examples directory.
 Accepts an HTTP GET request for specific target and respond with a stock text.
 
 ```C++
-web::session::http http_session;
+taar::session::http http_session;
 http_session.register_request_handler(
     method == http::verb::get && target == "/api/version",
-    web::handler::rest([]{ return "1.0"; }
+    taar::handler::rest([]{ return "1.0"; }
 ));
 
-web::cancellation_signals cancellation_signals;
+taar::cancellation_signals cancellation_signals;
 co_spawn(
     io_context,
-    web::server::tcp(
+    taar::server::tcp(
         "0.0.0.0",
         "8090",
         http_session,
         cancellation_signals),
-    bind_cancellation_slot(cancellation_signals.slot(), web::ignore_and_rethrow));
+    bind_cancellation_slot(cancellation_signals.slot(), taar::ignore_and_rethrow));
 
 io_context.run();
 ```
@@ -78,10 +79,10 @@ Accepts an HTTP GET request with a path template, calculates the sum for two of
 the path arguments and respond with a JSON value.
 
 ```C++
-web::session::http http_session;
+taar::session::http http_session;
 http_session.register_request_handler(
     method == http::verb::get && target == "/api/sum/{a}/{b}",
-    web::handler::rest([](int a, int b)
+    taar::handler::rest([](int a, int b)
     {
         return boost::json::value {
             {"a", a},
@@ -89,19 +90,19 @@ http_session.register_request_handler(
             {"result", a + b}
         };
     },
-    web::handler::path_arg("a"),
-    web::handler::path_arg("b")
+    taar::handler::path_arg("a"),
+    taar::handler::path_arg("b")
 ));
 
-web::cancellation_signals cancellation_signals;
+taar::cancellation_signals cancellation_signals;
 co_spawn(
     io_context,
-    web::server::tcp(
+    taar::server::tcp(
         "0.0.0.0",
         "8090",
         http_session,
         cancellation_signals),
-    bind_cancellation_slot(cancellation_signals.slot(), web::ignore_and_rethrow));
+    bind_cancellation_slot(cancellation_signals.slot(), taar::ignore_and_rethrow));
 
 io_context.run();
 ```
@@ -112,25 +113,25 @@ Accepts an HTTP POST request for a specific target, expects that a query paramet
 called "test_arg" to be present and passes the value of it to the handler lambda.
 
 ```C++
-web::session::http http_session;
+taar::session::http http_session;
 http_session.register_request_handler(
     method == http::verb::post && target == "/api/store/",
-    web::handler::rest([](const std::string& test_arg)
+    taar::handler::rest([](const std::string& test_arg)
     {
         std::cout << "Received test_arg = " << test_arg << '\n';
     },
-    web::handler::query_arg("test_arg")
+    taar::handler::query_arg("test_arg")
 ));
 
-web::cancellation_signals cancellation_signals;
+taar::cancellation_signals cancellation_signals;
 co_spawn(
     io_context,
-    web::server::tcp(
+    taar::server::tcp(
         "0.0.0.0",
         "8090",
         http_session,
         cancellation_signals),
-    bind_cancellation_slot(cancellation_signals.slot(), web::ignore_and_rethrow));
+    bind_cancellation_slot(cancellation_signals.slot(), taar::ignore_and_rethrow));
 
 io_context.run();
 ```
@@ -141,21 +142,21 @@ Accepts an HTTP GET request for all targets under the specified template and res
 with the requested file content with a correct mime-type.
 
 ```C++
-web::session::http http_session;
+taar::session::http http_session;
 http_session.register_request_handler(
     method == http::verb::get && target == "/{*}",
-    web::handler::htdocs {argv[2]}
+    taar::handler::htdocs {argv[2]}
 );
 
-web::cancellation_signals cancellation_signals;
+taar::cancellation_signals cancellation_signals;
 co_spawn(
     io_context,
-    web::server::tcp(
+    taar::server::tcp(
         "0.0.0.0",
         "8090",
         http_session,
         cancellation_signals),
-    bind_cancellation_slot(cancellation_signals.slot(), web::ignore_and_rethrow));
+    bind_cancellation_slot(cancellation_signals.slot(), taar::ignore_and_rethrow));
 
 io_context.run();
 ```
@@ -166,12 +167,12 @@ Accepts an HTTP PUT request for all targets under the specified template and
 respond with a custom text message.
 
 ```C++
-web::session::http http_session;
+taar::session::http http_session;
 http_session.register_request_handler(
     method == http::verb::put && target == "/special/{*}",
     [](
         const http::request<http::empty_body>& request,
-        const web::matcher::context& context) -> http::message_generator
+        const taar::matcher::context& context) -> http::message_generator
     {
         http::response<http::string_body> res {
             boost::beast::http::status::ok,
@@ -184,15 +185,15 @@ http_session.register_request_handler(
     }
 );
 
-web::cancellation_signals cancellation_signals;
+taar::cancellation_signals cancellation_signals;
 co_spawn(
     io_context,
-    web::server::tcp(
+    taar::server::tcp(
         "0.0.0.0",
         "8090",
         http_session,
         cancellation_signals),
-    bind_cancellation_slot(cancellation_signals.slot(), web::ignore_and_rethrow));
+    bind_cancellation_slot(cancellation_signals.slot(), taar::ignore_and_rethrow));
 
 io_context.run();
 ```
@@ -231,7 +232,7 @@ cmake --build build
 ## To run the unit-tests after the build
 
 ```bash
-build/test/boost-web-test
+build/test/boost-taar-test
 ```
 
 ## To install under the local prefix directory ./out
@@ -251,7 +252,7 @@ cmake --build build -j --target http_server && build/examples/http_server 8082 .
 ```bash
 version=$(git describe --abbrev=0 | grep -o '[0-9]\+.[0-9]\+.[0-9]\+')
 conan create . --version "$version" --build=missing
-conan upload "boost-web/$version" --only-recipe --remote your_conan_remote
+conan upload "boost-taar/$version" --only-recipe --remote your_conan_remote
 ```
 
 ## Tested compilers and platforms

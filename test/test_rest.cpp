@@ -4,17 +4,17 @@
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
-// Official repository: https://github.com/rjahanbakhshi/boost-web
+// Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
 
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/file_body.hpp>
-#include <boost/web/session/http.hpp>
-#include <boost/web/handler/rest.hpp>
-#include "boost/web/handler/rest_arg.hpp"
-#include <boost/web/matcher/method.hpp>
-#include <boost/web/matcher/target.hpp>
-#include <boost/web/matcher/context.hpp>
+#include <boost/taar/session/http.hpp>
+#include <boost/taar/handler/rest.hpp>
+#include "boost/taar/handler/rest_arg.hpp"
+#include <boost/taar/matcher/method.hpp>
+#include <boost/taar/matcher/target.hpp>
+#include <boost/taar/matcher/context.hpp>
 #include <boost/beast/http/message.hpp>
 #include <boost/beast/http/parser.hpp>
 #include <boost/beast/http/string_body.hpp>
@@ -55,11 +55,11 @@ boost::beast::http::response<BodyType> to_response(
 BOOST_AUTO_TEST_CASE(test_rest_arg_provider_request_type)
 {
     namespace http = boost::beast::http;
-    namespace web = boost::web;
-    using web::handler::detail::arg_provider_request;
-    using web::handler::detail::common_requests_type_t;
-    using web::handler::detail::compatible_arg_providers;
-    using web::matcher::context;
+    namespace taar= boost::taar;
+    using taar::handler::detail::arg_provider_request;
+    using taar::handler::detail::common_requests_type_t;
+    using taar::handler::detail::compatible_arg_providers;
+    using taar::matcher::context;
     using req_header = http::request_header<>;
     using string_req = http::request<http::string_body>;
     using empty_req = http::request<http::empty_body>;
@@ -104,15 +104,15 @@ void voidfn(int i, int j)
 BOOST_AUTO_TEST_CASE(test_rest_void)
 {
     namespace http = boost::beast::http;
-    namespace web = boost::web;
-    using web::matcher::context;
-    using web::handler::path_arg;
+    namespace taar = boost::taar;
+    using taar::matcher::context;
+    using taar::handler::path_arg;
 
     http::request<http::empty_body> req;
     context ctx;
     ctx.path_args = {{"a", "13"}, {"b", "42"}};
 
-    auto rh1 = web::handler::rest(
+    auto rh1 = taar::handler::rest(
         &voidfn,
         path_arg("a"),
         path_arg("b"));
@@ -121,7 +121,7 @@ BOOST_AUTO_TEST_CASE(test_rest_void)
     BOOST_TEST(resp1.body().empty());
     BOOST_TEST(resp1.count(http::field::content_type) == 0);
 
-    auto rh2 = web::handler::rest(
+    auto rh2 = taar::handler::rest(
         voidfn,
         path_arg("a"),
         path_arg("b"));
@@ -144,18 +144,18 @@ struct obj_handler
 BOOST_AUTO_TEST_CASE(test_rest)
 {
     namespace http = boost::beast::http;
-    namespace web = boost::web;
-    using web::matcher::context;
+    namespace taar = boost::taar;
+    using taar::matcher::context;
 
     http::request<http::empty_body> req;
     context ctx;
 
-    auto rh1 = web::handler::rest(const_obj_handler());
+    auto rh1 = taar::handler::rest(const_obj_handler());
     auto mg1 = rh1(req, ctx);
     auto resp1 = to_response<http::string_body>(mg1);
     BOOST_TEST(resp1.body() == "blah1");
 
-    auto rh2 = web::handler::rest(obj_handler());
+    auto rh2 = taar::handler::rest(obj_handler());
     auto mg2 = rh2(req, ctx);
     auto resp2 = to_response<http::string_body>(mg2);
     BOOST_TEST(resp2.body() == "blah2");
@@ -169,15 +169,15 @@ auto sum(int i, int j)
 BOOST_AUTO_TEST_CASE(test_rest_sum_target)
 {
     namespace http = boost::beast::http;
-    namespace web = boost::web;
-    using web::matcher::context;
-    using web::handler::path_arg;
+    namespace taar = boost::taar;
+    using taar::matcher::context;
+    using taar::handler::path_arg;
 
     http::request<http::empty_body> req;
     context ctx;
     ctx.path_args = {{"a", "13"}, {"b", "42"}};
 
-    auto rh_sum = web::handler::rest(
+    auto rh_sum = taar::handler::rest(
         sum,
         path_arg("a"),
         path_arg("b"));
@@ -190,14 +190,14 @@ BOOST_AUTO_TEST_CASE(test_rest_sum_target)
 BOOST_AUTO_TEST_CASE(test_rest_sum_query)
 {
     namespace http = boost::beast::http;
-    namespace web = boost::web;
-    using web::matcher::context;
-    using web::handler::query_arg;
+    namespace taar = boost::taar;
+    using taar::matcher::context;
+    using taar::handler::query_arg;
 
     http::request<http::empty_body> req{http::verb::get, "/?a=13&b=42", 10};
     context ctx;
 
-    auto rh_sum = web::handler::rest(
+    auto rh_sum = taar::handler::rest(
         sum,
         query_arg("a"),
         query_arg("b"));
@@ -210,16 +210,16 @@ BOOST_AUTO_TEST_CASE(test_rest_sum_query)
 BOOST_AUTO_TEST_CASE(test_rest_sum_header)
 {
     namespace http = boost::beast::http;
-    namespace web = boost::web;
-    using web::matcher::context;
-    using web::handler::header_arg;
+    namespace taar = boost::taar;
+    using taar::matcher::context;
+    using taar::handler::header_arg;
 
     http::request<http::empty_body> req;
     context ctx;
     req.insert("a", "13");
     req.insert("b", "42");
 
-    auto rh_sum = web::handler::rest(
+    auto rh_sum = taar::handler::rest(
         sum,
         header_arg("a"),
         header_arg("b"));
@@ -237,14 +237,14 @@ auto stock_string()
 BOOST_AUTO_TEST_CASE(test_rest_stock_string)
 {
     namespace http = boost::beast::http;
-    namespace web = boost::web;
-    using web::matcher::context;
-    using web::handler::header_arg;
+    namespace taar = boost::taar;
+    using taar::matcher::context;
+    using taar::handler::header_arg;
 
     http::request<http::empty_body> req;
     context ctx;
 
-    auto rh = web::handler::rest(stock_string);
+    auto rh = taar::handler::rest(stock_string);
     auto mg = rh(req, ctx);
     auto resp = to_response<http::string_body>(mg);
     BOOST_TEST(resp.body() == stock_string());
@@ -259,15 +259,15 @@ auto to_json(std::string value)
 BOOST_AUTO_TEST_CASE(test_rest_string_to_json_response)
 {
     namespace http = boost::beast::http;
-    namespace web = boost::web;
-    using web::matcher::context;
-    using web::handler::header_arg;
+    namespace taar = boost::taar;
+    using taar::matcher::context;
+    using taar::handler::header_arg;
 
     http::request<http::empty_body> req;
     context ctx;
     req.insert("value", "Hello");
 
-    auto rh = web::handler::rest(to_json, header_arg("value"));
+    auto rh = taar::handler::rest(to_json, header_arg("value"));
     auto mg = rh(req, ctx);
     auto resp = to_response<http::string_body>(mg);
     BOOST_TEST(resp.body() == R"({"value":"Hello"})");
@@ -301,15 +301,15 @@ void tag_invoke(
 BOOST_AUTO_TEST_CASE(test_rest_object_to_json_response)
 {
     namespace http = boost::beast::http;
-    namespace web = boost::web;
-    using web::matcher::context;
-    using web::handler::header_arg;
+    namespace taar = boost::taar;
+    using taar::matcher::context;
+    using taar::handler::header_arg;
 
     http::request<http::empty_body> req;
     context ctx;
     req.insert("value", "Hello");
 
-    auto rh = web::handler::rest(
+    auto rh = taar::handler::rest(
         [](std::string_view s)
         {
             return jsonable{.i = 13, .s = std::string{s}};
@@ -329,9 +329,9 @@ std::string accepts_jsonable(const jsonable& j)
 BOOST_AUTO_TEST_CASE(test_rest_invoke_with_jsonable)
 {
     namespace http = boost::beast::http;
-    namespace web = boost::web;
-    using web::matcher::context;
-    using web::handler::json_body_arg;
+    namespace taar = boost::taar;
+    using taar::matcher::context;
+    using taar::handler::json_body_arg;
 
     http::request<http::string_body> req;
     context ctx;
@@ -339,7 +339,7 @@ BOOST_AUTO_TEST_CASE(test_rest_invoke_with_jsonable)
     req.insert(http::field::content_type, "application/json");
     req.prepare_payload();
 
-    auto rh = web::handler::rest(accepts_jsonable, json_body_arg());
+    auto rh = taar::handler::rest(accepts_jsonable, json_body_arg());
     auto mg = rh(req, ctx);
     auto resp = to_response<http::string_body>(mg);
     BOOST_TEST(resp.body() == "Hello = 13");
@@ -362,16 +362,16 @@ struct concat_handler
 //BOOST_AUTO_TEST_CASE(test_rest_explicit_signature)
 //{
 //    namespace http = boost::beast::http;
-//    namespace web = boost::web;
-//    using web::matcher::context;
-//    using web::handler::path_arg;
+//    namespace taar = boost::taar;
+//    using taar::matcher::context;
+//    using taar::handler::path_arg;
 //
 //    http::request<http::string_body> req;
 //    context ctx;
 //    ctx.path_args = {{"a", "13"}, {"b", "42"}};
 //
 //    concat_handler bh;
-//    auto rh_sum = web::handler::rest(
+//    auto rh_sum = taar::handler::rest(
 //        std::function{std::bind(&concat_handler::concat, &bh)},
 //        path_arg("a"),
 //        path_arg("b"));
@@ -384,9 +384,9 @@ struct concat_handler
 BOOST_AUTO_TEST_CASE(test_rest_mfn)
 {
     namespace http = boost::beast::http;
-    namespace web = boost::web;
-    using web::matcher::context;
-    using web::handler::header_arg;
+    namespace taar = boost::taar;
+    using taar::matcher::context;
+    using taar::handler::header_arg;
 
     http::request<http::empty_body> req;
     context ctx;
@@ -395,7 +395,7 @@ BOOST_AUTO_TEST_CASE(test_rest_mfn)
 
     concat_handler bh;
 
-    auto rh = web::handler::rest(
+    auto rh = taar::handler::rest(
         &concat_handler::concat,
         &bh,
         header_arg("a"),
@@ -405,7 +405,7 @@ BOOST_AUTO_TEST_CASE(test_rest_mfn)
     BOOST_TEST(resp.body() == "1342");
     BOOST_TEST(resp[http::field::content_type] == "text/plain");
 
-    auto rhc = web::handler::rest(
+    auto rhc = taar::handler::rest(
         &concat_handler::const_concat,
         bh,
         header_arg("a"),
@@ -419,9 +419,9 @@ BOOST_AUTO_TEST_CASE(test_rest_mfn)
 BOOST_AUTO_TEST_CASE(test_rest_string_body)
 {
     namespace http = boost::beast::http;
-    namespace web = boost::web;
-    using web::matcher::context;
-    using web::handler::string_body_arg;
+    namespace taar = boost::taar;
+    using taar::matcher::context;
+    using taar::handler::string_body_arg;
 
     http::request<http::string_body> req;
     req.body() = "Hello";
@@ -431,7 +431,7 @@ BOOST_AUTO_TEST_CASE(test_rest_string_body)
 
     auto l = [](const std::string& str) { return str + " world!"; };
 
-    auto rh = web::handler::rest(
+    auto rh = taar::handler::rest(
         l,
         string_body_arg());
     auto mg = rh(req, ctx);

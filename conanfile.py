@@ -3,14 +3,14 @@ from conan import ConanFile
 from conan.tools.files import copy
 from conan.tools.cmake import cmake_layout, CMake
 
-class BoostWeb(ConanFile):
-    name = "boost-web"
+class BoostTaar(ConanFile):
+    name = "boost-taar"
     version = "0.0.1"
     license = "Boost Software License, Version 1.0"
     author = "Reza Jahanbakhshi <reza.jahanbakhshi@gmail.com>"
-    url = "https://github.com/rjahanbakhshi/boost.web"
+    url = "https://github.com/rjahanbakhshi/boost.taar"
     description = "A header-only library for web server and client development"
-    topics = ("boost", "asio", "http", "network", "web")
+    topics = ("boost", "asio", "http", "network", "web", "taar")
     settings = "os", "arch", "compiler", "build_type"
     exports_sources = [
         "boost/*",
@@ -34,7 +34,7 @@ class BoostWeb(ConanFile):
         cmake.configure()
         cmake.build()
         if not self.conf.get("tools.build:skip_test", default=False):
-            self.run(os.path.join(self.cpp.build.bindir, "test/boost-web-test"))
+            self.run(os.path.join(self.cpp.build.bindir, "test/boost-taar-test"))
         cmake.install()
 
     def package(self):

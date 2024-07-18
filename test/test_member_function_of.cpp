@@ -4,10 +4,10 @@
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
-// Official repository: https://github.com/rjahanbakhshi/boost-web
+// Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
 
-#include <boost/web/core/member_function_of.hpp>
+#include <boost/taar/core/member_function_of.hpp>
 #include <boost/test/unit_test.hpp>
 
 namespace {
@@ -24,7 +24,7 @@ struct s2
 
 BOOST_AUTO_TEST_CASE(test_member_function_of_with)
 {
-    using namespace boost::web;
+    using namespace boost::taar;
     static_assert(member_function_of<decltype(&s1::fn1), s1>);
     static_assert(member_function_of<decltype(&s1::fn1), s1 const>);
     static_assert(member_function_of<decltype(&s1::fn1), s1 volatile>);
