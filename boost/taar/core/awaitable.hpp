@@ -7,8 +7,8 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
 
-#ifndef BOOST_TAAR_HTTP_CORE_AWAITABLE_HPP
-#define BOOST_TAAR_HTTP_CORE_AWAITABLE_HPP
+#ifndef BOOST_TAAR_CORE_AWAITABLE_HPP
+#define BOOST_TAAR_CORE_AWAITABLE_HPP
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/awaitable.hpp>
@@ -20,5 +20,5 @@ using awaitable = boost::asio::awaitable<T, boost::asio::io_context::executor_ty
 
 } // namespace boost::taar
 
-#endif // BOOST_TAAR_HTTP_CORE_AWAITABLE_HPP
+#endif // BOOST_TAAR_CORE_AWAITABLE_HPP
 

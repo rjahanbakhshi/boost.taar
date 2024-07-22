@@ -7,8 +7,8 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
 
-#ifndef BOOST_TAAR_MATCHER_SUPER_TYPE_HPP
-#define BOOST_TAAR_MATCHER_SUPER_TYPE_HPP
+#ifndef BOOST_TAAR_CORE_SUPER_TYPE_HPP
+#define BOOST_TAAR_CORE_SUPER_TYPE_HPP
 
 #include <concepts>
 #include <type_traits>
@@ -81,4 +81,4 @@ using super_type_t = typename super_type<T...>::type;
 
 } // namespace boost::taar
 
-#endif // BOOST_TAAR_MATCHER_SUPER_TYPE_HPP
+#endif // BOOST_TAAR_CORE_SUPER_TYPE_HPP

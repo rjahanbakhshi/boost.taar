@@ -7,8 +7,8 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
 
-#ifndef BOOST_TAAR_HTTP_CORE_REBIND_EXECUTOR_HPP
-#define BOOST_TAAR_HTTP_CORE_REBIND_EXECUTOR_HPP
+#ifndef BOOST_TAAR_CORE_REBIND_EXECUTOR_HPP
+#define BOOST_TAAR_CORE_REBIND_EXECUTOR_HPP
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/use_awaitable.hpp>
@@ -28,4 +28,4 @@ using rebind_executor = typename T::template
 
 } // namespace boost::taar
 
-#endif // BOOST_TAAR_HTTP_CORE_REBIND_EXECUTOR_HPP
+#endif // BOOST_TAAR_CORE_REBIND_EXECUTOR_HPP

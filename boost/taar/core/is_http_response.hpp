@@ -7,8 +7,8 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
 
-#ifndef BOOST_TAAR_HTTP_CORE_IGNORE_AND_RETHROW_HPP
-#define BOOST_TAAR_HTTP_CORE_IGNORE_AND_RETHROW_HPP
+#ifndef BOOST_TAAR_CORE_IS_HTTP_RESPONSE_HPP
+#define BOOST_TAAR_CORE_IS_HTTP_RESPONSE_HPP
 
 #include <boost/beast/http/message.hpp>
 
@@ -36,4 +36,4 @@ inline constexpr bool is_http_response_v = is_http_response<T>::value;
 
 } // namespace boost::taar
 
-#endif // BOOST_TAAR_HTTP_CORE_IGNORE_AND_RETHROW_HPP
+#endif // BOOST_TAAR_CORE_IS_HTTP_RESPONSE_HPP

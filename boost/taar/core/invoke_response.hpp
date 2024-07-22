@@ -7,8 +7,8 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
 
-#ifndef BOOST_TAAR_HTTP_CORE_INVOKE_RESPONSE_HPP
-#define BOOST_TAAR_HTTP_CORE_INVOKE_RESPONSE_HPP
+#ifndef BOOST_TAAR_CORE_INVOKE_RESPONSE_HPP
+#define BOOST_TAAR_CORE_INVOKE_RESPONSE_HPP
 
 #include <boost/taar/core/always_false.hpp>
 #include <boost/taar/core/is_http_response.hpp>
@@ -114,5 +114,5 @@ static boost::beast::http::message_generator invoke_response(
 
 } // namespace boost::taar
 
-#endif // BOOST_TAAR_HTTP_CORE_INVOKE_RESPONSE_HPP
+#endif // BOOST_TAAR_CORE_INVOKE_RESPONSE_HPP
 

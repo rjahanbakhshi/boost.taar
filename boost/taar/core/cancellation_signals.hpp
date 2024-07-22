@@ -7,8 +7,8 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
 
-#ifndef BOOST_TAAR_HTTP_CORE_CANCELLATION_SIGNALS_HPP
-#define BOOST_TAAR_HTTP_CORE_CANCELLATION_SIGNALS_HPP
+#ifndef BOOST_TAAR_CORE_CANCELLATION_SIGNALS_HPP
+#define BOOST_TAAR_CORE_CANCELLATION_SIGNALS_HPP
 
 #include <boost/asio/cancellation_signal.hpp>
 #include <list>
@@ -56,4 +56,4 @@ private:
 
 } // namespace boost::taar
 
-#endif // BOOST_TAAR_HTTP_CORE_CANCELLATION_SIGNALS_HPP
+#endif // BOOST_TAAR_CORE_CANCELLATION_SIGNALS_HPP

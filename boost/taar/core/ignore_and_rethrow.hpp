@@ -7,8 +7,8 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
 
-#ifndef BOOST_TAAR_HTTP_CORE_IGNORE_AND_RETHROW_HPP
-#define BOOST_TAAR_HTTP_CORE_IGNORE_AND_RETHROW_HPP
+#ifndef BOOST_TAAR_CORE_IGNORE_AND_RETHROW_HPP
+#define BOOST_TAAR_CORE_IGNORE_AND_RETHROW_HPP
 
 #include <exception>
 
@@ -28,4 +28,4 @@ static const ignore_and_rethrow_t ignore_and_rethrow;
 
 } // namespace boost::taar
 
-#endif // BOOST_TAAR_HTTP_CORE_IGNORE_AND_RETHROW_HPP
+#endif // BOOST_TAAR_CORE_IGNORE_AND_RETHROW_HPP
