@@ -5,6 +5,7 @@ if(NOT CMAKE_EXPORT_COMPILE_COMMANDS)
 endif()
 
 set(ENABLE_CLANG_TIDY OFF CACHE BOOL "Enable clang-tidy for supported targets.")
+set(ENABLE_UNITY_BUILD OFF CACHE BOOL "Enable unity build.")
 
 project(
     boost-taar
@@ -26,6 +27,7 @@ target_sources(
         boost/taar/core/cancellation_signals.hpp
         boost/taar/core/ignore_and_rethrow.hpp
         boost/taar/core/invoke_response.hpp
+        boost/taar/core/is_http_response.hpp
         boost/taar/core/member_function_of.hpp
         boost/taar/core/rebind_executor.hpp
         boost/taar/core/specialization_of.hpp

@@ -141,4 +141,26 @@ BOOST_AUTO_TEST_CASE(test_http_session)
     );
 }
 
+BOOST_AUTO_TEST_CASE(test_http_session_soft_error_handler)
+{
+    taar::session::http http_session;
+
+    http_session.set_soft_error_handler(
+        [this](std::exception_ptr eptr)
+        {
+            try
+            {
+                std::rethrow_exception(eptr);
+            }
+            catch (...)
+            {
+                http::response<http::string_body> response {
+                    boost::beast::http::status::internal_server_error,
+                    11};
+                return response;
+            }
+        }
+    );
+}
+
 } // namespace

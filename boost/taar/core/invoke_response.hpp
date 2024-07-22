@@ -11,6 +11,7 @@
 #define BOOST_TAAR_HTTP_CORE_INVOKE_RESPONSE_HPP
 
 #include <boost/taar/core/always_false.hpp>
+#include <boost/taar/core/is_http_response.hpp>
 #include <boost/taar/core/callable_traits.hpp>
 #include <boost/taar/core/specialization_of.hpp>
 #include <boost/beast/http/message_generator.hpp>
@@ -68,7 +69,7 @@ static boost::beast::http::message_generator invoke_response(
         response.prepare_payload();
         return response;
     }
-    else if constexpr (specialization_of<http::response, result_type>)
+    else if constexpr (is_http_response_v<result_type>)
     {
         return std::invoke(std::forward<CallableType>(callable), std::forward<ArgsType>(args)...);
     }

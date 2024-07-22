@@ -4,6 +4,7 @@ find_package(Boost 1.83 COMPONENTS test REQUIRED)
 
 add_executable(${PROJECT_NAME})
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 23)
+set_target_properties(${PROJECT_NAME} PROPERTIES UNITY_BUILD ${ENABLE_UNITY_BUILD})
 target_sources(
     ${PROJECT_NAME}
     PRIVATE
@@ -11,6 +12,7 @@ target_sources(
         test_callable_with.cpp
         test_header.cpp
         test_http_session.cpp
+        test_is_http_response.cpp
         test_matcher.cpp
         test_member_function_of.cpp
         test_method.cpp
