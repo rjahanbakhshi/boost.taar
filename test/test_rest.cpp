@@ -70,31 +70,31 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_provider_request_type)
     using provider_empty = void(const empty_req&, const context&);
     using provider_file = void(const file_req&, const context&);
 
-    static_assert(std::is_same_v<arg_provider_request<provider_header>, req_header>);
-    static_assert(std::is_same_v<arg_provider_request<provider_string>, string_req>);
-    static_assert(std::is_same_v<arg_provider_request<provider_empty>, empty_req>);
-    static_assert(std::is_same_v<arg_provider_request<provider_file>, file_req>);
+    static_assert(std::is_same_v<arg_provider_request<provider_header>, req_header>, "Failed!");
+    static_assert(std::is_same_v<arg_provider_request<provider_string>, string_req>, "Failed!");
+    static_assert(std::is_same_v<arg_provider_request<provider_empty>, empty_req>, "Failed!");
+    static_assert(std::is_same_v<arg_provider_request<provider_file>, file_req>, "Failed!");
 
-    static_assert(std::is_same_v<common_requests_type_t<>, empty_req>);
-    static_assert(std::is_same_v<common_requests_type_t<provider_header>, empty_req>);
-    static_assert(std::is_same_v<common_requests_type_t<provider_string>, string_req>);
-    static_assert(std::is_same_v<common_requests_type_t<provider_empty>, empty_req>);
-    static_assert(std::is_same_v<common_requests_type_t<provider_file>, file_req>);
+    static_assert(std::is_same_v<common_requests_type_t<>, empty_req>, "Failed!");
+    static_assert(std::is_same_v<common_requests_type_t<provider_header>, empty_req>, "Failed!");
+    static_assert(std::is_same_v<common_requests_type_t<provider_string>, string_req>, "Failed!");
+    static_assert(std::is_same_v<common_requests_type_t<provider_empty>, empty_req>, "Failed!");
+    static_assert(std::is_same_v<common_requests_type_t<provider_file>, file_req>, "Failed!");
 
-    static_assert(compatible_arg_providers<provider_header, provider_string>);
-    static_assert(compatible_arg_providers<provider_header, provider_empty>);
-    static_assert(compatible_arg_providers<provider_header, provider_file>);
-    static_assert(compatible_arg_providers<provider_header, provider_header>);
-    static_assert(!compatible_arg_providers<provider_string, provider_file>);
-    static_assert(compatible_arg_providers<provider_header, provider_header, provider_header>);
-    static_assert(!compatible_arg_providers<provider_header, provider_string, provider_file>);
-    static_assert(!compatible_arg_providers<provider_empty, provider_string, provider_file>);
+    static_assert(compatible_arg_providers<provider_header, provider_string>, "Failed!");
+    static_assert(compatible_arg_providers<provider_header, provider_empty>, "Failed!");
+    static_assert(compatible_arg_providers<provider_header, provider_file>, "Failed!");
+    static_assert(compatible_arg_providers<provider_header, provider_header>, "Failed!");
+    static_assert(!compatible_arg_providers<provider_string, provider_file>, "Failed!");
+    static_assert(compatible_arg_providers<provider_header, provider_header, provider_header>, "Failed!");
+    static_assert(!compatible_arg_providers<provider_header, provider_string, provider_file>, "Failed!");
+    static_assert(!compatible_arg_providers<provider_empty, provider_string, provider_file>, "Failed!");
 
-    static_assert(std::is_same_v<common_requests_type_t<provider_string, provider_header>, string_req>);
-    static_assert(std::is_same_v<common_requests_type_t<provider_empty, provider_header>, empty_req>);
-    static_assert(std::is_same_v<common_requests_type_t<provider_file, provider_header>, file_req>);
-    static_assert(std::is_same_v<common_requests_type_t<provider_header, provider_header>, empty_req>);
-    static_assert(std::is_same_v<common_requests_type_t<provider_header, provider_header, provider_string>, string_req>);
+    static_assert(std::is_same_v<common_requests_type_t<provider_string, provider_header>, string_req>, "Failed!");
+    static_assert(std::is_same_v<common_requests_type_t<provider_empty, provider_header>, empty_req>, "Failed!");
+    static_assert(std::is_same_v<common_requests_type_t<provider_file, provider_header>, file_req>, "Failed!");
+    static_assert(std::is_same_v<common_requests_type_t<provider_header, provider_header>, empty_req>, "Failed!");
+    static_assert(std::is_same_v<common_requests_type_t<provider_header, provider_header, provider_string>, string_req>, "Failed!");
 }
 
 void voidfn(int i, int j)

@@ -29,10 +29,10 @@ public:
 } // namespace detail
 
 template<class T>
-using is_http_response = typename detail::is_http_response_impl<T>::type;
-
-template<class T>
-inline constexpr bool is_http_response_v = is_http_response<T>::value;
+concept is_http_response = requires
+{
+    requires detail::is_http_response_impl<T>::type::value;
+};
 
 } // namespace boost::taar
 

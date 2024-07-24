@@ -44,7 +44,7 @@ struct have_super_type<T, U, Rest...>
 };
 
 template <typename... T>
-constexpr inline bool have_super_type_v = have_super_type<T...>::value;
+inline constexpr bool have_super_type_v = have_super_type<T...>::value;
 
 // Type trait evaluating to the super type between two types
 template <typename... T>

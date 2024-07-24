@@ -7,5 +7,13 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
 
-#define BOOST_TEST_MODULE test_matcher
-#include <boost/test/included/unit_test.hpp>
+#ifndef BOOST_TAAR_CORE_RESPONSE_FROM_TAG_HPP
+#define BOOST_TAAR_CORE_RESPONSE_FROM_TAG_HPP
+
+namespace boost::taar {
+
+struct response_from_tag {};
+
+} // namespace boost::taar
+
+#endif // BOOST_TAAR_CORE_RESPONSE_FROM_TAG_HPP

@@ -69,7 +69,7 @@ static boost::beast::http::message_generator invoke_response(
         response.prepare_payload();
         return response;
     }
-    else if constexpr (is_http_response_v<result_type>)
+    else if constexpr (is_http_response<result_type>)
     {
         return std::invoke(std::forward<CallableType>(callable), std::forward<ArgsType>(args)...);
     }

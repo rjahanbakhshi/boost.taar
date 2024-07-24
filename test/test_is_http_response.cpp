@@ -31,15 +31,15 @@ using file_response = http::response<http::file_body>;
 BOOST_AUTO_TEST_CASE(test_is_response)
 {
     using namespace boost::taar;
-    static_assert(is_http_response_v<empty_response>);
-    static_assert(is_http_response_v<string_response>);
-    static_assert(is_http_response_v<file_response>);
+    static_assert(is_http_response<empty_response>, "Failed!");
+    static_assert(is_http_response<string_response>, "Failed!");
+    static_assert(is_http_response<file_response>, "Failed!");
 
-    static_assert(!is_http_response_v<http::request<http::empty_body>>);
-    static_assert(!is_http_response_v<not_a_response>);
-    static_assert(!is_http_response_v<std::string>);
-    static_assert(!is_http_response_v<float>);
-    static_assert(!is_http_response_v<int>);
+    static_assert(!is_http_response<http::request<http::empty_body>>, "Failed!");
+    static_assert(!is_http_response<not_a_response>, "Failed!");
+    static_assert(!is_http_response<std::string>, "Failed!");
+    static_assert(!is_http_response<float>, "Failed!");
+    static_assert(!is_http_response<int>, "Failed!");
 }
 
 } // namespace

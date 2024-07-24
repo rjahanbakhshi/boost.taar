@@ -56,16 +56,16 @@ BOOST_AUTO_TEST_CASE(test_matcher_operand_free_function)
     BOOST_TEST(!(contextual_bool_operand && !free_function_operand)({}, ctx));
     BOOST_TEST((contextual_bool_operand || free_function_operand)({}, ctx));
 
-    static_assert(!decltype(free_function_operand)::with_parsed_target);
-    static_assert(!decltype(contextual_bool_operand)::with_parsed_target);
-    static_assert(!decltype(!free_function_operand)::with_parsed_target);
-    static_assert(!decltype(!contextual_bool_operand)::with_parsed_target);
+    static_assert(!decltype(free_function_operand)::with_parsed_target, "Failed!");
+    static_assert(!decltype(contextual_bool_operand)::with_parsed_target, "Failed!");
+    static_assert(!decltype(!free_function_operand)::with_parsed_target, "Failed!");
+    static_assert(!decltype(!contextual_bool_operand)::with_parsed_target, "Failed!");
 
-    static_assert(!decltype(free_function_operand && contextual_bool_operand)::with_parsed_target);
-    static_assert(!decltype(contextual_bool_operand && free_function_operand)::with_parsed_target);
+    static_assert(!decltype(free_function_operand && contextual_bool_operand)::with_parsed_target, "Failed!");
+    static_assert(!decltype(contextual_bool_operand && free_function_operand)::with_parsed_target, "Failed!");
 
-    static_assert(!decltype(free_function_operand || contextual_bool_operand)::with_parsed_target);
-    static_assert(!decltype(contextual_bool_operand || free_function_operand)::with_parsed_target);
+    static_assert(!decltype(free_function_operand || contextual_bool_operand)::with_parsed_target, "Failed!");
+    static_assert(!decltype(contextual_bool_operand || free_function_operand)::with_parsed_target, "Failed!");
 }
 
 BOOST_AUTO_TEST_CASE(test_matcher_operand_free_function_with_target)
@@ -84,14 +84,14 @@ BOOST_AUTO_TEST_CASE(test_matcher_operand_free_function_with_target)
     BOOST_TEST(!(free_function_target_operand && !free_function_operand)({}, ctx));
     BOOST_TEST((free_function_target_operand || free_function_operand)({}, ctx));
 
-    static_assert(decltype(free_function_target_operand)::with_parsed_target);
-    static_assert(decltype(!free_function_target_operand)::with_parsed_target);
+    static_assert(decltype(free_function_target_operand)::with_parsed_target, "Failed!");
+    static_assert(decltype(!free_function_target_operand)::with_parsed_target, "Failed!");
 
-    static_assert(decltype(free_function_operand && free_function_target_operand)::with_parsed_target);
-    static_assert(decltype(free_function_target_operand && free_function_operand)::with_parsed_target);
+    static_assert(decltype(free_function_operand && free_function_target_operand)::with_parsed_target, "Failed!");
+    static_assert(decltype(free_function_target_operand && free_function_operand)::with_parsed_target, "Failed!");
 
-    static_assert(decltype(free_function_operand || free_function_target_operand)::with_parsed_target);
-    static_assert(decltype(free_function_target_operand || free_function_operand)::with_parsed_target);
+    static_assert(decltype(free_function_operand || free_function_target_operand)::with_parsed_target, "Failed!");
+    static_assert(decltype(free_function_target_operand || free_function_operand)::with_parsed_target, "Failed!");
 }
 
 BOOST_AUTO_TEST_CASE(test_matcher_operand_lambda)

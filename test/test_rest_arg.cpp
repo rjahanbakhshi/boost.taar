@@ -41,13 +41,13 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_traits)
 {
     using namespace boost::taar::handler::detail;
 
-    static_assert(lexical_castable<std::string, int>);
-    static_assert(lexical_castable<std::string_view, int>);
+    static_assert(lexical_castable<std::string, int>, "Failed!");
+    static_assert(lexical_castable<std::string_view, int>, "Failed!");
 
-    static_assert(convertible_from_json_value<std::string>);
-    static_assert(convertible_from_json_value<std::string_view>);
-    static_assert(convertible_from_json_value<int>);
-    static_assert(convertible_from_json_value<jsonable>);
+    static_assert(convertible_from_json_value<std::string>, "Failed!");
+    static_assert(convertible_from_json_value<std::string_view>, "Failed!");
+    static_assert(convertible_from_json_value<int>, "Failed!");
+    static_assert(convertible_from_json_value<jsonable>, "Failed!");
 
     BOOST_TEST(bool_cast("true").value());
     BOOST_TEST(bool_cast("TRUE").value());
@@ -61,14 +61,14 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_traits)
     BOOST_TEST(!bool_cast("0").value());
     BOOST_TEST(bool_cast("blah").has_error());
 
-    static_assert(rest_arg_castable<int, int>);
-    static_assert(rest_arg_castable<std::string_view, int>);
-    static_assert(rest_arg_castable<std::string, int>);
-    static_assert(rest_arg_castable<int, std::string>);
-    static_assert(rest_arg_castable<std::string, float>);
-    static_assert(rest_arg_castable<float, std::string>);
-    static_assert(rest_arg_castable<std::string, std::string_view>);
-    static_assert(rest_arg_castable<boost::json::value, jsonable>);
+    static_assert(rest_arg_castable<int, int>, "Failed!");
+    static_assert(rest_arg_castable<std::string_view, int>, "Failed!");
+    static_assert(rest_arg_castable<std::string, int>, "Failed!");
+    static_assert(rest_arg_castable<int, std::string>, "Failed!");
+    static_assert(rest_arg_castable<std::string, float>, "Failed!");
+    static_assert(rest_arg_castable<float, std::string>, "Failed!");
+    static_assert(rest_arg_castable<std::string, std::string_view>, "Failed!");
+    static_assert(rest_arg_castable<boost::json::value, jsonable>, "Failed!");
 }
 
 BOOST_AUTO_TEST_CASE(test_rest_arg_cast)
@@ -92,20 +92,20 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_provider)
     using namespace boost::taar::matcher;
     using namespace boost::taar::handler;
 
-    static_assert(!is_rest_arg_provider<int>);
-    static_assert(!is_rest_arg_provider<void>);
-    static_assert(!is_rest_arg_provider<void()>);
-    static_assert(is_rest_arg_provider<std::string(int, const context&)>);
-    static_assert(is_rest_arg_provider<std::string(*)(int, const context&)>);
-    static_assert(is_rest_arg_provider<void(int, context&)>);
-    static_assert(is_rest_arg_provider<int(int, context)>);
-    static_assert(!is_rest_arg_provider<int(int, bool)>);
-    static_assert(is_rest_arg_provider<decltype([](int, context){})>);
-    static_assert(is_rest_arg_provider<path_arg>);
-    static_assert(is_rest_arg_provider<query_arg>);
-    static_assert(is_rest_arg_provider<header_arg>);
-    static_assert(is_rest_arg_provider<string_body_arg>);
-    static_assert(is_rest_arg_provider<json_body_arg>);
+    static_assert(!is_rest_arg_provider<int>, "Failed!");
+    static_assert(!is_rest_arg_provider<void>, "Failed!");
+    static_assert(!is_rest_arg_provider<void()>, "Failed!");
+    static_assert(is_rest_arg_provider<std::string(int, const context&)>, "Failed!");
+    static_assert(is_rest_arg_provider<std::string(*)(int, const context&)>, "Failed!");
+    static_assert(is_rest_arg_provider<void(int, context&)>, "Failed!");
+    static_assert(is_rest_arg_provider<int(int, context)>, "Failed!");
+    static_assert(!is_rest_arg_provider<int(int, bool)>, "Failed!");
+    static_assert(is_rest_arg_provider<decltype([](int, context){})>, "Failed!");
+    static_assert(is_rest_arg_provider<path_arg>, "Failed!");
+    static_assert(is_rest_arg_provider<query_arg>, "Failed!");
+    static_assert(is_rest_arg_provider<header_arg>, "Failed!");
+    static_assert(is_rest_arg_provider<string_body_arg>, "Failed!");
+    static_assert(is_rest_arg_provider<json_body_arg>, "Failed!");
 }
 
 BOOST_AUTO_TEST_CASE(test_rest_arg)

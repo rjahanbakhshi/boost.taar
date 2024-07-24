@@ -25,30 +25,30 @@ struct s2
 BOOST_AUTO_TEST_CASE(test_member_function_of_with)
 {
     using namespace boost::taar;
-    static_assert(member_function_of<decltype(&s1::fn1), s1>);
-    static_assert(member_function_of<decltype(&s1::fn1), s1 const>);
-    static_assert(member_function_of<decltype(&s1::fn1), s1 volatile>);
-    static_assert(member_function_of<decltype(&s1::fn1), s1 const volatile>);
-    static_assert(member_function_of<decltype(&s1::fn1), s1 const&>);
-    static_assert(member_function_of<decltype(&s1::fn1), s1 volatile&>);
-    static_assert(member_function_of<decltype(&s1::fn1), s1 const volatile&>);
-    static_assert(member_function_of<decltype(&s1::fn1), s1&>);
+    static_assert(member_function_of<decltype(&s1::fn1), s1>, "Failed!");
+    static_assert(member_function_of<decltype(&s1::fn1), s1 const>, "Failed!");
+    static_assert(member_function_of<decltype(&s1::fn1), s1 volatile>, "Failed!");
+    static_assert(member_function_of<decltype(&s1::fn1), s1 const volatile>, "Failed!");
+    static_assert(member_function_of<decltype(&s1::fn1), s1 const&>, "Failed!");
+    static_assert(member_function_of<decltype(&s1::fn1), s1 volatile&>, "Failed!");
+    static_assert(member_function_of<decltype(&s1::fn1), s1 const volatile&>, "Failed!");
+    static_assert(member_function_of<decltype(&s1::fn1), s1&>, "Failed!");
 
-    static_assert(member_function_of<decltype(&s1::fn1) const, s1>);
-    static_assert(member_function_of<decltype(&s1::fn1) volatile, s1>);
-    static_assert(member_function_of<decltype(&s1::fn1) const volatile, s1>);
-    static_assert(member_function_of<decltype(&s1::fn1) const&, s1>);
-    static_assert(member_function_of<decltype(&s1::fn1) volatile&, s1>);
-    static_assert(member_function_of<decltype(&s1::fn1) const volatile&, s1>);
-    static_assert(member_function_of<decltype(&s1::fn1)&, s1>);
+    static_assert(member_function_of<decltype(&s1::fn1) const, s1>, "Failed!");
+    static_assert(member_function_of<decltype(&s1::fn1) volatile, s1>, "Failed!");
+    static_assert(member_function_of<decltype(&s1::fn1) const volatile, s1>, "Failed!");
+    static_assert(member_function_of<decltype(&s1::fn1) const&, s1>, "Failed!");
+    static_assert(member_function_of<decltype(&s1::fn1) volatile&, s1>, "Failed!");
+    static_assert(member_function_of<decltype(&s1::fn1) const volatile&, s1>, "Failed!");
+    static_assert(member_function_of<decltype(&s1::fn1)&, s1>, "Failed!");
 
-    static_assert(member_function_of<decltype(&s1::fn1), s1*>);
-    static_assert(member_function_of<decltype(&s1::fn1), s1 const*>);
-    static_assert(member_function_of<decltype(&s1::fn1), s1 volatile*>);
-    static_assert(member_function_of<decltype(&s1::fn1), s1 const volatile*>);
+    static_assert(member_function_of<decltype(&s1::fn1), s1*>, "Failed!");
+    static_assert(member_function_of<decltype(&s1::fn1), s1 const*>, "Failed!");
+    static_assert(member_function_of<decltype(&s1::fn1), s1 volatile*>, "Failed!");
+    static_assert(member_function_of<decltype(&s1::fn1), s1 const volatile*>, "Failed!");
 
-    static_assert(!member_function_of<decltype(&s2::fn1), s1>);
-    static_assert(!member_function_of<decltype(&s1::fn1), s2>);
+    static_assert(!member_function_of<decltype(&s2::fn1), s1>, "Failed!");
+    static_assert(!member_function_of<decltype(&s1::fn1), s2>, "Failed!");
 }
 
 } // namespace

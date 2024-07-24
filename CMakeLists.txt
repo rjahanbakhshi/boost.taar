@@ -25,11 +25,16 @@ target_sources(
         boost/taar/core/awaitable.hpp
         boost/taar/core/callable_traits.hpp
         boost/taar/core/cancellation_signals.hpp
+        boost/taar/core/constexpr_string.hpp
         boost/taar/core/ignore_and_rethrow.hpp
         boost/taar/core/invoke_response.hpp
         boost/taar/core/is_http_response.hpp
         boost/taar/core/member_function_of.hpp
+        boost/taar/core/pack_element.hpp
+        boost/taar/core/response_from.hpp
+        boost/taar/core/response_from_tag.hpp
         boost/taar/core/rebind_executor.hpp
+        boost/taar/core/result_response.hpp
         boost/taar/core/specialization_of.hpp
         boost/taar/core/super_type.hpp
         boost/taar/handler/htdocs.hpp

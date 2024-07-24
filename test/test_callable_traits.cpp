@@ -34,129 +34,129 @@ BOOST_AUTO_TEST_CASE(test_matcher_callable_traits)
 {
     using namespace boost::taar;
 
-    static_assert(callable_traits<decltype(&void_fn)>::args_count == 0);
-    static_assert(std::is_same_v<callable_traits<decltype(&void_fn)>::result_type, void>);
+    static_assert(callable_traits<decltype(&void_fn)>::args_count == 0, "Failed!");
+    static_assert(std::is_same_v<callable_traits<decltype(&void_fn)>::result_type, void>, "Failed!");
 
-    static_assert(callable_traits<decltype(void_fn)>::args_count == 0);
-    static_assert(std::is_same_v<callable_traits<decltype(void_fn)>::result_type, void>);
+    static_assert(callable_traits<decltype(void_fn)>::args_count == 0, "Failed!");
+    static_assert(std::is_same_v<callable_traits<decltype(void_fn)>::result_type, void>, "Failed!");
 
-    static_assert(callable_traits<decltype(&my_function)>::args_count == 3);
+    static_assert(callable_traits<decltype(&my_function)>::args_count == 3, "Failed!");
     static_assert(std::is_same_v<
         callable_traits<decltype(&my_function)>::signature_type,
-        void(int, double&, const float&)>);
+        void(int, double&, const float&)>, "Failed!");
     static_assert(std::is_same_v<
         callable_traits<decltype(&my_function)>::result_type,
-        void>);
+        void>, "Failed!");
     static_assert(std::is_same_v<
         callable_traits<decltype(&my_function)>::arg_type<0>,
-        int>);
+        int>, "Failed!");
     static_assert(std::is_same_v<
         callable_traits<decltype(&my_function)>::arg_type<1>,
-        double&>);
+        double&>, "Failed!");
     static_assert(std::is_same_v<
         callable_traits<decltype(&my_function)>::arg_type<2>,
-        const float&>);
+        const float&>, "Failed!");
 
-    static_assert(callable_traits<decltype(my_function)>::args_count == 3);
+    static_assert(callable_traits<decltype(my_function)>::args_count == 3, "Failed!");
     static_assert(std::is_same_v<
         callable_traits<decltype(my_function)>::signature_type,
-        void(int, double&, const float&)>);
+        void(int, double&, const float&)>, "Failed!");
     static_assert(std::is_same_v<
         callable_traits<decltype(my_function)>::result_type,
-        void>);
+        void>, "Failed!");
     static_assert(std::is_same_v<
         callable_traits<decltype(my_function)>::arg_type<0>,
-        int>);
+        int>, "Failed!");
     static_assert(std::is_same_v<
         callable_traits<decltype(my_function)>::arg_type<1>,
-        double&>);
+        double&>, "Failed!");
     static_assert(std::is_same_v<
         callable_traits<decltype(my_function)>::arg_type<2>,
-        const float&>);
+        const float&>, "Failed!");
 
     functor f;
-    static_assert(callable_traits<decltype(f)>::args_count == 3);
+    static_assert(callable_traits<decltype(f)>::args_count == 3, "Failed!");
     static_assert(std::is_same_v<
         callable_traits<decltype(f)>::signature_type,
-        double(float, int, char)>);
+        double(float, int, char)>, "Failed!");
     static_assert(std::is_same_v<
         callable_traits<decltype(f)>::result_type,
-        double>);
+        double>, "Failed!");
     static_assert(std::is_same_v<
         callable_traits<decltype(f)>::arg_type<0>,
-        float>);
+        float>, "Failed!");
     static_assert(std::is_same_v<
         callable_traits<decltype(f)>::arg_type<1>,
-        int>);
+        int>, "Failed!");
     static_assert(std::is_same_v<
         callable_traits<decltype(f)>::arg_type<2>,
-        char>);
+        char>, "Failed!");
 
     functor_const fc;
-    static_assert(callable_traits<decltype(fc)>::args_count == 3);
+    static_assert(callable_traits<decltype(fc)>::args_count == 3, "Failed!");
     static_assert(std::is_same_v<
         callable_traits<decltype(fc)>::signature_type,
-        double(float, int, char)>);
+        double(float, int, char)>, "Failed!");
     static_assert(std::is_same_v<
         callable_traits<decltype(fc)>::result_type,
-        double>);
+        double>, "Failed!");
     static_assert(std::is_same_v<
         callable_traits<decltype(fc)>::arg_type<0>,
-        float>);
+        float>, "Failed!");
     static_assert(std::is_same_v<
         callable_traits<decltype(fc)>::arg_type<1>,
-        int>);
+        int>, "Failed!");
     static_assert(std::is_same_v<
         callable_traits<decltype(fc)>::arg_type<2>,
-        char>);
+        char>, "Failed!");
 
     auto l = [](char) {};
-    static_assert(callable_traits<decltype(l)>::args_count == 1);
+    static_assert(callable_traits<decltype(l)>::args_count == 1, "Failed!");
     static_assert(std::is_same_v<
         callable_traits<decltype(l)>::signature_type,
-        void(char)>);
+        void(char)>, "Failed!");
     static_assert(std::is_same_v<
         callable_traits<decltype(l)>::result_type,
-        void>);
+        void>, "Failed!");
     static_assert(std::is_same_v<
         callable_traits<decltype(l)>::arg_type<0>,
-        char>);
+        char>, "Failed!");
 
-    static_assert(callable_traits<decltype(&memfn_type::fn)>::args_count == 2);
+    static_assert(callable_traits<decltype(&memfn_type::fn)>::args_count == 2, "Failed!");
     static_assert(std::is_same_v<
         callable_traits<decltype(&memfn_type::fn)>::signature_type,
-        int(char, double)>);
+        int(char, double)>, "Failed!");
     static_assert(std::is_same_v<
         callable_traits<decltype(&memfn_type::fn)>::result_type,
-        int>);
+        int>, "Failed!");
     static_assert(std::is_same_v<
         callable_traits<decltype(&memfn_type::fn)>::arg_type<0>,
-        char>);
+        char>, "Failed!");
     static_assert(std::is_same_v<
         callable_traits<decltype(&memfn_type::fn)>::arg_type<1>,
-        double>);
+        double>, "Failed!");
 }
 
 BOOST_AUTO_TEST_CASE(test_matcher_callable_traits_aliases)
 {
     using namespace boost::taar;
 
-    static_assert(callable_args_count<decltype(my_function)> == 3);
+    static_assert(callable_args_count<decltype(my_function)> == 3, "Failed!");
     static_assert(std::is_same_v<
         callable_signature_type<decltype(my_function)>,
-        void(int, double&, const float&)>);
+        void(int, double&, const float&)>, "Failed!");
     static_assert(std::is_same_v<
         callable_result_type<decltype(my_function)>,
-        void>);
+        void>, "Failed!");
     static_assert(std::is_same_v<
         callable_arg_type<decltype(my_function), 0>,
-        int>);
+        int>, "Failed!");
     static_assert(std::is_same_v<
         callable_arg_type<decltype(my_function), 1>,
-        double&>);
+        double&>, "Failed!");
     static_assert(std::is_same_v<
         callable_arg_type<decltype(my_function), 2>,
-        const float&>);
+        const float&>, "Failed!");
 }
 
 } // namespace

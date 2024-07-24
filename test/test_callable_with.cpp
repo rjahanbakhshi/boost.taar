@@ -61,15 +61,15 @@ struct callable
 BOOST_AUTO_TEST_CASE(test_matcher_callable_with)
 {
     using namespace boost::taar::matcher::detail;
-    static_assert(callable_with<decltype(&free_function), bool, const request&, context&>);
-    static_assert(callable_with<decltype(&free_function_extra), bool, const request&, context&, int>);
-    static_assert(callable_with<decltype(&contextual_bool), bool, const request&, context&>);
-    static_assert(callable_with<decltype(lambda), bool, const request&, context&>);
-    static_assert(callable_with<callable, bool, int, float>);
-    static_assert(callable_with<callable, bool, int, double>);
-    static_assert(callable_with<callable, int, int>);
-    static_assert(callable_with<callable, bool, int>);
-    static_assert(callable_with<callable, bool, double>);
+    static_assert(callable_with<decltype(&free_function), bool, const request&, context&>, "Failed!");
+    static_assert(callable_with<decltype(&free_function_extra), bool, const request&, context&, int>, "Failed!");
+    static_assert(callable_with<decltype(&contextual_bool), bool, const request&, context&>, "Failed!");
+    static_assert(callable_with<decltype(lambda), bool, const request&, context&>, "Failed!");
+    static_assert(callable_with<callable, bool, int, float>, "Failed!");
+    static_assert(callable_with<callable, bool, int, double>, "Failed!");
+    static_assert(callable_with<callable, int, int>, "Failed!");
+    static_assert(callable_with<callable, bool, int>, "Failed!");
+    static_assert(callable_with<callable, bool, double>, "Failed!");
 }
 
 } // namespace
