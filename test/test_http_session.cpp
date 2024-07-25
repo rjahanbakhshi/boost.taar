@@ -44,6 +44,9 @@ struct object_type
     }
 };
 
+void on_hard_error(int, std::exception_ptr)
+{}
+
 BOOST_AUTO_TEST_CASE(test_http_session)
 {
     taar::session::http http_session;
@@ -64,6 +67,8 @@ BOOST_AUTO_TEST_CASE(test_http_session)
                 std::cerr << "Unknown error!\n";
             }
         });
+
+    http_session.set_hard_error_handler(std::bind_front(on_hard_error, 10));
 
     http_session.set_soft_error_handler(
         [](std::exception_ptr)

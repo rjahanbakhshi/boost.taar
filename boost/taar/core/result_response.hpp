@@ -37,6 +37,10 @@ template <>
 class result_response_base<void>
 {
 public:
+    result_response_base()
+        : response {response_from()}
+    {}
+
     response_from_t<> response;
 };
 
