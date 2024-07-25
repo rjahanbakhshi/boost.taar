@@ -10,9 +10,10 @@
 #ifndef BOOST_TAAR_SESSION_HTTP_HPP
 #define BOOST_TAAR_SESSION_HTTP_HPP
 
+#include <boost/asio/async_result.hpp>
 #include <boost/taar/matcher/context.hpp>
 #include <boost/taar/matcher/operand.hpp>
-#include "boost/taar/core/invoke_response.hpp"
+#include <boost/taar/core/response_from.hpp>
 #include <boost/taar/core/member_function_of.hpp>
 #include <boost/taar/core/callable_traits.hpp>
 #include <boost/taar/core/specialization_of.hpp>
@@ -32,13 +33,52 @@
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/url/url_view.hpp>
-#include <concepts>
 #include <exception>
 #include <vector>
 #include <functional>
 #include <utility>
 
 namespace boost::taar::session {
+namespace detail {
+
+template <typename T>
+concept soft_error_handler = requires
+{
+    requires std::is_invocable_v<T, std::exception_ptr>;
+    requires has_response_from<std::invoke_result_t<T, std::exception_ptr>>;
+};
+
+template <typename T>
+concept hard_error_handler = requires
+{
+    requires std::is_invocable_v<T, std::exception_ptr>;
+};
+
+template <typename StreamType>
+auto async_write(
+    StreamType& stream,
+    ::boost::beast::http::message_generator&& generator)
+{
+    return ::boost::beast::async_write(
+        stream,
+        std::move(generator));
+}
+
+template <
+    typename StreamType,
+    bool isRequest,
+    typename Body,
+    typename Fields>
+auto async_write(
+    StreamType& stream,
+    ::boost::beast::http::message<isRequest, Body, Fields>&& message)
+{
+    return ::boost::beast::http::async_write(
+        stream,
+        std::move(message));
+}
+
+} // detail
 
 class http
 {
@@ -57,7 +97,7 @@ private:
             boost::beast::http::request_parser<boost::beast::http::buffer_body>&,
             cancellation_signals&)>;
 
-    using soft_error_handler_type = std::function<
+    using wrapped_soft_error_handler_type = std::function<
         awaitable<bool>(
             std::exception_ptr,
             rebind_executor<boost::beast::tcp_stream>&,
@@ -66,16 +106,20 @@ private:
 
     using hard_error_handler_type = std::function<void(std::exception_ptr)>;
 
-    static void default_soft_error_handler(std::exception_ptr eptr)
-    {
-        std::rethrow_exception(eptr);
-    }
-
 public:
     http()
-    {
-        set_soft_error_handler(&default_soft_error_handler);
-    }
+        : wrapped_soft_error_handler_ {
+            [](
+                std::exception_ptr eptr,
+                rebind_executor<boost::beast::tcp_stream>&,
+                boost::beast::http::request_header<>&,
+                cancellation_signals&) -> awaitable<bool>
+            {
+                std::rethrow_exception(eptr);
+            }
+        }
+    {}
+
     awaitable<void> operator()(
         rebind_executor<boost::asio::ip::tcp::socket> socket,
         cancellation_signals& signals) const
@@ -147,7 +191,11 @@ public:
                     req_header.payload_size().value() > 0)
                 {
                     http::request_parser<http::string_body> body_parser {std::move(header_parser)};
-                    auto [req_ec, req_sz] = co_await async_read(stream, buffer, body_parser);
+                    auto [req_ec, req_sz] = co_await async_read(
+                        stream,
+                        buffer,
+                        body_parser);
+
                     if (req_ec)
                     {
                         // Error reading the full request. The session will be closed.
@@ -160,7 +208,10 @@ public:
                 http::response<http::empty_body> response {http::status::not_found, version};
                 response.keep_alive(keep_alive);
                 response.prepare_payload();
-                auto [resp_ec, resp_sz] = co_await http::async_write(stream, response);
+                auto [resp_ec, resp_sz] = co_await http::async_write(
+                    stream,
+                    response);
+
                 if (resp_ec)
                 {
                     // Error in writing the response. The session will be closed.
@@ -222,12 +273,13 @@ public:
                 std::exception_ptr ex;
                 try
                 {
-                    auto response = request_handler(
-                        body_parser.get(),
-                        context);
+                    auto response = response_from(
+                        request_handler(
+                            body_parser.get(),
+                            context));
 
-                    const bool keep_alive = response.keep_alive();
-                    co_await boost::beast::async_write(stream, std::move(response));
+                    bool keep_alive = response.keep_alive();
+                    co_await detail::async_write(stream, std::move(response));
                     co_return keep_alive;
                 }
                 catch (...)
@@ -236,7 +288,7 @@ public:
                 }
 
                 // An exception is thrown within the request handler.
-                co_return co_await soft_error_handler_(
+                co_return co_await wrapped_soft_error_handler_(
                     ex,
                     stream,
                     body_parser.get(),
@@ -275,41 +327,33 @@ public:
         );
     }
 
-    template <typename Handler> requires
-        // TODO: need a concept to make sure Handler is compatible
-        std::constructible_from<callable_arg_type<Handler, 0>, std::exception_ptr>
-    void set_soft_error_handler(Handler handler)
+    template <detail::soft_error_handler HandlerType>
+    void set_soft_error_handler(HandlerType handler)
     {
-        namespace http = boost::beast::http;
-
-        soft_error_handler_ =
+        wrapped_soft_error_handler_ =
             [handler = std::move(handler)](
-                std::exception_ptr ex,
+                std::exception_ptr eptr,
                 rebind_executor<boost::beast::tcp_stream>& stream,
                 boost::beast::http::request_header<>& request_header,
                 cancellation_signals& signals) mutable
             -> awaitable<bool>
             {
-                auto rg = invoke_response(
-                    request_header,
-                    http::status::internal_server_error,
-                    handler,
-                    ex);
-
-                const bool keep_alive = rg.keep_alive();
-                co_await boost::beast::async_write(stream, std::move(rg));
+                auto response = response_from(handler(eptr));
+                bool keep_alive = response.keep_alive();
+                co_await detail::async_write(stream, std::move(response));
                 co_return keep_alive;
             };
     }
 
-    void set_hard_error_handler(hard_error_handler_type handler)
+    template <detail::hard_error_handler HandlerType>
+    void set_hard_error_handler(HandlerType handler)
     {
         hard_error_handler_ = std::move(handler);
     }
 
 private:
     std::vector<std::pair<matcher_type, request_handler_wrapper_type>> matcher_handlers_;
-    soft_error_handler_type soft_error_handler_;
+    wrapped_soft_error_handler_type wrapped_soft_error_handler_;
     hard_error_handler_type hard_error_handler_ = [](std::exception_ptr){};
     bool needs_parsed_target_ = false;
 };

@@ -10,9 +10,7 @@
 #ifndef BOOST_TAAR_CORE_PACK_ELEMENT_HPP
 #define BOOST_TAAR_CORE_PACK_ELEMENT_HPP
 
-#include <boost/asio/io_context.hpp>
-#include <boost/asio/use_awaitable.hpp>
-#include <boost/asio/as_tuple.hpp>
+#include <cstddef>
 
 namespace boost::taar {
 

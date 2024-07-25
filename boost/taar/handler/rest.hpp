@@ -10,23 +10,18 @@
 #ifndef BOOST_TAAR_HANDLER_REST_HPP
 #define BOOST_TAAR_HANDLER_REST_HPP
 
-#include "boost/taar/handler/rest_error.hpp"
-#include <boost/test/execution_monitor.hpp>
+#include <boost/taar/handler/rest_error.hpp>
 #include <boost/taar/handler/rest_arg.hpp>
 #include <boost/taar/matcher/context.hpp>
-#include <boost/taar/core/always_false.hpp>
 #include <boost/taar/core/callable_traits.hpp>
 #include <boost/taar/core/member_function_of.hpp>
-#include <boost/taar/core/invoke_response.hpp>
+#include <boost/taar/core/response_from.hpp>
 #include <boost/taar/core/super_type.hpp>
+#include <boost/beast/http/message_generator.hpp>
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/field.hpp>
 #include <boost/beast/http/string_body.hpp>
 #include <boost/beast/http/message.hpp>
-#include <boost/beast/http/message_generator.hpp>
-#include <boost/json/value.hpp>
-#include <boost/json/serialize.hpp>
-#include <boost/system/result.hpp>
 #include <utility>
 #include <type_traits>
 
@@ -66,9 +61,35 @@ struct common_requests_type<>
 template <typename... T>
 using common_requests_type_t = typename common_requests_type<T...>::type;
 
-template <typename CallableType, std::size_t... Indexes, typename... ArgProvidersType>
-auto rest_for_callable(
+template <typename CallableType, typename... ArgsType>
+inline decltype(auto) invoke_to_response(
     CallableType&& callable,
+    ArgsType&&... args)
+{
+    using result_type = std::invoke_result_t<CallableType, ArgsType...>;
+
+    if constexpr (std::is_same_v<void, result_type>)
+    {
+        std::invoke(
+            std::forward<CallableType>(callable),
+            std::forward<ArgsType>(args)...);
+        return response_from();
+    }
+    else
+    {
+        return response_from(
+            std::invoke(
+                std::forward<CallableType>(callable),
+                std::forward<ArgsType>(args)...));
+    }
+}
+
+template <
+    typename CallableType,
+    std::size_t... Indexes,
+    typename... ArgProvidersType>
+inline auto rest_for_callable(
+    CallableType callable,
     std::index_sequence<Indexes...>,
     ArgProvidersType&&... arg_providers)
 {
@@ -86,41 +107,42 @@ auto rest_for_callable(
     using request_type = detail::common_requests_type_t<
         std::remove_reference_t<ArgProvidersType>...>;
 
-    return [
+    return
+    [
         callable = std::forward<CallableType>(callable),
         ...arg_providers = std::forward<ArgProvidersType>(arg_providers)
     ](const request_type& request, const matcher::context& context) mutable
+    -> boost::beast::http::message_generator
     {
         try
         {
-            return invoke_response(
-                request,
-                boost::beast::http::status::ok,
+            return invoke_to_response(
                 callable,
                 rest_arg<
                     callable_arg_type<noref_fn_type, Indexes>,
-                    std::remove_reference_t<ArgProvidersType>>{arg_providers}(
-                        request,
-                        context
-                    )...
+                    std::remove_reference_t<ArgProvidersType>
+                > {arg_providers}(request, context)...
             );
         }
         catch(const boost::system::system_error& e)
         {
             if (e.code().category() == error_category())
             {
-                return invoke_response(
-                    request,
-                    boost::beast::http::status::bad_request,
-                    [&e] { return e.what(); });
+                auto response = response_from(e.what());
+                response.result(boost::beast::http::status::bad_request);
+                return response;
             }
             throw;
         }
     };
 }
 
-template <typename MemFnType, typename ObjectType, std::size_t... Indexes, typename... ArgProvidersType>
-auto rest_for_memfn(
+template <
+    typename MemFnType,
+    typename ObjectType,
+    std::size_t... Indexes,
+    typename... ArgProvidersType>
+inline auto rest_for_memfn(
     MemFnType memfn,
     ObjectType&& object,
     std::index_sequence<Indexes...>,
@@ -140,27 +162,34 @@ auto rest_for_memfn(
     using request_type = detail::common_requests_type_t<
         std::remove_reference_t<ArgProvidersType>...>;
 
-    return [
+    return
+    [
         memfn,
         object = std::forward<ObjectType>(object),
         ...arg_providers = std::forward<ArgProvidersType>(arg_providers)
     ](const request_type& request, const matcher::context& context) mutable
+    -> boost::beast::http::message_generator
     {
         try
         {
-            return invoke_response(
-                request,
-                boost::beast::http::status::ok,
+            return invoke_to_response(
                 memfn,
-                object,
-                rest_arg<callable_arg_type<noref_fn_type, Indexes>, std::remove_reference_t<ArgProvidersType>>{arg_providers}(request, context)...);
+                std::forward<ObjectType>(object),
+                rest_arg<
+                    callable_arg_type<noref_fn_type, Indexes>,
+                    std::remove_reference_t<ArgProvidersType>
+                > {arg_providers}(request, context)...
+            );
         }
-        catch(const std::exception& e) // TODO: Only handle rest related errors
+        catch(const boost::system::system_error& e)
         {
-            return invoke_response(
-                request,
-                boost::beast::http::status::bad_request,
-                [&e] { return e.what(); });
+            if (e.code().category() == error_category())
+            {
+                auto response = response_from(e.what());
+                response.result(boost::beast::http::status::bad_request);
+                return response;
+            }
+            throw;
         }
     };
 }
@@ -169,7 +198,7 @@ auto rest_for_memfn(
 
 template <typename CallableType, typename... ArgProvidersType>
 requires (!std::is_member_function_pointer_v<std::remove_cvref_t<CallableType>>)
-auto rest(
+inline auto rest(
     CallableType&& callable,
     ArgProvidersType&&... arg_providers)
 {
@@ -181,7 +210,7 @@ auto rest(
 
 template <typename MemFnType, typename ObjectType, typename... ArgProvidersType>
 requires (member_function_of<MemFnType, std::remove_cvref_t<ObjectType>>)
-auto rest(
+inline auto rest(
     MemFnType memfn,
     ObjectType&& object,
     ArgProvidersType&&... arg_providers)

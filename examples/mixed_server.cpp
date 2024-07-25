@@ -7,14 +7,14 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
 
-#include <boost/json/value.hpp>
 #include <boost/taar/handler/htdocs.hpp>
 #include <boost/taar/handler/rest.hpp>
 #include <boost/taar/session/http.hpp>
 #include <boost/taar/server/tcp.hpp>
-#include "boost/taar/handler/rest_arg.hpp"
-#include "boost/taar/matcher/method.hpp"
-#include "boost/taar/matcher/target.hpp"
+#include <boost/taar/handler/rest_arg.hpp>
+#include <boost/taar/matcher/method.hpp>
+#include <boost/taar/matcher/target.hpp>
+#include <boost/taar/core/result_response.hpp>
 #include <boost/taar/core/cancellation_signals.hpp>
 #include <boost/taar/core/ignore_and_rethrow.hpp>
 #include <boost/beast/http.hpp>
@@ -23,6 +23,7 @@
 #include <boost/asio/signal_set.hpp>
 #include <boost/asio/bind_cancellation_slot.hpp>
 #include <boost/asio/io_context.hpp>
+#include <boost/json/value.hpp>
 #include <exception>
 #include <iostream>
 #include <cstdlib>
@@ -42,6 +43,7 @@ int main(int argc, char* argv[])
     using net::co_spawn;
     using net::bind_cancellation_slot;
     using net::detached;
+    using taar::result_response;
     using taar::matcher::method;
     using taar::matcher::target;
 
@@ -79,12 +81,16 @@ int main(int argc, char* argv[])
             catch (const std::exception& e)
             {
                 std::cerr << e.what() << '\n';
-                return boost::json::value{{"Error", e.what()}};
+                return
+                    result_response(boost::json::value{{"soft_error", e.what()}})
+                        .set_status(http::status::internal_server_error);
             }
             catch (...)
             {
                 std::cerr << "Unknown error!\n";
-                return boost::json::value{{"Error", "Unknown error!"}};
+                return
+                    result_response(boost::json::value{{"soft_error", "Unknown error!"}})
+                        .set_status(http::status::internal_server_error);
             }
         }
     );
@@ -114,6 +120,11 @@ int main(int argc, char* argv[])
     http_session.register_request_handler(
         method == http::verb::get && target == "/api/throw",
         taar::handler::rest([]{ throw std::runtime_error{"Error"}; }
+    ));
+
+    http_session.register_request_handler(
+        method == http::verb::get && target == "/api/throw13",
+        taar::handler::rest([]{ throw 13; }
     ));
 
     http_session.register_request_handler(

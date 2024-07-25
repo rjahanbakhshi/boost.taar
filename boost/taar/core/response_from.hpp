@@ -13,14 +13,27 @@
 #include <boost/taar/core/is_http_response.hpp>
 #include <boost/taar/core/always_false.hpp>
 #include <boost/taar/core/response_from_tag.hpp>
+#include <boost/beast/http/message_generator.hpp>
 #include <boost/beast/http/message.hpp>
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/string_body.hpp>
+#include <boost/json/serialize.hpp>
+#include <boost/json/value.hpp>
 #include <concepts>
 
 namespace boost::taar {
 
 namespace detail {
+
+template <typename T>
+concept is_response_from_result = requires
+{
+    requires
+        is_http_response<std::remove_cvref_t<T>> ||
+        std::same_as<
+            std::remove_cvref_t<T>,
+            boost::beast::http::message_generator>;
+};
 
 struct response_from_built_in_tag {};
 
@@ -34,8 +47,8 @@ inline auto tag_invoke(response_from_built_in_tag)
     return response;
 }
 
-template <typename T> requires (is_http_response<std::remove_cvref_t<T>>)
-inline auto tag_invoke(response_from_built_in_tag, T&& response)
+template <typename T> requires (is_response_from_result<T>)
+inline decltype(auto) tag_invoke(response_from_built_in_tag, T&& response)
 {
     return std::forward<T>(response);
 }
@@ -83,11 +96,21 @@ inline auto tag_invoke(response_from_built_in_tag, char const* value)
     return response;
 }
 
+inline auto tag_invoke(response_from_built_in_tag, const boost::json::value& value)
+{
+    namespace http = boost::beast::http;
+    http::response<http::string_body> response {http::status::ok, 11};
+    response.set(boost::beast::http::field::content_type, "application/json");
+    response.body() = boost::json::serialize(value);
+    response.prepare_payload();
+    return response;
+}
+
 template<typename... T>
 concept has_user_defined_response_from = requires (T&&... args)
 {
     tag_invoke(response_from_tag{}, std::forward<T>(args)...);
-    requires is_http_response<
+    requires is_response_from_result<
         decltype(
             tag_invoke(
                 response_from_tag{},
@@ -98,7 +121,7 @@ template<typename... T>
 concept has_built_in_response_from = requires (T&&... args)
 {
     tag_invoke(response_from_built_in_tag{}, std::forward<T>(args)...);
-    requires is_http_response<
+    requires is_response_from_result<
         decltype(
             tag_invoke(
                 response_from_built_in_tag{},

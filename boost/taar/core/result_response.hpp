@@ -59,7 +59,7 @@ public:
         return *this;
     }
 
-    result_response& set_result(boost::beast::http::status status)
+    result_response& set_status(boost::beast::http::status status)
     {
         base_type::response.result(status);
         return *this;

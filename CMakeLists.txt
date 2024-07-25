@@ -27,7 +27,6 @@ target_sources(
         boost/taar/core/cancellation_signals.hpp
         boost/taar/core/constexpr_string.hpp
         boost/taar/core/ignore_and_rethrow.hpp
-        boost/taar/core/invoke_response.hpp
         boost/taar/core/is_http_response.hpp
         boost/taar/core/member_function_of.hpp
         boost/taar/core/pack_element.hpp

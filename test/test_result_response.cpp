@@ -50,7 +50,7 @@ BOOST_AUTO_TEST_CASE(test_result_response)
 
     auto r3 = result_response{"3test"}
         .set_header(http::field::content_type, "custom3")
-        .set_result(http::status::internal_server_error)
+        .set_status(http::status::internal_server_error)
         .set_version(10);
     static_assert(has_response_from<decltype(r3)>);
     BOOST_TEST(response_from(r3).body() == "3test");
@@ -59,7 +59,7 @@ BOOST_AUTO_TEST_CASE(test_result_response)
     BOOST_TEST(response_from(r3).version() == 10);
 
     auto r4 = result_response{custom_type{13}}
-        .set_result(http::status::internal_server_error);
+        .set_status(http::status::internal_server_error);
     BOOST_TEST(response_from(r4).body() == "13");
     BOOST_TEST(response_from(r4).result() == http::status::internal_server_error);
 }

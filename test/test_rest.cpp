@@ -298,29 +298,6 @@ void tag_invoke(
     jv = { {{"i", obj.i}, {"s", obj.s}} };
 }
 
-BOOST_AUTO_TEST_CASE(test_rest_object_to_json_response)
-{
-    namespace http = boost::beast::http;
-    namespace taar = boost::taar;
-    using taar::matcher::context;
-    using taar::handler::header_arg;
-
-    http::request<http::empty_body> req;
-    context ctx;
-    req.insert("value", "Hello");
-
-    auto rh = taar::handler::rest(
-        [](std::string_view s)
-        {
-            return jsonable{.i = 13, .s = std::string{s}};
-        },
-        header_arg("value"));
-    auto mg = rh(req, ctx);
-    auto resp = to_response<http::string_body>(mg);
-    BOOST_TEST(resp.body() == R"({"i":13,"s":"Hello"})");
-    BOOST_TEST(resp[http::field::content_type] == "application/json");
-}
-
 std::string accepts_jsonable(const jsonable& j)
 {
     return j.s + " = " + std::to_string(j.i);
