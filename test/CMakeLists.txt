@@ -19,16 +19,17 @@ target_sources(
         test_method.cpp
         test_operand.cpp
         test_pack_element.cpp
+        test_response_builder.cpp
         test_response_from_built_in.cpp
         test_response_from_user.cpp
         test_rest.cpp
         test_rest_arg.cpp
-        test_result_response.cpp
         test_specialization_of.cpp
         test_super_type.cpp
         test_target.cpp
         test_template_parser.cpp
         test_version.cpp
+        to_response.h
 )
 
 target_link_libraries(

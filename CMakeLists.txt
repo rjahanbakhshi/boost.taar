@@ -30,10 +30,10 @@ target_sources(
         boost/taar/core/is_http_response.hpp
         boost/taar/core/member_function_of.hpp
         boost/taar/core/pack_element.hpp
+        boost/taar/core/rebind_executor.hpp
+        boost/taar/core/response_builder.hpp
         boost/taar/core/response_from.hpp
         boost/taar/core/response_from_tag.hpp
-        boost/taar/core/rebind_executor.hpp
-        boost/taar/core/result_response.hpp
         boost/taar/core/specialization_of.hpp
         boost/taar/core/super_type.hpp
         boost/taar/handler/htdocs.hpp

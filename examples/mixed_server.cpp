@@ -14,7 +14,7 @@
 #include <boost/taar/handler/rest_arg.hpp>
 #include <boost/taar/matcher/method.hpp>
 #include <boost/taar/matcher/target.hpp>
-#include <boost/taar/core/result_response.hpp>
+#include <boost/taar/core/response_builder.hpp>
 #include <boost/taar/core/cancellation_signals.hpp>
 #include <boost/taar/core/ignore_and_rethrow.hpp>
 #include <boost/beast/http.hpp>
@@ -43,7 +43,7 @@ int main(int argc, char* argv[])
     using net::co_spawn;
     using net::bind_cancellation_slot;
     using net::detached;
-    using taar::result_response;
+    using taar::response_builder;
     using taar::matcher::method;
     using taar::matcher::target;
 
@@ -82,14 +82,14 @@ int main(int argc, char* argv[])
             {
                 std::cerr << e.what() << '\n';
                 return
-                    result_response(boost::json::value{{"soft_error", e.what()}})
+                    response_builder(boost::json::value{{"soft_error", e.what()}})
                         .set_status(http::status::internal_server_error);
             }
             catch (...)
             {
                 std::cerr << "Unknown error!\n";
                 return
-                    result_response(boost::json::value{{"soft_error", "Unknown error!"}})
+                    response_builder(boost::json::value{{"soft_error", "Unknown error!"}})
                         .set_status(http::status::internal_server_error);
             }
         }

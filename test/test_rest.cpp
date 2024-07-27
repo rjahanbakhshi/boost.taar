@@ -7,6 +7,7 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
 
+#include "to_response.h"
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/file_body.hpp>
 #include <boost/taar/session/http.hpp>
@@ -23,34 +24,6 @@
 #include <string>
 
 namespace {
-
-// Function to convert message_generator to http::response
-template<class BodyType>
-boost::beast::http::response<BodyType> to_response(
-    boost::beast::http::message_generator& generator)
-{
-    boost::beast::error_code ec;
-    boost::beast::http::response_parser<BodyType> parser;
-
-    while (!parser.is_done())
-    {
-        auto buffers = generator.prepare(ec);
-        if(ec)
-        {
-            throw boost::system::system_error{ec};
-        }
-
-        auto n = parser.put(buffers, ec);
-        if(ec && ec != boost::beast::http::error::need_buffer)
-        {
-            throw boost::system::system_error{ec};
-        }
-
-        generator.consume(n);
-    }
-
-    return parser.release();
-}
 
 BOOST_AUTO_TEST_CASE(test_rest_arg_provider_request_type)
 {
@@ -116,8 +89,7 @@ BOOST_AUTO_TEST_CASE(test_rest_void)
         &voidfn,
         path_arg("a"),
         path_arg("b"));
-    auto mg1 = rh1(req, ctx);
-    auto resp1 = to_response<http::string_body>(mg1);
+    auto resp1 = to_response<http::string_body>(rh1(req, ctx));
     BOOST_TEST(resp1.body().empty());
     BOOST_TEST(resp1.count(http::field::content_type) == 0);
 
@@ -125,8 +97,7 @@ BOOST_AUTO_TEST_CASE(test_rest_void)
         voidfn,
         path_arg("a"),
         path_arg("b"));
-    auto mg2 = rh2(req, ctx);
-    auto resp2 = to_response<http::string_body>(mg2);
+    auto resp2 = to_response<http::string_body>(rh2(req, ctx));
     BOOST_TEST(resp2.body().empty());
     BOOST_TEST(resp2.count(http::field::content_type) == 0);
 }
@@ -151,13 +122,11 @@ BOOST_AUTO_TEST_CASE(test_rest)
     context ctx;
 
     auto rh1 = taar::handler::rest(const_obj_handler());
-    auto mg1 = rh1(req, ctx);
-    auto resp1 = to_response<http::string_body>(mg1);
+    auto resp1 = to_response<http::string_body>(rh1(req, ctx));
     BOOST_TEST(resp1.body() == "blah1");
 
     auto rh2 = taar::handler::rest(obj_handler());
-    auto mg2 = rh2(req, ctx);
-    auto resp2 = to_response<http::string_body>(mg2);
+    auto resp2 = to_response<http::string_body>(rh2(req, ctx));
     BOOST_TEST(resp2.body() == "blah2");
 }
 
@@ -181,8 +150,7 @@ BOOST_AUTO_TEST_CASE(test_rest_sum_target)
         sum,
         path_arg("a"),
         path_arg("b"));
-    auto mg_sum = rh_sum(req, ctx);
-    auto resp_sum = to_response<http::string_body>(mg_sum);
+    auto resp_sum = to_response<http::string_body>(rh_sum(req, ctx));
     BOOST_TEST(resp_sum.body() == "55");
     BOOST_TEST(resp_sum[http::field::content_type] == "text/plain");
 }
@@ -201,8 +169,7 @@ BOOST_AUTO_TEST_CASE(test_rest_sum_query)
         sum,
         query_arg("a"),
         query_arg("b"));
-    auto mg_sum = rh_sum(req, ctx);
-    auto resp_sum = to_response<http::string_body>(mg_sum);
+    auto resp_sum = to_response<http::string_body>(rh_sum(req, ctx));
     BOOST_TEST(resp_sum.body() == "55");
     BOOST_TEST(resp_sum[http::field::content_type] == "text/plain");
 }
@@ -223,8 +190,7 @@ BOOST_AUTO_TEST_CASE(test_rest_sum_header)
         sum,
         header_arg("a"),
         header_arg("b"));
-    auto mg_sum = rh_sum(req, ctx);
-    auto resp_sum = to_response<http::string_body>(mg_sum);
+    auto resp_sum = to_response<http::string_body>(rh_sum(req, ctx));
     BOOST_TEST(resp_sum.body() == "55");
     BOOST_TEST(resp_sum[http::field::content_type] == "text/plain");
 }
@@ -245,8 +211,7 @@ BOOST_AUTO_TEST_CASE(test_rest_stock_string)
     context ctx;
 
     auto rh = taar::handler::rest(stock_string);
-    auto mg = rh(req, ctx);
-    auto resp = to_response<http::string_body>(mg);
+    auto resp = to_response<http::string_body>(rh(req, ctx));
     BOOST_TEST(resp.body() == stock_string());
     BOOST_TEST(resp[http::field::content_type] == "text/plain");
 }
@@ -268,8 +233,7 @@ BOOST_AUTO_TEST_CASE(test_rest_string_to_json_response)
     req.insert("value", "Hello");
 
     auto rh = taar::handler::rest(to_json, header_arg("value"));
-    auto mg = rh(req, ctx);
-    auto resp = to_response<http::string_body>(mg);
+    auto resp = to_response<http::string_body>(rh(req, ctx));
     BOOST_TEST(resp.body() == R"({"value":"Hello"})");
     BOOST_TEST(resp[http::field::content_type] == "application/json");
 }
@@ -317,8 +281,7 @@ BOOST_AUTO_TEST_CASE(test_rest_invoke_with_jsonable)
     req.prepare_payload();
 
     auto rh = taar::handler::rest(accepts_jsonable, json_body_arg());
-    auto mg = rh(req, ctx);
-    auto resp = to_response<http::string_body>(mg);
+    auto resp = to_response<http::string_body>(rh(req, ctx));
     BOOST_TEST(resp.body() == "Hello = 13");
     BOOST_TEST(resp[http::field::content_type] == "text/plain");
 }
@@ -352,8 +315,7 @@ struct concat_handler
 //        std::function{std::bind(&concat_handler::concat, &bh)},
 //        path_arg("a"),
 //        path_arg("b"));
-//    auto mg = rh_sum(req, ctx);
-//    auto resp = to_response<http::string_body>(mg);
+//    auto resp = to_response<http::string_body>(rh_sum(req, ctx));
 //    BOOST_TEST(resp.body() == "1342");
 //    BOOST_TEST(resp[http::field::content_type] == "text/plain");
 //}
@@ -377,8 +339,7 @@ BOOST_AUTO_TEST_CASE(test_rest_mfn)
         &bh,
         header_arg("a"),
         header_arg("b"));
-    auto mg = rh(req, ctx);
-    auto resp = to_response<http::string_body>(mg);
+    auto resp = to_response<http::string_body>(rh(req, ctx));
     BOOST_TEST(resp.body() == "1342");
     BOOST_TEST(resp[http::field::content_type] == "text/plain");
 
@@ -387,8 +348,7 @@ BOOST_AUTO_TEST_CASE(test_rest_mfn)
         bh,
         header_arg("a"),
         header_arg("b"));
-    auto mgc = rhc(req, ctx);
-    auto respc = to_response<http::string_body>(mgc);
+    auto respc = to_response<http::string_body>(rhc(req, ctx));
     BOOST_TEST(respc.body() == "4213");
     BOOST_TEST(respc[http::field::content_type] == "text/plain");
 }
@@ -411,8 +371,7 @@ BOOST_AUTO_TEST_CASE(test_rest_string_body)
     auto rh = taar::handler::rest(
         l,
         string_body_arg());
-    auto mg = rh(req, ctx);
-    auto resp = to_response<http::string_body>(mg);
+    auto resp = to_response<http::string_body>(rh(req, ctx));
     BOOST_TEST(resp.body() == "Hello world!");
     BOOST_TEST(resp[http::field::content_type] == "text/plain");
 }

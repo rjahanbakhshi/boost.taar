@@ -157,7 +157,6 @@ inline constexpr decltype(auto) response_from(T&&... value)
 template <has_response_from... T>
 using response_from_t = std::invoke_result_t<decltype(response_from<T...>), T...>;
 
-
 } // namespace boost::taar
 
 #endif // BOOST_TAAR_CORE_RESPONSE_FROM_HPP
