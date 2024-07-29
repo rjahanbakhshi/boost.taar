@@ -7,10 +7,13 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
 
+#include <boost/beast/http/empty_body.hpp>
 #include <boost/taar/session/http.hpp>
 #include <boost/taar/handler/rest.hpp>
 #include <boost/taar/matcher/method.hpp>
 #include <boost/taar/matcher/target.hpp>
+#include <boost/taar/core/response_builder.hpp>
+#include <boost/taar/core/awaitable.hpp>
 #include <boost/test/unit_test.hpp>
 
 namespace {
@@ -148,24 +151,33 @@ BOOST_AUTO_TEST_CASE(test_http_session)
 
 BOOST_AUTO_TEST_CASE(test_http_session_soft_error_handler)
 {
+    using taar::awaitable;
+    using taar::response_builder;
     taar::session::http http_session;
 
-    http_session.set_soft_error_handler(
-        [this](std::exception_ptr eptr)
-        {
-            try
-            {
-                std::rethrow_exception(eptr);
-            }
-            catch (...)
-            {
-                http::response<http::string_body> response {
-                    boost::beast::http::status::internal_server_error,
-                    11};
-                return response;
-            }
-        }
-    );
+    //http_session.set_soft_error_handler([](std::exception_ptr){});
+    //http_session.set_soft_error_handler([](std::exception_ptr) -> awaitable<void> { return {}; });
+
+    //http_session.set_soft_error_handler([](std::exception_ptr) -> int { return {}; });
+    //http_session.set_soft_error_handler([](std::exception_ptr) -> awaitable<int> { return {}; });
+
+    //http_session.set_soft_error_handler([](std::exception_ptr) -> response_builder { return {}; });
+    //http_session.set_soft_error_handler([](std::exception_ptr) -> awaitable<response_builder> { return {}; });
+}
+
+taar::awaitable<int> awaitable_handler(
+    const http::request<boost::beast::http::empty_body>& request,
+    const boost::taar::matcher::context&)
+{
+    co_return 10;
+}
+
+BOOST_AUTO_TEST_CASE(test_http_session_awaitable_handler)
+{
+    taar::session::http http_session;
+    http_session.register_request_handler(
+        method == http::verb::post,
+        &awaitable_handler);
 }
 
 } // namespace

@@ -159,7 +159,7 @@ struct rest_arg
 
     arg_type operator()(
         const arg_provider_request_type& request,
-        const matcher::context& context)
+        const matcher::context& context) &&
     {
         if constexpr (
             specialization_of<std::optional, arg_type> &&

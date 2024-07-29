@@ -7,6 +7,7 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
 
+#include <boost/taar/core/awaitable.hpp>
 #include <boost/taar/core/response_from.hpp>
 #include <boost/beast/http/message.hpp>
 #include <boost/beast/http/empty_body.hpp>
@@ -23,6 +24,10 @@ namespace http = boost::beast::http;
 using boost::taar::response_from;
 using boost::taar::response_from_t;
 using boost::taar::has_response_from;
+using boost::taar::response_from_invoke;
+using boost::taar::awaitable;
+
+struct user_type {};
 
 BOOST_AUTO_TEST_CASE(test_response_from_built_in)
 {
@@ -43,9 +48,11 @@ BOOST_AUTO_TEST_CASE(test_response_from_built_in)
     static_assert(has_response_from<std::string>, "Failed!");
     static_assert(has_response_from<std::string_view>, "Failed!");
     static_assert(has_response_from<char const*>, "Failed!");
-    static_assert(has_response_from<const int>, "Failed!");
+    static_assert(has_response_from<int const>, "Failed!");
     static_assert(has_response_from<int&>, "Failed!");
-    static_assert(has_response_from<const int&>, "Failed!");
+    static_assert(has_response_from<int const&>, "Failed!");
+    static_assert(!has_response_from<user_type const &>, "Failed!");
+    static_assert(!has_response_from<awaitable<int>>, "Failed!");
 
     static_assert(std::is_same_v<decltype(response_from()), response_from_t<>>);
     static_assert(!std::is_same_v<decltype(response_from(13.42)), response_from_t<>>);
@@ -99,6 +106,54 @@ BOOST_AUTO_TEST_CASE(test_response_from_built_in)
     BOOST_TEST(response_from(std::move(i3)).at(http::field::content_type) == "text/plain");
     BOOST_TEST(response_from(std::move(i3)).result() == http::status::ok);
     BOOST_TEST(response_from(std::move(i3)).body() == "15");
+}
+
+void void_fn(){}
+void void_int_fn(int){}
+int int_fn(){ return 13; }
+awaitable<void> awaitable_void_fn(){ co_return; }
+awaitable<void> awaitable_void_int_fn(int){ co_return; }
+awaitable<int> awaitable_int_fn(){ co_return 13; }
+
+BOOST_AUTO_TEST_CASE(test_response_from_invoke)
+{
+    static_assert(
+        std::is_same_v<
+            response_from_t<>,
+            decltype(response_from_invoke(void_fn))
+        >
+    );
+    static_assert(
+        std::is_same_v<
+            response_from_t<>,
+            decltype(response_from_invoke(void_int_fn, 13))
+        >
+    );
+    static_assert(
+        std::is_same_v<
+            response_from_t<int>,
+            decltype(response_from_invoke(int_fn))
+        >
+    );
+
+    static_assert(
+        std::is_same_v<
+            awaitable<response_from_t<>>,
+            decltype(response_from_invoke(awaitable_void_fn))
+        >
+    );
+    static_assert(
+        std::is_same_v<
+            awaitable<response_from_t<>>,
+            decltype(response_from_invoke(awaitable_void_int_fn, 42))
+        >
+    );
+    static_assert(
+        std::is_same_v<
+            awaitable<response_from_t<int>>,
+            decltype(response_from_invoke(awaitable_int_fn))
+        >
+    );
 }
 
 } // namespace

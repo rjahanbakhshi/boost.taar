@@ -170,7 +170,7 @@ public:
 
     // Support for response_from
     friend auto tag_invoke(
-        detail::response_from_built_in_tag,
+        detail::response_from_built_in_tag<response_builder>,
         response_builder&& value)
     {
         return std::move(value).get_response();

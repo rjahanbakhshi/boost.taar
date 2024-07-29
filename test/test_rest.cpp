@@ -16,6 +16,9 @@
 #include <boost/taar/matcher/method.hpp>
 #include <boost/taar/matcher/target.hpp>
 #include <boost/taar/matcher/context.hpp>
+#include <boost/taar/core/awaitable.hpp>
+#include <boost/taar/core/is_awaitable.hpp>
+#include <boost/taar/core/response_from.hpp>
 #include <boost/beast/http/message.hpp>
 #include <boost/beast/http/parser.hpp>
 #include <boost/beast/http/string_body.hpp>
@@ -374,6 +377,31 @@ BOOST_AUTO_TEST_CASE(test_rest_string_body)
     auto resp = to_response<http::string_body>(rh(req, ctx));
     BOOST_TEST(resp.body() == "Hello world!");
     BOOST_TEST(resp[http::field::content_type] == "text/plain");
+}
+
+BOOST_AUTO_TEST_CASE(test_rest_awaitable_handler)
+{
+    namespace http = boost::beast::http;
+    namespace taar = boost::taar;
+    using taar::matcher::context;
+    using taar::handler::string_body_arg;
+    using taar::has_response_from;
+    using taar::response_from_t;
+    using taar::awaitable;
+    using taar::is_awaitable;
+
+    http::request<http::string_body> req;
+    context ctx;
+
+    auto l = [](const std::string& str) -> awaitable<std::string> { co_return str + " world!"; };
+    auto rh = taar::handler::rest(l, string_body_arg());
+
+    static_assert(is_awaitable<decltype(rh(req, ctx))>, "Failed!");
+    static_assert(has_response_from<decltype(rh(req, ctx))::value_type>, "Failed!");
+    static_assert(
+        std::is_same_v<
+            response_from_t<std::string>&&,
+            response_from_t<decltype(rh(req, ctx))::value_type>>, "Failed!");
 }
 
 } // namespace

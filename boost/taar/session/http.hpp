@@ -20,6 +20,7 @@
 #include <boost/taar/core/cancellation_signals.hpp>
 #include <boost/taar/core/awaitable.hpp>
 #include <boost/taar/core/rebind_executor.hpp>
+#include <boost/taar/core/is_awaitable.hpp>
 #include <boost/beast/http/read.hpp>
 #include <boost/beast/http/write.hpp>
 #include <boost/beast/http/message_generator.hpp>
@@ -34,6 +35,7 @@
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/url/url_view.hpp>
 #include <exception>
+#include <type_traits>
 #include <vector>
 #include <functional>
 #include <utility>
@@ -41,11 +43,20 @@
 namespace boost::taar::session {
 namespace detail {
 
-template <typename T>
-concept soft_error_handler = requires
+template <typename HandlerType>
+concept soft_error_handler = requires(HandlerType handler)
 {
-    requires std::is_invocable_v<T, std::exception_ptr>;
-    requires has_response_from<std::invoke_result_t<T, std::exception_ptr>>;
+    requires std::is_invocable_v<HandlerType, std::exception_ptr>;
+    requires !is_awaitable<std::invoke_result_t<HandlerType, std::exception_ptr>>;
+    response_from_invoke(std::move(handler), std::declval<std::exception_ptr>());
+};
+
+template <typename HandlerType>
+concept awaitable_soft_error_handler = requires(HandlerType handler)
+{
+    requires std::is_invocable_v<HandlerType, std::exception_ptr>;
+    requires is_awaitable<std::invoke_result_t<HandlerType, std::exception_ptr>>;
+    response_from_invoke(std::move(handler), std::declval<std::exception_ptr>());
 };
 
 template <typename T>
@@ -273,14 +284,33 @@ public:
                 std::exception_ptr ex;
                 try
                 {
-                    auto response = response_from(
-                        request_handler(
-                            body_parser.get(),
-                            context));
+                    using handler_result = std::invoke_result_t<
+                        std::remove_cvref_t<RequestHandler>,
+                        decltype(body_parser.get()),
+                        const matcher::context&>;
 
-                    bool keep_alive = response.keep_alive();
-                    co_await detail::async_write(stream, std::move(response));
-                    co_return keep_alive;
+                    if constexpr (is_awaitable<handler_result>)
+                    {
+                        auto response = response_from(
+                            co_await request_handler(
+                                body_parser.get(),
+                                context));
+
+                        bool keep_alive = response.keep_alive();
+                        co_await detail::async_write(stream, std::move(response));
+                        co_return keep_alive;
+                    }
+                    else
+                    {
+                        auto response = response_from(
+                            request_handler(
+                                body_parser.get(),
+                                context));
+
+                        bool keep_alive = response.keep_alive();
+                        co_await detail::async_write(stream, std::move(response));
+                        co_return keep_alive;
+                    }
                 }
                 catch (...)
                 {
@@ -338,7 +368,25 @@ public:
                 cancellation_signals& signals) mutable
             -> awaitable<bool>
             {
-                auto response = response_from(handler(eptr));
+                auto response = response_from_invoke(std::move(handler), eptr);
+                bool keep_alive = response.keep_alive();
+                co_await detail::async_write(stream, std::move(response));
+                co_return keep_alive;
+            };
+    }
+
+    template <detail::awaitable_soft_error_handler HandlerType>
+    void set_soft_error_handler(HandlerType handler)
+    {
+        wrapped_soft_error_handler_ =
+            [handler = std::move(handler)](
+                std::exception_ptr eptr,
+                rebind_executor<boost::beast::tcp_stream>& stream,
+                boost::beast::http::request_header<>& request_header,
+                cancellation_signals& signals) mutable
+            -> awaitable<bool>
+            {
+                auto response = co_await response_from_invoke(std::move(handler), eptr);
                 bool keep_alive = response.keep_alive();
                 co_await detail::async_write(stream, std::move(response));
                 co_return keep_alive;

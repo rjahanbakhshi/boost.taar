@@ -12,6 +12,7 @@
 
 namespace boost::taar {
 
+template <typename... T>
 struct response_from_tag {};
 
 } // namespace boost::taar
