@@ -128,18 +128,18 @@ BOOST_AUTO_TEST_CASE(test_rest_arg)
     context ctx;
     ctx.path_args = {{"a", "13"}, {"b", "42"}};
 
-    BOOST_TEST((rest_arg<int, query_arg>{query_arg("a")}(req, ctx) == 13));
-    BOOST_TEST((rest_arg<std::string, query_arg>{query_arg("a")}(req, ctx) == "13"));
-    BOOST_TEST((rest_arg<std::string_view, query_arg>{query_arg("a")}(req, ctx) == "13"));
+    BOOST_TEST((rest_arg<int, query_arg>{query_arg("a")}(0, req, ctx) == 13));
+    BOOST_TEST((rest_arg<std::string, query_arg>{query_arg("a")}(0, req, ctx) == "13"));
+    BOOST_TEST((rest_arg<std::string_view, query_arg>{query_arg("a")}(0, req, ctx) == "13"));
 
-    BOOST_TEST((rest_arg<int, path_arg>{path_arg("a")}(req, ctx) == 13));
-    BOOST_TEST((rest_arg<int, path_arg>{path_arg("b")}(req, ctx) == 42));
-    BOOST_TEST((rest_arg<std::string, path_arg>{path_arg("b")}(req, ctx) == "42"));
+    BOOST_TEST((rest_arg<int, path_arg>{path_arg("a")}(0, req, ctx) == 13));
+    BOOST_TEST((rest_arg<int, path_arg>{path_arg("b")}(0, req, ctx) == 42));
+    BOOST_TEST((rest_arg<std::string, path_arg>{path_arg("b")}(0, req, ctx) == "42"));
 
-    BOOST_TEST((rest_arg<std::string, header_arg>{header_arg("header1")}(req, ctx) == "value1"));
-    BOOST_TEST((rest_arg<std::string_view, header_arg>{header_arg("header2")}(req, ctx) == "value2"));
-    BOOST_TEST((rest_arg<std::string_view, header_arg>{header_arg("pi")}(req, ctx) == "3.14"));
-    BOOST_TEST((rest_arg<float, header_arg>{header_arg("pi")}(req, ctx) == 3.14f));
+    BOOST_TEST((rest_arg<std::string, header_arg>{header_arg("header1")}(0, req, ctx) == "value1"));
+    BOOST_TEST((rest_arg<std::string_view, header_arg>{header_arg("header2")}(0, req, ctx) == "value2"));
+    BOOST_TEST((rest_arg<std::string_view, header_arg>{header_arg("pi")}(0, req, ctx) == "3.14"));
+    BOOST_TEST((rest_arg<float, header_arg>{header_arg("pi")}(0, req, ctx) == 3.14f));
 }
 
 BOOST_AUTO_TEST_CASE(test_rest_arg_string_body)
@@ -159,27 +159,27 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_string_body)
     context ctx;
 
     BOOST_TEST((
-        rest_arg<std::string, string_body_arg>{string_body_arg()}(req, ctx) ==
+        rest_arg<std::string, string_body_arg>{string_body_arg()}(0, req, ctx) ==
         "Hello world!"));
 
     BOOST_TEST((
-        rest_arg<std::string_view, string_body_arg>{string_body_arg()}(req, ctx) ==
+        rest_arg<std::string_view, string_body_arg>{string_body_arg()}(0, req, ctx) ==
         "Hello world!"));
 
     BOOST_TEST((
-        rest_arg<std::string, string_body_arg>{string_body_arg("text/plain")}(req, ctx) ==
+        rest_arg<std::string, string_body_arg>{string_body_arg("text/plain")}(0, req, ctx) ==
         "Hello world!"));
 
     BOOST_TEST((
-        rest_arg<std::string, string_body_arg>{string_body_arg("text/plain", "application/json")}(req, ctx) ==
+        rest_arg<std::string, string_body_arg>{string_body_arg("text/plain", "application/json")}(0, req, ctx) ==
         "Hello world!"));
 
     BOOST_TEST((
-        rest_arg<std::string, string_body_arg>{string_body_arg(all_content_types)}(req, ctx) ==
+        rest_arg<std::string, string_body_arg>{string_body_arg(all_content_types)}(0, req, ctx) ==
         "Hello world!"));
 
     BOOST_CHECK_THROW(
-        (rest_arg<std::string, string_body_arg>{string_body_arg("image/png")}(req, ctx)),
+        (rest_arg<std::string, string_body_arg>{string_body_arg("image/png")}(0, req, ctx)),
         boost::system::system_error);
 }
 
@@ -200,23 +200,23 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_json_body)
     context ctx;
 
     BOOST_TEST((
-      rest_arg<boost::json::value, json_body_arg>{json_body_arg()}(req, ctx) ==
+      rest_arg<boost::json::value, json_body_arg>{json_body_arg()}(0, req, ctx) ==
       boost::json::value{{"everything", 42}}));
 
     BOOST_TEST((
-      rest_arg<boost::json::value, json_body_arg>{json_body_arg("application/json")}(req, ctx) ==
+      rest_arg<boost::json::value, json_body_arg>{json_body_arg("application/json")}(0, req, ctx) ==
       boost::json::value{{"everything", 42}}));
 
     BOOST_TEST((
-      rest_arg<boost::json::value, json_body_arg>{json_body_arg(all_content_types)}(req, ctx) ==
+      rest_arg<boost::json::value, json_body_arg>{json_body_arg(all_content_types)}(0, req, ctx) ==
       boost::json::value{{"everything", 42}}));
 
     BOOST_TEST((
-      rest_arg<boost::json::value, json_body_arg>{json_body_arg("application/json", "text/plain")}(req, ctx) ==
+      rest_arg<boost::json::value, json_body_arg>{json_body_arg("application/json", "text/plain")}(0, req, ctx) ==
       boost::json::value{{"everything", 42}}));
 
     BOOST_CHECK_THROW(
-        (rest_arg<boost::json::value, json_body_arg>{json_body_arg("text/plain")}(req, ctx)),
+        (rest_arg<boost::json::value, json_body_arg>{json_body_arg("text/plain")}(0, req, ctx)),
         boost::system::system_error);
 }
 

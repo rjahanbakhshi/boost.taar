@@ -17,7 +17,7 @@
 namespace boost::taar {
 
 template <typename T>
-using rebind_executor = typename T::template 
+using rebind_executor = typename T::template
     rebind_executor<
         boost::asio::as_tuple_t<
             boost::asio::use_awaitable_t<

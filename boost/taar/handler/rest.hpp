@@ -10,7 +10,6 @@
 #ifndef BOOST_TAAR_HANDLER_REST_HPP
 #define BOOST_TAAR_HANDLER_REST_HPP
 
-#include <boost/taar/handler/rest_error.hpp>
 #include <boost/taar/handler/rest_arg.hpp>
 #include <boost/taar/matcher/context.hpp>
 #include <boost/taar/core/callable_traits.hpp>
@@ -19,6 +18,7 @@
 #include <boost/taar/core/super_type.hpp>
 #include <boost/taar/core/is_awaitable.hpp>
 #include <boost/taar/core/awaitable.hpp>
+#include <boost/taar/core/error.hpp>
 #include <boost/beast/http/message_generator.hpp>
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/field.hpp>
@@ -90,14 +90,21 @@ inline auto rest_for_callable(
     [
         callable = std::forward<CallableType>(callable),
         ...arg_providers = std::forward<ArgProvidersType>(arg_providers)
-    ](const request_type& request, const matcher::context& context) mutable
-    {
-        return response_from_invoke(
+    ](const request_type& request, const matcher::context& context) mutable ->
+        decltype(response_from_invoke(
             callable,
             rest_arg<
                 callable_arg_type<noref_fn_type, Indexes>,
                 std::remove_reference_t<ArgProvidersType>
-            > {arg_providers}(request, context)...
+            > {arg_providers}(Indexes, request, context)...
+        ))
+    {
+        co_return co_await response_from_invoke(
+            callable,
+            rest_arg<
+                callable_arg_type<noref_fn_type, Indexes>,
+                std::remove_reference_t<ArgProvidersType>
+            > {arg_providers}(Indexes, request, context)...
         );
     };
 }
@@ -132,15 +139,23 @@ inline auto rest_for_memfn(
         memfn,
         object = std::forward<ObjectType>(object),
         ...arg_providers = std::forward<ArgProvidersType>(arg_providers)
-    ](const request_type& request, const matcher::context& context) mutable
-    {
-        return response_from_invoke(
+    ](const request_type& request, const matcher::context& context) mutable ->
+        decltype(response_from_invoke(
             memfn,
             std::forward<ObjectType>(object),
             rest_arg<
                 callable_arg_type<noref_fn_type, Indexes>,
                 std::remove_reference_t<ArgProvidersType>
-            > {arg_providers}(request, context)...
+            > {arg_providers}(Indexes, request, context)...
+        ))
+    {
+        co_return co_await response_from_invoke(
+            memfn,
+            std::forward<ObjectType>(object),
+            rest_arg<
+                callable_arg_type<noref_fn_type, Indexes>,
+                std::remove_reference_t<ArgProvidersType>
+            > {arg_providers}(Indexes, request, context)...
         );
     };
 }

@@ -10,7 +10,7 @@
 #ifndef BOOST_TAAR_MATCHER_TEMPLATE_PARSER_HPP
 #define BOOST_TAAR_MATCHER_TEMPLATE_PARSER_HPP
 
-#include <boost/taar/matcher/error.hpp>
+#include <boost/taar/core/error.hpp>
 #include <boost/system/result.hpp>
 #include <vector>
 #include <string_view>

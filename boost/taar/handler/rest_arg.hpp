@@ -10,11 +10,11 @@
 #ifndef BOOST_TAAR_HANDLER_REST_ARG_HPP
 #define BOOST_TAAR_HANDLER_REST_ARG_HPP
 
-#include "boost/taar/core/callable_traits.hpp"
 #include <boost/taar/matcher/context.hpp>
-#include <boost/taar/handler/rest_error.hpp>
+#include <boost/taar/core/callable_traits.hpp>
 #include <boost/taar/core/always_false.hpp>
 #include <boost/taar/core/specialization_of.hpp>
+#include <boost/taar/core/error.hpp>
 #include <boost/beast/http/string_body.hpp>
 #include <boost/beast/http/message.hpp>
 #include <boost/url/parse.hpp>
@@ -26,8 +26,10 @@
 #include <boost/system/result.hpp>
 #include <initializer_list>
 #include <iterator>
+#include <system_error>
 #include <unordered_set>
 #include <optional>
+#include <format>
 #include <string>
 #include <algorithm>
 #include <utility>
@@ -69,7 +71,7 @@ boost::system::result<bool> inline bool_cast(std::string_view str)
         return iter-> second;
     }
 
-    return rest_error::invalid_request_format;
+    return error::invalid_request_format;
 }
 
 // Convert the getter into another one by applying possible cast and conversions.
@@ -158,43 +160,56 @@ struct rest_arg
     {}
 
     arg_type operator()(
+        std::size_t index,
         const arg_provider_request_type& request,
         const matcher::context& context) &&
     {
-        if constexpr (
-            specialization_of<std::optional, arg_type> &&
-            detail::is_rest_arg_provider<arg_provider_type> &&
-            detail::rest_arg_castable<typename arg_provider_result_type::value_type, arg_type>)
+        try
         {
-            // It's necessary to store the retrieved value to make sure it outlives
-            // the call operator. Case in point, std::string -> std::string_view
-            provider_result_ = arg_provider_(request, context);
-            if (provider_result_.has_error() &&
-                provider_result_.error() == rest_error::argument_not_found)
+            if constexpr (
+                specialization_of<std::optional, arg_type> &&
+                detail::is_rest_arg_provider<arg_provider_type> &&
+                detail::rest_arg_castable<typename arg_provider_result_type::value_type, arg_type>)
             {
-                return std::nullopt;
-            }
+                // It's necessary to store the retrieved value to make sure it outlives
+                // the call operator. Case in point, std::string -> std::string_view
+                provider_result_ = arg_provider_(request, context);
+                if (provider_result_.has_error() &&
+                    provider_result_.error() == error::argument_not_found)
+                {
+                    return std::nullopt;
+                }
 
-            return detail::rest_arg_cast<arg_type>(std::move(provider_result_.value()));
+                return detail::rest_arg_cast<arg_type>(std::move(provider_result_.value()));
+            }
+            if constexpr (
+                detail::is_rest_arg_provider<arg_provider_type> &&
+                detail::rest_arg_castable<typename arg_provider_result_type::value_type, arg_type>)
+            {
+                // It's necessary to store the retrieved value to make sure it outlives
+                // the call operator. Case in point, std::string -> std::string_view
+                provider_result_ = arg_provider_(request, context);
+                return detail::rest_arg_cast<arg_type>(std::move(provider_result_.value()));
+            }
+            else if constexpr (detail::rest_arg_castable<arg_provider_type, arg_type>)
+            {
+                return detail::rest_arg_cast<arg_type>(std::move(arg_provider_));
+            }
+            else
+            {
+                static_assert(
+                    always_false<arg_provider_type, arg_type>,
+                    "Not a compatible rest arg provider!");
+            }
         }
-        if constexpr (
-            detail::is_rest_arg_provider<arg_provider_type> &&
-            detail::rest_arg_castable<typename arg_provider_result_type::value_type, arg_type>)
+        catch(...)
         {
-            // It's necessary to store the retrieved value to make sure it outlives
-            // the call operator. Case in point, std::string -> std::string_view
-            provider_result_ = arg_provider_(request, context);
-            return detail::rest_arg_cast<arg_type>(std::move(provider_result_.value()));
-        }
-        else if constexpr (detail::rest_arg_castable<arg_provider_type, arg_type>)
-        {
-            return detail::rest_arg_cast<arg_type>(std::move(arg_provider_));
-        }
-        else
-        {
-            static_assert(
-                always_false<arg_provider_type, arg_type>,
-                "Not a compatible rest arg provider!");
+            throw boost::system::system_error{
+                error::invalid_argument_format,
+                std::format(
+                    "REST arg({}:{})",
+                    index + 1,
+                    arg_provider_.name())};
         }
     }
 
@@ -209,6 +224,11 @@ struct path_arg
         : path_key_ {std::move(path_key)}
     {}
 
+    const std::string& name() const
+    {
+        return path_key_;
+    }
+
     boost::system::result<std::string> operator()(
         const boost::beast::http::request_header<>&,
         const matcher::context& context) const
@@ -218,7 +238,7 @@ struct path_arg
         {
             return std::string {iter->second};
         }
-        return rest_error::argument_not_found;
+        return error::argument_not_found;
     }
 
     std::string path_key_;
@@ -234,6 +254,11 @@ struct query_arg
         , ic_ {std::move(ic)}
     {}
 
+    const std::string& name() const
+    {
+        return query_key_;
+    }
+
     boost::system::result<std::string> operator()(
         const boost::beast::http::request_header<>& request,
         const matcher::context&) const
@@ -241,14 +266,14 @@ struct query_arg
         auto url_view = boost::urls::parse_origin_form(request.target());
         if (!url_view)
         {
-            return rest_error::invalid_url_format;
+            return error::invalid_url_format;
         }
 
         auto params = url_view->params();
 
         if (params.count(query_key_, ic_) > 1)
         {
-            return rest_error::argument_ambiguous;
+            return error::argument_ambiguous;
         }
 
         auto iter = params.find(query_key_, ic_);
@@ -257,7 +282,7 @@ struct query_arg
             const auto& param = *iter;
             return std::string {param.value};
         }
-        return rest_error::argument_not_found;
+        return error::argument_not_found;
     }
 
     std::string query_key_;
@@ -271,6 +296,11 @@ struct header_arg
         : header_name_ {std::move(header_name)}
     {}
 
+    const std::string& name() const
+    {
+        return header_name_;
+    }
+
     boost::system::result<std::string> operator()(
         const boost::beast::http::request_header<>& request,
         const matcher::context&) const
@@ -278,7 +308,7 @@ struct header_arg
         auto iter_range = request.equal_range(header_name_);
         if (iter_range.first == request.end())
         {
-            return rest_error::argument_not_found;
+            return error::argument_not_found;
         }
         else if (std::distance(iter_range.first, iter_range.second) == 1)
         {
@@ -286,7 +316,7 @@ struct header_arg
         }
 
         // More than one instance of the header with the same name found.
-        return rest_error::argument_ambiguous;
+        return error::argument_ambiguous;
     }
 
     std::string header_name_;
@@ -308,6 +338,11 @@ struct string_body_arg
         }
     }
 
+    std::string name() const
+    {
+        return "string_body";
+    }
+
     string_body_arg(all_content_types_t)
     {}
 
@@ -323,7 +358,7 @@ struct string_body_arg
                     return content_types_.contains(elem.value());
                 }) == range.second)
             {
-                return rest_error::invalid_content_type;
+                return error::invalid_content_type;
             }
         }
 
@@ -346,6 +381,11 @@ struct json_body_arg
         }
     }
 
+    std::string name() const
+    {
+        return "json_body";
+    }
+
     json_body_arg(all_content_types_t)
     {}
 
@@ -361,7 +401,7 @@ struct json_body_arg
                     return content_types_.contains(elem.value());
                 }) == range.second)
             {
-                return rest_error::invalid_content_type;
+                return error::invalid_content_type;
             }
         }
 
@@ -369,7 +409,7 @@ struct json_body_arg
         auto json = boost::json::parse(request.body(), ec);
         if (ec)
         {
-            return rest_error::invalid_request_format;
+            return error::invalid_request_format;
         }
         return json;
     }

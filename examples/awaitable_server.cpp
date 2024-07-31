@@ -27,8 +27,8 @@
 #include <boost/json/value.hpp>
 #include <exception>
 #include <iostream>
-#include <cstdlib>
 #include <thread>
+#include <cstdlib>
 
 int main(int argc, char* argv[])
 {
@@ -81,23 +81,6 @@ int main(int argc, char* argv[])
     );
 
     http_session.register_request_handler(
-        method == http::verb::get && target == "/special/{*}",
-        [](
-            const http::request<http::empty_body>& request,
-            const taar::matcher::context& context) -> awaitable<http::message_generator>
-        {
-            http::response<http::string_body> res {
-                boost::beast::http::status::ok,
-                request.version()};
-            res.set(boost::beast::http::field::content_type, "text/html");
-            res.keep_alive(request.keep_alive());
-            res.body() = "Special path is: " + context.path_args.at("*");
-            res.prepare_payload();
-            co_return res;
-        }
-    );
-
-    http_session.register_request_handler(
         method == http::verb::get && target == "/api/sum/{a}/{b}",
         taar::handler::rest([](int a, int b) -> awaitable<boost::json::value>
         {
@@ -113,7 +96,7 @@ int main(int argc, char* argv[])
 
     http_session.register_request_handler(
         method == http::verb::post && target == "/api/concat/{a}",
-        taar::handler::rest([](std::string a, const std::string& b)
+        taar::handler::rest([](std::string_view a, const std::string_view& b)
             -> awaitable<std::string>
         {
             co_return std::string{a} + std::string{b};

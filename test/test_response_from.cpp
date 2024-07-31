@@ -119,19 +119,19 @@ BOOST_AUTO_TEST_CASE(test_response_from_invoke)
 {
     static_assert(
         std::is_same_v<
-            response_from_t<>,
+            awaitable<response_from_t<>>,
             decltype(response_from_invoke(void_fn))
         >
     );
     static_assert(
         std::is_same_v<
-            response_from_t<>,
+            awaitable<response_from_t<>>,
             decltype(response_from_invoke(void_int_fn, 13))
         >
     );
     static_assert(
         std::is_same_v<
-            response_from_t<int>,
+            awaitable<response_from_t<int>>,
             decltype(response_from_invoke(int_fn))
         >
     );

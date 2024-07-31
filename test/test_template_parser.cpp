@@ -15,6 +15,7 @@ namespace {
 BOOST_AUTO_TEST_CASE(test_matcher_template_parser_invalid)
 {
     using namespace boost::taar::matcher;
+    using boost::taar::error;
 
     BOOST_TEST((parse_template("") == error::no_absolute_template));
     BOOST_TEST((parse_template("blah") == error::no_absolute_template));

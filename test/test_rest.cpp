@@ -92,16 +92,14 @@ BOOST_AUTO_TEST_CASE(test_rest_void)
         &voidfn,
         path_arg("a"),
         path_arg("b"));
-    auto resp1 = to_response<http::string_body>(rh1(req, ctx));
-    BOOST_TEST(resp1.body().empty());
+    auto resp1 = to_response(rh1(req, ctx));
     BOOST_TEST(resp1.count(http::field::content_type) == 0);
 
     auto rh2 = taar::handler::rest(
         voidfn,
         path_arg("a"),
         path_arg("b"));
-    auto resp2 = to_response<http::string_body>(rh2(req, ctx));
-    BOOST_TEST(resp2.body().empty());
+    auto resp2 = to_response(rh2(req, ctx));
     BOOST_TEST(resp2.count(http::field::content_type) == 0);
 }
 
@@ -400,7 +398,7 @@ BOOST_AUTO_TEST_CASE(test_rest_awaitable_handler)
     static_assert(has_response_from<decltype(rh(req, ctx))::value_type>, "Failed!");
     static_assert(
         std::is_same_v<
-            response_from_t<std::string>&&,
+            response_from_t<std::string>,
             response_from_t<decltype(rh(req, ctx))::value_type>>, "Failed!");
 }
 

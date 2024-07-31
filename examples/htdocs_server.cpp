@@ -21,6 +21,7 @@
 #include <boost/asio/signal_set.hpp>
 #include <boost/asio/bind_cancellation_slot.hpp>
 #include <boost/asio/io_context.hpp>
+#include <thread>
 #include <iostream>
 #include <cstdlib>
 
@@ -67,7 +68,11 @@ int main(int argc, char* argv[])
             }),
         bind_cancellation_slot(cancellation_signals.slot(), taar::ignore_and_rethrow));
 
-    io_context.run();
+    std::vector<std::jthread> threads;
+    for (int i = 0; i < 8; ++i)
+    {
+        threads.emplace_back([&]{io_context.run();});
+    }
 
     return EXIT_SUCCESS;
 }

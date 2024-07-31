@@ -10,6 +10,7 @@
 #ifndef BOOST_TAAR_CORE_RESPONSE_FROM_HPP
 #define BOOST_TAAR_CORE_RESPONSE_FROM_HPP
 
+#include <boost/taar/core/awaitable.hpp>
 #include <boost/taar/core/is_awaitable.hpp>
 #include <boost/taar/core/is_http_response.hpp>
 #include <boost/taar/core/always_false.hpp>
@@ -159,7 +160,7 @@ concept has_response_from =
     detail::has_built_in_response_from<T...>;
 
 template <has_response_from... T>
-inline constexpr decltype(auto) response_from(T&&... value)
+inline constexpr auto response_from(T&&... value)
 {
     if constexpr (detail::has_user_defined_response_from<T...>)
     {
@@ -182,21 +183,24 @@ template <typename CallableType, typename... ArgsType> requires (
     std::is_void_v<std::invoke_result_t<CallableType, ArgsType...>>)
 inline auto response_from_invoke(
     CallableType&& callable,
-    ArgsType... args)
+    ArgsType&&... args) ->
+awaitable<response_from_t<>>
 {
     std::invoke(
         std::forward<CallableType>(callable),
         std::forward<ArgsType>(args)...);
-    return response_from();
+    co_return response_from();
 }
 
 template <typename CallableType, typename... ArgsType> requires (
     has_response_from<std::invoke_result_t<CallableType, ArgsType...>>)
-inline decltype(auto) response_from_invoke(
+inline auto response_from_invoke(
     CallableType&& callable,
-    ArgsType... args)
+    ArgsType&&... args) ->
+awaitable<
+    response_from_t<typename std::invoke_result_t<CallableType, ArgsType...>>>
 {
-    return response_from(std::invoke(
+    co_return response_from(std::invoke(
         std::forward<CallableType>(callable),
         std::forward<ArgsType>(args)...));
 }
@@ -206,10 +210,9 @@ template <typename CallableType, typename... ArgsType> requires (
     std::is_void_v<typename std::invoke_result_t<CallableType, ArgsType...>::value_type>)
 inline auto response_from_invoke(
     CallableType&& callable,
-    ArgsType... args) ->
-asio::awaitable<
-    response_from_t<>,
-    typename std::invoke_result_t<CallableType, ArgsType...>::executor_type>
+    ArgsType&&... args) ->
+awaitable<
+    response_from_t<>>
 {
     co_await std::invoke(
         std::forward<CallableType>(callable),
@@ -222,10 +225,9 @@ template <typename CallableType, typename... ArgsType> requires (
     has_response_from<typename std::invoke_result_t<CallableType, ArgsType...>::value_type>)
 inline auto response_from_invoke(
     CallableType&& callable,
-    ArgsType... args) ->
-asio::awaitable<
-    response_from_t<typename std::invoke_result_t<CallableType, ArgsType...>::value_type>,
-    typename std::invoke_result_t<CallableType, ArgsType...>::executor_type>
+    ArgsType&&... args) ->
+awaitable<
+    response_from_t<typename std::invoke_result_t<CallableType, ArgsType...>::value_type>>
 {
     co_return response_from(co_await std::invoke(
         std::forward<CallableType>(callable),
