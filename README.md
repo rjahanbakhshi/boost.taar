@@ -200,12 +200,12 @@ io_context.run();
 
 ## Configuring the build directory
 
-Below are the commands to be executed from the project's root directory to build
-the Debug configuration.
+Execute the following commands from the project's root directory to configure
+it for the Debug configuration.
 
 ### No package manager
 
-This requires that the boost libraries are installed on the host.
+This requires the Boost libraries to be installed on the host.
 
 ```bash
 cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug
@@ -223,7 +223,7 @@ cmake \
 
 ## To build the code after configuring
 
-Assuming that it's invoked from the root directory of the project.
+Assuming it is invoked from the project's root directory.
 
 ```bash
 cmake --build build

@@ -10,6 +10,7 @@
 #ifndef BOOST_TAAR_HANDLER_REST_ARG_HPP
 #define BOOST_TAAR_HANDLER_REST_ARG_HPP
 
+#include <boost/beast/http/field.hpp>
 #include <boost/taar/matcher/context.hpp>
 #include <boost/taar/core/callable_traits.hpp>
 #include <boost/taar/core/always_false.hpp>
@@ -28,6 +29,7 @@
 #include <iterator>
 #include <system_error>
 #include <unordered_set>
+#include <variant>
 #include <optional>
 #include <format>
 #include <string>
@@ -293,33 +295,59 @@ struct query_arg
 struct header_arg
 {
     header_arg(std::string header_name)
-        : header_name_ {std::move(header_name)}
+        : header_ {std::move(header_name)}
     {}
 
-    const std::string& name() const
+    header_arg(boost::beast::http::field field)
+        : header_ {field}
+    {}
+
+    std::string name() const
     {
-        return header_name_;
+        std::string result;
+        std::visit([&](auto&& arg)
+        {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, std::string>)
+                result = arg;
+            else if constexpr (std::is_same_v<T, boost::beast::http::field>)
+                result = to_string(arg);
+            else
+                static_assert(false, "Not supported type!");
+        }, header_);
+
+        return result;
     }
 
     boost::system::result<std::string> operator()(
         const boost::beast::http::request_header<>& request,
         const matcher::context&) const
     {
-        auto iter_range = request.equal_range(header_name_);
-        if (iter_range.first == request.end())
-        {
-            return error::argument_not_found;
-        }
-        else if (std::distance(iter_range.first, iter_range.second) == 1)
-        {
-            return std::string {iter_range.first->value()};
-        }
+        boost::system::result<std::string> result;
 
-        // More than one instance of the header with the same name found.
-        return error::argument_ambiguous;
+        std::visit([&](auto&& arg)
+        {
+            auto iter_range = request.equal_range(arg);
+
+            if (iter_range.first == request.end())
+            {
+                result = error::argument_not_found;
+            }
+            else if (std::distance(iter_range.first, iter_range.second) == 1)
+            {
+                result = std::string {iter_range.first->value()};
+            }
+            else
+            {
+                // More than one instance of the header with the same name found.
+                result = error::argument_ambiguous;
+            }
+        }, header_);
+
+        return result;
     }
 
-    std::string header_name_;
+    std::variant<boost::beast::http::field, std::string> header_;
 };
 
 struct all_content_types_t {};
