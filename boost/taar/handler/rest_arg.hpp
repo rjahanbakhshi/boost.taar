@@ -350,6 +350,62 @@ struct header_arg
     std::variant<boost::beast::http::field, std::string> header_;
 };
 
+// REST arg provider from the request cookie header
+struct cookie_arg
+{
+    cookie_arg(std::string name)
+        : name_ {std::move(name)}
+    {}
+
+    const std::string& name() const
+    {
+        return name_;
+    }
+
+    boost::system::result<std::string> operator()(
+        const boost::beast::http::request_header<>& request,
+        const matcher::context&) const
+    {
+        auto header_iter = request.find(boost::beast::http::field::cookie);
+        if (header_iter != request.end())
+        {
+            auto const& cookie = header_iter->value();
+            std::remove_cvref_t<decltype(cookie)>::size_type pos = 0;
+            while (pos < cookie.size())
+            {
+                auto end = cookie.find('=', pos);
+                if (end >= cookie.size())
+                {
+                    return error::invalid_request_format;
+                }
+
+                if (name_ == cookie.substr(pos, end - pos))
+                {
+                    // Name matched
+                    pos = end + 1;
+                    if (pos < cookie.size())
+                    {
+                        end = cookie.find("; ", pos);
+                        return cookie.substr(pos, end - pos);
+                    }
+
+                    return "";
+                }
+
+                pos = cookie.find("; ", end);
+                if (pos < cookie.size())
+                {
+                    pos += 2;
+                }
+            }
+        }
+
+        return error::argument_not_found;
+    }
+
+    std::string name_;
+};
+
 struct all_content_types_t {};
 constexpr all_content_types_t all_content_types {};
 

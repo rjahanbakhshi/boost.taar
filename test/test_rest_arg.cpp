@@ -7,6 +7,7 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
 
+#include "boost/taar/core/error.hpp"
 #include <boost/taar/handler/rest_arg.hpp>
 #include <boost/test/unit_test.hpp>
 #include <boost/json/value_from.hpp>
@@ -104,6 +105,7 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_provider)
     static_assert(is_rest_arg_provider<path_arg>, "Failed!");
     static_assert(is_rest_arg_provider<query_arg>, "Failed!");
     static_assert(is_rest_arg_provider<header_arg>, "Failed!");
+    static_assert(is_rest_arg_provider<cookie_arg>, "Failed!");
     static_assert(is_rest_arg_provider<string_body_arg>, "Failed!");
     static_assert(is_rest_arg_provider<json_body_arg>, "Failed!");
 }
@@ -117,6 +119,7 @@ BOOST_AUTO_TEST_CASE(test_rest_arg)
     using taar::handler::query_arg;
     using taar::handler::path_arg;
     using taar::handler::header_arg;
+    using taar::handler::cookie_arg;
     using taar::handler::string_body_arg;
     using taar::handler::json_body_arg;
 
@@ -142,6 +145,39 @@ BOOST_AUTO_TEST_CASE(test_rest_arg)
     BOOST_TEST((rest_arg<std::string_view, header_arg>{header_arg("pi")}(0, req, ctx) == "3.14"));
     BOOST_TEST((rest_arg<float, header_arg>{header_arg("pi")}(0, req, ctx) == 3.14f));
     BOOST_TEST((rest_arg<std::string, header_arg>{header_arg(http::field::host)}(0, req, ctx) == "boost.org"));
+}
+
+BOOST_AUTO_TEST_CASE(test_rest_arg_cookie)
+{
+    namespace http = boost::beast::http;
+    namespace taar = boost::taar;
+    using taar::matcher::context;
+    using taar::handler::rest_arg;
+    using taar::handler::cookie_arg;
+    using taar::error;
+
+    http::request<http::string_body> req{http::verb::get, "", 10};
+    req.set(http::field::cookie, "cookie1=value1; cookie2=value2; cookie3=value3");
+    context ctx;
+
+    BOOST_TEST((rest_arg<std::string, cookie_arg>{cookie_arg("cookie1")}(0, req, ctx) == "value1"));
+    BOOST_TEST((rest_arg<std::string, cookie_arg>{cookie_arg("cookie2")}(0, req, ctx) == "value2"));
+    BOOST_TEST((rest_arg<std::string, cookie_arg>{cookie_arg("cookie3")}(0, req, ctx) == "value3"));
+
+    req.set(http::field::cookie, "cookie1=");
+    BOOST_TEST((rest_arg<std::string, cookie_arg>{cookie_arg("cookie1")}(0, req, ctx) == ""));
+
+    req.set(http::field::cookie, "");
+    BOOST_REQUIRE_THROW((rest_arg<std::string, cookie_arg>{cookie_arg("cookie1")}(0, req, ctx)), boost::system::system_error);
+
+    req.set(http::field::cookie, "cookie1");
+    BOOST_REQUIRE_THROW((rest_arg<std::string, cookie_arg>{cookie_arg("cookie1")}(0, req, ctx)), boost::system::system_error);
+
+    req.set(http::field::cookie, "cookie1;");
+    BOOST_REQUIRE_THROW((rest_arg<std::string, cookie_arg>{cookie_arg("cookie1")}(0, req, ctx)), boost::system::system_error);
+
+    req.set(http::field::cookie, ";");
+    BOOST_REQUIRE_THROW((rest_arg<std::string, cookie_arg>{cookie_arg("cookie1")}(0, req, ctx)), boost::system::system_error);
 }
 
 BOOST_AUTO_TEST_CASE(test_rest_arg_string_body)
