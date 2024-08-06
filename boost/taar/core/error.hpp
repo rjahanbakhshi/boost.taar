@@ -52,7 +52,7 @@ inline boost::system::error_category const& error_category() noexcept
             case error::argument_not_found:
                 return "Argument not found";
             case error::argument_ambiguous:
-                return "Argument not ambiguous";
+                return "Argument ambiguous";
             case error::invalid_argument_format:
                 return "Invalid argument format.";
             case error::invalid_request_format:

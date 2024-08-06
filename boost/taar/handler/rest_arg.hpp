@@ -25,8 +25,8 @@
 #include <boost/json/value_to.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/system/result.hpp>
+#include <exception>
 #include <initializer_list>
-#include <iterator>
 #include <system_error>
 #include <unordered_set>
 #include <variant>
@@ -204,6 +204,16 @@ struct rest_arg
                     "Not a compatible rest arg provider!");
             }
         }
+        catch(const std::exception& e)
+        {
+            throw boost::system::system_error{
+                error::invalid_argument_format,
+                std::format(
+                    "{} - REST arg({}:{})",
+                    e.what(),
+                    index + 1,
+                    arg_provider_.name())};
+        }
         catch(...)
         {
             throw boost::system::system_error{
@@ -333,14 +343,21 @@ struct header_arg
             {
                 result = error::argument_not_found;
             }
-            else if (std::distance(iter_range.first, iter_range.second) == 1)
-            {
-                result = std::string {iter_range.first->value()};
-            }
             else
             {
-                // More than one instance of the header with the same name found.
-                result = error::argument_ambiguous;
+                result = std::string {iter_range.first->value()};
+                if (std::any_of(
+                        iter_range.first,
+                        iter_range.second,
+                        [&](auto const& val)
+                        {
+                            return val.value() != result.value();
+                        }
+                   ))
+                {
+                    // Same header is repeated with different values.
+                    result = error::argument_ambiguous;
+                }
             }
         }, header_);
 

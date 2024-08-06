@@ -147,6 +147,28 @@ BOOST_AUTO_TEST_CASE(test_rest_arg)
     BOOST_TEST((rest_arg<std::string, header_arg>{header_arg(http::field::host)}(0, req, ctx) == "boost.org"));
 }
 
+BOOST_AUTO_TEST_CASE(test_rest_arg_multiple_headers)
+{
+    namespace http = boost::beast::http;
+    namespace taar = boost::taar;
+    using taar::matcher::context;
+    using taar::handler::rest_arg;
+    using taar::handler::header_arg;
+    using taar::error;
+
+    context ctx;
+
+    http::request<http::string_body> req1{http::verb::get, "", 10};
+    req1.insert(http::field::host, "host1");
+    req1.insert(http::field::host, "host1");
+    BOOST_TEST((rest_arg<std::string, header_arg>{header_arg(http::field::host)}(0, req1, ctx) == "host1"));
+
+    http::request<http::string_body> req2{http::verb::get, "", 10};
+    req2.insert(http::field::host, "host1");
+    req2.insert(http::field::host, "host2");
+    BOOST_REQUIRE_THROW((rest_arg<std::string, header_arg>{header_arg(http::field::host)}(0, req2, ctx)), boost::system::system_error);
+}
+
 BOOST_AUTO_TEST_CASE(test_rest_arg_cookie)
 {
     namespace http = boost::beast::http;
