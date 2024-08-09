@@ -240,15 +240,29 @@ public:
     }
 
     template <typename MatcherType, typename RequestHandler>
-    // TODO: need a concept to make sure MatcherType is compatible
-    // TODO: need a concept to make sure RequestHandler is compatible
+    auto register_request_handler(
+        MatcherType&&,
+        RequestHandler)
+    {
+        static_assert(
+            matcher::is_matcher<std::decay_t<MatcherType>>,
+            "Incompatible matcher type");
+
+        static_assert(
+            std::is_copy_constructible_v<std::decay_t<RequestHandler>>,
+            "Http handler target must be copy-constructible");
+    }
+
+    template <typename MatcherType, typename RequestHandler> requires(
+        matcher::is_matcher<std::decay_t<MatcherType>> &&
+        std::is_copy_constructible_v<std::decay_t<RequestHandler>>)
     auto register_request_handler(
         MatcherType&& matcher,
         RequestHandler request_handler)
     {
         namespace http = boost::beast::http;
 
-        matcher::operand operand {std::forward<MatcherType&&>(matcher)};
+        matcher::operand operand {std::forward<MatcherType>(matcher)};
         needs_parsed_target_ |= decltype(operand)::with_parsed_target;
 
         matcher_handlers_.emplace_back(
@@ -278,7 +292,7 @@ public:
                 try
                 {
                     auto response = co_await response_from_invoke(
-                        request_handler,
+                        std::move(request_handler),
                         body_parser.get(),
                         context);
 

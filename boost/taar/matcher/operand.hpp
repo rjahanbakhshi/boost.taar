@@ -254,6 +254,12 @@ operand(ObjectType) ->
         >::template arg_type<0>
     >, ObjectType>;
 
+template <typename MatcherType>
+concept is_matcher = requires(MatcherType&& matcher)
+{
+    operand{std::forward<MatcherType>(matcher)};
+};
+
 } // namespace boost::taar::matcher
 
 #endif // BOOST_TAAR_MATCHER_MATCHER_HPP
