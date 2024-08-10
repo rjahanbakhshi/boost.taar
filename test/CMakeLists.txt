@@ -13,6 +13,7 @@ target_sources(
         test_callable_with.cpp
         test_constexpr_string.cpp
         test_header.cpp
+        test_tcp_server.cpp
         test_http_session.cpp
         test_is_http_response.cpp
         test_member_function_of.cpp

@@ -31,6 +31,7 @@ target_sources(
         boost/taar/core/is_awaitable.hpp
         boost/taar/core/is_http_response.hpp
         boost/taar/core/member_function_of.hpp
+        boost/taar/core/move_only_function.hpp
         boost/taar/core/pack_element.hpp
         boost/taar/core/rebind_executor.hpp
         boost/taar/core/response_builder.hpp

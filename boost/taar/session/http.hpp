@@ -14,6 +14,7 @@
 #include <boost/taar/matcher/context.hpp>
 #include <boost/taar/matcher/operand.hpp>
 #include <boost/taar/core/response_from.hpp>
+#include <boost/taar/core/move_only_function.hpp>
 #include <boost/taar/core/member_function_of.hpp>
 #include <boost/taar/core/callable_traits.hpp>
 #include <boost/taar/core/specialization_of.hpp>
@@ -38,7 +39,6 @@
 #include <exception>
 #include <type_traits>
 #include <vector>
-#include <functional>
 #include <utility>
 
 namespace boost::taar::session {
@@ -86,13 +86,13 @@ auto async_write(
 class http
 {
 private:
-    using matcher_type = std::function<
+    using matcher_type = move_only_function<
         bool(
             const boost::beast::http::request_header<>&,
             matcher::context&,
             const boost::urls::url_view&)>;
 
-    using request_handler_wrapper_type = std::function<
+    using request_handler_wrapper_type = move_only_function<
         awaitable<bool>(
             const matcher::context&,
             rebind_executor<boost::beast::tcp_stream>&,
@@ -100,14 +100,20 @@ private:
             boost::beast::http::request_parser<boost::beast::http::buffer_body>&,
             cancellation_signals&)>;
 
-    using wrapped_soft_error_handler_type = std::function<
+    struct matcher_handler_type
+    {
+        matcher_type matcher;
+        request_handler_wrapper_type handler;
+    };
+
+    using soft_error_handler_wrapper_type = move_only_function<
         awaitable<bool>(
             std::exception_ptr,
             rebind_executor<boost::beast::tcp_stream>&,
             boost::beast::http::request_header<>&,
             cancellation_signals&)>;
 
-    using hard_error_handler_type = std::function<void(std::exception_ptr)>;
+    using hard_error_handler_type = move_only_function<void(std::exception_ptr)>;
 
 public:
     http()
@@ -123,9 +129,15 @@ public:
         }
     {}
 
+    http(http const&) = delete;
+    http(http&&) = default;
+    http& operator=(http const&) = delete;
+    http& operator=(http&&) = default;
+    ~http() = default;
+
     awaitable<void> operator()(
         rebind_executor<boost::asio::ip::tcp::socket> socket,
-        cancellation_signals& signals) const
+        cancellation_signals& signals)
     {
         namespace net = boost::asio;
         namespace http = boost::beast::http;
@@ -166,16 +178,23 @@ public:
                 }
 
                 auto iter = std::ranges::find_if(matcher_handlers_,
-                    [&](auto const& matcher) -> bool
+                    [&](auto const& matcher_handler) -> bool
                     {
                         context.path_args.clear();
-                        return matcher.first(req_header, context, parsed_target);
+                        return matcher_handler.matcher(
+                            req_header,
+                            context,
+                            parsed_target);
                     });
 
                 if (iter != matcher_handlers_.cend())
                 {
-                    auto const& handler = iter->second;
-                    if (!co_await handler(context, stream, buffer, header_parser, signals))
+                    if (!co_await iter->handler(
+                        context,
+                        stream,
+                        buffer,
+                        header_parser,
+                        signals))
                     {
                         // Handler instructed to close the session.
                         break;
@@ -249,13 +268,13 @@ public:
             "Incompatible matcher type");
 
         static_assert(
-            std::is_copy_constructible_v<std::decay_t<RequestHandler>>,
-            "Http handler target must be copy-constructible");
+            std::is_move_constructible_v<std::decay_t<RequestHandler>>,
+            "Http handler target must be move-constructible");
     }
 
     template <typename MatcherType, typename RequestHandler> requires(
         matcher::is_matcher<std::decay_t<MatcherType>> &&
-        std::is_copy_constructible_v<std::decay_t<RequestHandler>>)
+        std::is_move_constructible_v<std::decay_t<RequestHandler>>)
     auto register_request_handler(
         MatcherType&& matcher,
         RequestHandler request_handler)
@@ -340,7 +359,7 @@ public:
     {
         return register_request_handler(
             std::forward<MatcherType>(matcher),
-            [memfn, object](ArgsType&&... args)
+            [memfn, object](ArgsType&&... args) mutable
             {
                 return (object->*memfn)(std::forward<ArgsType>(args)...);
             }
@@ -387,8 +406,8 @@ public:
     }
 
 private:
-    std::vector<std::pair<matcher_type, request_handler_wrapper_type>> matcher_handlers_;
-    wrapped_soft_error_handler_type wrapped_soft_error_handler_;
+    std::vector<matcher_handler_type> matcher_handlers_;
+    soft_error_handler_wrapper_type wrapped_soft_error_handler_;
     hard_error_handler_type hard_error_handler_ = [](std::exception_ptr){};
     bool needs_parsed_target_ = false;
 };

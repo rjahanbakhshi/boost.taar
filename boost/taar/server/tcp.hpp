@@ -29,7 +29,7 @@ template <typename SessionHandler> // TODO: SessionHandler concept for callable 
 [[nodiscard]] awaitable<void> tcp(
     std::string bind_host,
     std::string bind_port,
-    const SessionHandler& session_handler,
+    SessionHandler&& session_handler,
     cancellation_signals& signals,
     std::function<void(const boost::asio::ip::tcp::endpoint&)> local_endpoint_handler = nullptr)
 {
@@ -75,7 +75,7 @@ template <typename SessionHandler> // TODO: SessionHandler concept for callable 
             const auto executor = socket.get_executor();
             co_spawn(
                 executor,
-                session_handler(std::move(socket), signals),
+                std::forward<SessionHandler>(session_handler)(std::move(socket), signals),
                 net::bind_cancellation_slot(signals.slot(), detached));
         }
     }
