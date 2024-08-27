@@ -25,6 +25,7 @@ enum class error
     invalid_request_format,
     invalid_url_format,
     invalid_content_type,
+    invalid_cookie_format,
 };
 
 #if (__cpp_constexpr >= 202211L)
@@ -61,6 +62,8 @@ inline boost::system::error_category const& error_category() noexcept
                 return "Invalid url format";
             case error::invalid_content_type:
                 return "Invalid content type";
+            case error::invalid_cookie_format:
+                return "Invalid cookie format";
             }
 
             return "(Unknown error)";

@@ -12,13 +12,17 @@ target_sources(
         test_callable_traits.cpp
         test_callable_with.cpp
         test_constexpr_string.cpp
-        test_header.cpp
+        test_cookies.cpp
         test_tcp_server.cpp
         test_http_session.cpp
         test_is_http_response.cpp
+        test_matcher_cookie.cpp
+        test_matcher_header.cpp
+        test_matcher_method.cpp
+        test_matcher_operand.cpp
+        test_matcher_target.cpp
+        test_matcher_version.cpp
         test_member_function_of.cpp
-        test_method.cpp
-        test_operand.cpp
         test_pack_element.cpp
         test_response_builder.cpp
         test_response_from.cpp
@@ -27,9 +31,7 @@ target_sources(
         test_rest_arg.cpp
         test_specialization_of.cpp
         test_super_type.cpp
-        test_target.cpp
         test_template_parser.cpp
-        test_version.cpp
         to_response.h
 )
 

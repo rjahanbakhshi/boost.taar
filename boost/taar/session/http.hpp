@@ -11,9 +11,11 @@
 #define BOOST_TAAR_SESSION_HTTP_HPP
 
 #include <boost/asio/async_result.hpp>
+#include <boost/beast/http/fields.hpp>
 #include <boost/taar/matcher/context.hpp>
 #include <boost/taar/matcher/operand.hpp>
 #include <boost/taar/core/response_from.hpp>
+#include <boost/taar/core/cookies.hpp>
 #include <boost/taar/core/move_only_function.hpp>
 #include <boost/taar/core/member_function_of.hpp>
 #include <boost/taar/core/callable_traits.hpp>
@@ -90,7 +92,8 @@ private:
         bool(
             const boost::beast::http::request_header<>&,
             matcher::context&,
-            const boost::urls::url_view&)>;
+            const boost::urls::url_view&,
+            const cookies&)>;
 
     using request_handler_wrapper_type = move_only_function<
         awaitable<bool>(
@@ -171,10 +174,20 @@ public:
                 auto& req_header = header_parser.get();
                 matcher::context context;
                 boost::urls::url_view parsed_target;
+                cookies parsed_cookies;
 
                 if (needs_parsed_target_)
                 {
                     parsed_target = boost::urls::url_view(req_header.target());
+                }
+
+                if (needs_parsed_cookies_)
+                {
+                    auto r = req_header.equal_range(boost::beast::http::field::cookie);
+                    while (r.first++ != r.second)
+                    {
+                        parse_cookies(r.first->value(), parsed_cookies);
+                    }
                 }
 
                 auto iter = std::ranges::find_if(matcher_handlers_,
@@ -184,7 +197,8 @@ public:
                         return matcher_handler.matcher(
                             req_header,
                             context,
-                            parsed_target);
+                            parsed_target,
+                            parsed_cookies);
                     });
 
                 if (iter != matcher_handlers_.cend())
@@ -283,14 +297,16 @@ public:
 
         matcher::operand operand {std::forward<MatcherType>(matcher)};
         needs_parsed_target_ |= decltype(operand)::with_parsed_target;
+        needs_parsed_cookies_ |= decltype(operand)::with_parsed_cookies;
 
         matcher_handlers_.emplace_back(
             [this, operand = std::move(operand)](
                 const http::request_header<>& request,
                 matcher::context& context,
-                const boost::urls::url_view& parsed_target)
+                const boost::urls::url_view& parsed_target,
+                const cookies& parsed_cookies)
             {
-                return operand(request, context, parsed_target);
+                return operand(request, context, parsed_target, parsed_cookies);
             },
             [this, request_handler = std::move(request_handler)](
                 const matcher::context& context,
@@ -410,6 +426,7 @@ private:
     soft_error_handler_wrapper_type wrapped_soft_error_handler_;
     hard_error_handler_type hard_error_handler_ = [](std::exception_ptr){};
     bool needs_parsed_target_ = false;
+    bool needs_parsed_cookies_ = false;
 };
 
 } // namespace boost::taar::session

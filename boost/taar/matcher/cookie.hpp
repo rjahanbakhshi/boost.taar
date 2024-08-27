@@ -7,83 +7,85 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
 
-#ifndef BOOST_TAAR_MATCHER_HEADER_HPP
-#define BOOST_TAAR_MATCHER_HEADER_HPP
+#ifndef BOOST_TAAR_MATCHER_COOKIE_HPP
+#define BOOST_TAAR_MATCHER_COOKIE_HPP
 
 #include <boost/taar/matcher/context.hpp>
 #include <boost/taar/matcher/operand.hpp>
 #include <boost/beast/http/message.hpp>
 
 namespace boost::taar::matcher {
+namespace detail {
+
+} // namespace detail
 
 template <class FieldsType = boost::beast::http::fields>
-struct header_t
+struct cookie_t
 {
     using request_type = boost::beast::http::request_header<FieldsType>;
 
-    template <typename KeyType>
-    struct header_item
+    struct cookie_item
     {
-        KeyType key;
+        std::string name;
 
-        friend auto operator==(header_item lhs, std::string rhs)
+        friend auto operator==(cookie_item lhs, std::string rhs)
         {
             return matcher::operand
             {
                 [lhs = std::move(lhs), rhs = std::move(rhs)](
-                    const request_type& request,
-                    context& context)
+                    const request_type&,
+                    context&,
+                    const cookies& parsed_cookies)
                 {
-                    return request[lhs.key] == rhs;
+                    auto iter = parsed_cookies.find(lhs.name);
+                    return
+                        iter != parsed_cookies.end() &&
+                        iter->second == rhs;
                 }
             };
         }
 
-        friend auto operator==(std::string lhs, header_item rhs)
+        friend auto operator==(std::string lhs, cookie_item rhs)
         {
             return operator==(std::move(rhs), std::move(lhs));
         }
 
-        friend auto operator!=(header_item lhs, std::string rhs)
+        friend auto operator!=(cookie_item lhs, std::string rhs)
         {
             return !operator==(std::move(lhs), std::move(rhs));
         }
 
-        friend auto operator!=(std::string lhs, header_item rhs)
+        friend auto operator!=(std::string lhs, cookie_item rhs)
         {
             return !operator==(std::move(rhs), std::move(lhs));
         }
 
-        friend auto exist(header_item lhs)
+        friend auto exist(cookie_item lhs)
         {
             return matcher::operand
             {
                 [lhs = std::move(lhs)](
-                    const request_type& request,
-                    context& context)
+                    const request_type&,
+                    context&,
+                    const cookies& parsed_cookies)
                 {
-                    return request.find(lhs.key) != request.end();
+                    return parsed_cookies.contains(lhs.name);
                 }
             };
         }
     };
 
-    auto operator()(boost::beast::http::field field) const
+    auto operator()(std::string name) const
     {
-        return header_item {std::move(field)};
-    }
-
-    auto operator()(std::string field) const
-    {
-        return header_item {std::move(field)};
+        return cookie_item {std::move(name)};
     }
 };
 
 template<class FieldsType = boost::beast::http::fields>
-constexpr auto basic_header = header_t<FieldsType>{};
+constexpr auto basic_cookie = cookie_t<FieldsType>{};
 
-constexpr auto header = basic_header<boost::beast::http::fields>;
+constexpr auto cookie = basic_cookie<boost::beast::http::fields>;
 
 } // namespace boost::taar::matcher
 
-#endif // BOOST_TAAR_MATCHER_HEADER_HPP
+#endif // BOOST_TAAR_MATCHER_COOKIE_HPP

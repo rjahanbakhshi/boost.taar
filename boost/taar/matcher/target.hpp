@@ -36,7 +36,7 @@ struct target_t
         return matcher::operand
         {
             [ptt_segments = std::move(ptt_segments)](
-                const request_type& request,
+                const request_type&,
                 context& context,
                 const boost::urls::url_view& parsed_target)
             {

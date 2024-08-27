@@ -26,6 +26,7 @@ target_sources(
         boost/taar/core/callable_traits.hpp
         boost/taar/core/cancellation_signals.hpp
         boost/taar/core/constexpr_string.hpp
+        boost/taar/core/cookies.hpp
         boost/taar/core/error.hpp
         boost/taar/core/ignore_and_rethrow.hpp
         boost/taar/core/is_awaitable.hpp
@@ -46,6 +47,7 @@ target_sources(
         boost/taar/matcher/detail/join_with.hpp
         boost/taar/matcher/detail/ranges_to.hpp
         boost/taar/matcher/context.hpp
+        boost/taar/matcher/cookie.hpp
         boost/taar/matcher/header.hpp
         boost/taar/matcher/method.hpp
         boost/taar/matcher/operand.hpp

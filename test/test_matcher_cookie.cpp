@@ -7,7 +7,8 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
 
-#include <boost/taar/matcher/header.hpp>
+#include "boost/taar/core/cookies.hpp"
+#include <boost/taar/matcher/cookie.hpp>
 #include <boost/beast/http/verb.hpp>
 #include <boost/beast/http/string_body.hpp>
 #include <boost/beast/version.hpp>
@@ -15,23 +16,22 @@
 
 namespace {
 
-BOOST_AUTO_TEST_CASE(test_matcher_header)
+BOOST_AUTO_TEST_CASE(test_matcher_cookie)
 {
     namespace http = boost::beast::http;
-    using namespace boost::taar::matcher;
+    namespace taar = boost::taar;
+    using namespace taar::matcher;
     using http::field;
 
     http::request<http::string_body> req{http::verb::get, "/a/b", 10};
-    req.set(field::host, "example.com");
-    req.set(field::user_agent, BOOST_BEAST_VERSION_STRING);
-    req.set("example", "Example Value");
+    taar::cookies parsed_cookies{"name1=value1; blah=42;nr=13"};
     context ctx;
 
-    BOOST_TEST((header(field::host) == "example.com")(req, ctx));
-    BOOST_TEST((header("host") == "example.com")(req, ctx));
-    BOOST_TEST((header(field::user_agent) == BOOST_BEAST_VERSION_STRING)(req, ctx));
-    BOOST_TEST((header("example") == "Example Value")(req, ctx));
-    BOOST_TEST(!(header("example") == "example value")(req, ctx));
+    BOOST_TEST((cookie("name1") == "value1")(req, ctx, {}, parsed_cookies));
+    BOOST_TEST((cookie("blah") == "42")(req, ctx, {}, parsed_cookies));
+    BOOST_TEST((exist(cookie("nr")))(req, ctx, {}, parsed_cookies));
+    BOOST_TEST((cookie("nr") == "13")(req, ctx, {}, parsed_cookies));
+    BOOST_TEST((!exist(cookie("not_exists")))(req, ctx, {}, parsed_cookies));
 }
 
 } // namespace

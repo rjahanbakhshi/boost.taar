@@ -25,16 +25,16 @@ BOOST_AUTO_TEST_CASE(test_matcher_method)
     http::request<http::string_body> req{http::verb::get, "", 10};
     context ctx;
 
-    BOOST_TEST((method == verb::get)(req, ctx));
-    BOOST_TEST(!(verb::put == method)(req, ctx));
-    BOOST_TEST(!(!(method == verb::get))(req, ctx));
-    BOOST_TEST((!(method == verb::put))(req, ctx));
-    BOOST_TEST(!(method != verb::get)(req, ctx));
-    BOOST_TEST((verb::put != method)(req, ctx));
-    BOOST_TEST(!(method == verb::get && verb::put == method)(req, ctx));
-    BOOST_TEST((method == verb::get && verb::get == method)(req, ctx));
-    BOOST_TEST((method == verb::get || verb::put == method)(req, ctx));
-    BOOST_TEST((method == verb::put || verb::get == method)(req, ctx));;
+    BOOST_TEST((method == verb::get)(req, ctx, {}, {}));
+    BOOST_TEST(!(verb::put == method)(req, ctx, {}, {}));
+    BOOST_TEST(!(!(method == verb::get))(req, ctx, {}, {}));
+    BOOST_TEST((!(method == verb::put))(req, ctx, {}, {}));
+    BOOST_TEST(!(method != verb::get)(req, ctx, {}, {}));
+    BOOST_TEST((verb::put != method)(req, ctx, {}, {}));
+    BOOST_TEST(!(method == verb::get && verb::put == method)(req, ctx, {}, {}));
+    BOOST_TEST((method == verb::get && verb::get == method)(req, ctx, {}, {}));
+    BOOST_TEST((method == verb::get || verb::put == method)(req, ctx, {}, {}));
+    BOOST_TEST((method == verb::put || verb::get == method)(req, ctx, {}, {}));;
 }
 
 } // namespace
