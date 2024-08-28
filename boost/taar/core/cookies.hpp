@@ -11,13 +11,10 @@
 #define BOOST_TAAR_CORE_COOKIES_HPP
 
 #include <boost/taar/core/error.hpp>
-#include <boost/url.hpp>
-#include <boost/system/result.hpp>
 #include <boost/url/decode_view.hpp>
 #include <boost/url/grammar/all_chars.hpp>
 #include <boost/url/grammar/lut_chars.hpp>
-#include <boost/url/grammar/vchars.hpp>
-#include <boost/url/rfc/pchars.hpp>
+#include <boost/system/result.hpp>
 #include <unordered_map>
 #include <string_view>
 #include <string>

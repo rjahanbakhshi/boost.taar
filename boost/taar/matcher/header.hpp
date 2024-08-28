@@ -70,12 +70,12 @@ struct header_t
 
     auto operator()(boost::beast::http::field field) const
     {
-        return header_item {std::move(field)};
+        return header_item<boost::beast::http::field> {std::move(field)};
     }
 
     auto operator()(std::string field) const
     {
-        return header_item {std::move(field)};
+        return header_item<std::string> {std::move(field)};
     }
 };
 
