@@ -184,7 +184,7 @@ public:
                 if (needs_parsed_cookies_)
                 {
                     auto r = req_header.equal_range(boost::beast::http::field::cookie);
-                    while (r.first++ != r.second)
+                    for (; r.first != r.second; ++r.first)
                     {
                         parse_cookies(r.first->value(), parsed_cookies);
                     }
