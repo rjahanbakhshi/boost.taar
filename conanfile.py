@@ -5,7 +5,7 @@ from conan.tools.cmake import cmake_layout, CMake
 
 class BoostTaar(ConanFile):
     name = "boost-taar"
-    version = "0.0.1"
+    version = "0.0.2"
     license = "Boost Software License, Version 1.0"
     author = "Reza Jahanbakhshi <reza.jahanbakhshi@gmail.com>"
     url = "https://github.com/rjahanbakhshi/boost.taar"
