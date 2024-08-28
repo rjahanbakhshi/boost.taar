@@ -161,9 +161,10 @@ public:
         using rhs_request_type = typename rhs_operand_type::request_type;
         using super_request_type = super_type_t<request_type, rhs_request_type>;
 
-        if constexpr (
-            (with_parsed_target && with_parsed_cookies) ||
-            (rhs_operand_type::with_parsed_target && rhs_operand_type::with_parsed_cookies))
+        constexpr auto with_target = with_parsed_target || rhs_operand_type::with_parsed_target;
+        constexpr auto with_cookie = with_parsed_cookies || rhs_operand_type::with_parsed_cookies;
+
+        if constexpr (with_target && with_cookie)
         {
             return matcher::operand
             {
@@ -179,7 +180,7 @@ public:
                 }
             };
         }
-        else if constexpr (with_parsed_target || rhs_operand_type::with_parsed_target)
+        else if constexpr (with_target)
         {
             return matcher::operand
             {
@@ -194,7 +195,7 @@ public:
                 }
             };
         }
-        else if constexpr (with_parsed_cookies || rhs_operand_type::with_parsed_cookies)
+        else if constexpr (with_cookie)
         {
             return matcher::operand
             {
@@ -236,9 +237,10 @@ public:
         using lhs_request_type = typename lhs_operand_type::request_type;
         using super_request_type = super_type_t<request_type, lhs_request_type>;
 
-        if constexpr (
-            (with_parsed_target && with_parsed_cookies) ||
-            (lhs_operand_type::with_parsed_target && lhs_operand_type::with_parsed_cookies))
+        constexpr auto with_target = with_parsed_target || lhs_operand_type::with_parsed_target;
+        constexpr auto with_cookie = with_parsed_cookies || lhs_operand_type::with_parsed_cookies;
+
+        if constexpr (with_target && with_cookie)
         {
             return matcher::operand
             {
@@ -254,7 +256,7 @@ public:
                 }
             };
         }
-        else if constexpr (with_parsed_target || lhs_operand_type::with_parsed_target)
+        else if constexpr (with_target)
         {
             return matcher::operand
             {
@@ -269,7 +271,7 @@ public:
                 }
             };
         }
-        else if constexpr (with_parsed_cookies || lhs_operand_type::with_parsed_cookies)
+        else if constexpr (with_cookie)
         {
             return matcher::operand
             {
@@ -311,9 +313,10 @@ public:
         using rhs_request_type = typename rhs_operand_type::request_type;
         using super_request_type = super_type_t<request_type, rhs_request_type>;
 
-        if constexpr (
-            (with_parsed_target && with_parsed_cookies) ||
-            (rhs_operand_type::with_parsed_target && rhs_operand_type::with_parsed_cookies))
+        constexpr auto with_target = with_parsed_target || rhs_operand_type::with_parsed_target;
+        constexpr auto with_cookie = with_parsed_cookies || rhs_operand_type::with_parsed_cookies;
+
+        if constexpr (with_target && with_cookie)
         {
             return matcher::operand
             {
@@ -329,7 +332,7 @@ public:
                 }
             };
         }
-        else if constexpr (with_parsed_target || rhs_operand_type::with_parsed_target)
+        else if constexpr (with_target)
         {
             return matcher::operand
             {
@@ -344,7 +347,7 @@ public:
                 }
             };
         }
-        else if constexpr (with_parsed_cookies || rhs_operand_type::with_parsed_cookies)
+        else if constexpr (with_cookie)
         {
             return matcher::operand
             {
@@ -386,9 +389,10 @@ public:
         using lhs_request_type = typename lhs_operand_type::request_type;
         using super_request_type = super_type_t<request_type, lhs_request_type>;
 
-        if constexpr (
-            (with_parsed_target && with_parsed_cookies) ||
-            (lhs_operand_type::with_parsed_target && lhs_operand_type::with_parsed_cookies))
+        constexpr auto with_target = with_parsed_target || lhs_operand_type::with_parsed_target;
+        constexpr auto with_cookie = with_parsed_cookies || lhs_operand_type::with_parsed_cookies;
+
+        if constexpr (with_target && with_cookie)
         {
             return matcher::operand
             {
@@ -404,7 +408,7 @@ public:
                 }
             };
         }
-        else if constexpr (with_parsed_target || lhs_operand_type::with_parsed_target)
+        else if constexpr (with_target)
         {
             return matcher::operand
             {
@@ -419,7 +423,7 @@ public:
                 }
             };
         }
-        else if constexpr (with_parsed_cookies || lhs_operand_type::with_parsed_cookies)
+        else if constexpr (with_cookie)
         {
             return matcher::operand
             {

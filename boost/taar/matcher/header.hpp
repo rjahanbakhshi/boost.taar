@@ -54,15 +54,15 @@ struct header_t
             return !operator==(std::move(rhs), std::move(lhs));
         }
 
-        friend auto exist(header_item lhs)
+        friend auto exist(header_item header)
         {
             return matcher::operand
             {
-                [lhs = std::move(lhs)](
+                [header = std::move(header)](
                     const request_type& request,
                     context& context)
                 {
-                    return request.find(lhs.key) != request.end();
+                    return request.find(header.key) != request.end();
                 }
             };
         }

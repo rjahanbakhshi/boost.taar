@@ -60,16 +60,16 @@ struct cookie_t
             return !operator==(std::move(rhs), std::move(lhs));
         }
 
-        friend auto exist(cookie_item lhs)
+        friend auto exist(cookie_item cookie)
         {
             return matcher::operand
             {
-                [lhs = std::move(lhs)](
+                [cookie = std::move(cookie)](
                     const request_type&,
                     context&,
                     const cookies& parsed_cookies)
                 {
-                    return parsed_cookies.contains(lhs.name);
+                    return parsed_cookies.contains(cookie.name);
                 }
             };
         }
