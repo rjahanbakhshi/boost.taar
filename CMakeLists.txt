@@ -43,6 +43,8 @@ target_sources(
         boost/taar/handler/htdocs.hpp
         boost/taar/handler/rest.hpp
         boost/taar/handler/rest_arg.hpp
+        boost/taar/handler/rest_arg_cast.hpp
+        boost/taar/handler/rest_arg_cast_tag.hpp
         boost/taar/matcher/detail/callable_with.hpp
         boost/taar/matcher/detail/join_with.hpp
         boost/taar/matcher/detail/ranges_to.hpp

@@ -25,7 +25,6 @@
 #include <type_traits>
 
 namespace boost::taar {
-
 namespace detail {
 
 template <typename T>
@@ -41,8 +40,7 @@ struct response_from_built_in_tag {};
 
 // Built-in response_from implementations. The user-defined ones can always
 // override the built-in ones.
-inline auto tag_invoke(
-    response_from_built_in_tag<>)
+inline auto tag_invoke(response_from_built_in_tag<>)
 {
     namespace http = boost::beast::http;
     http::response<http::empty_body> response {http::status::ok, 11};

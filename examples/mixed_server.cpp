@@ -46,6 +46,13 @@ int main(int argc, char* argv[])
     using taar::response_builder;
     using taar::matcher::method;
     using taar::matcher::target;
+    using taar::matcher::context;
+    using taar::handler::rest;
+    using taar::handler::htdocs;
+    using taar::handler::query_arg;
+    using taar::handler::header_arg;
+    using taar::handler::path_arg;
+    using taar::handler::with_default;
 
     net::io_context io_context;
 
@@ -99,7 +106,7 @@ int main(int argc, char* argv[])
         method == http::verb::get && target == "/special/{*}",
         [](
             const http::request<http::empty_body>& request,
-            const taar::matcher::context& context) -> http::message_generator
+            const context& context) -> http::message_generator
         {
             http::response<http::string_body> res {
                 boost::beast::http::status::ok,
@@ -114,22 +121,22 @@ int main(int argc, char* argv[])
 
     http_session.register_request_handler(
         method == http::verb::get && target == "/api/version",
-        taar::handler::rest([]{ return "1.0"; }
+        rest([]{ return "1.0"; }
     ));
 
     http_session.register_request_handler(
         method == http::verb::get && target == "/api/throw",
-        taar::handler::rest([]{ throw std::runtime_error{"Error"}; }
+        rest([]{ throw std::runtime_error{"Error"}; }
     ));
 
     http_session.register_request_handler(
         method == http::verb::get && target == "/api/throw13",
-        taar::handler::rest([]{ throw 13; }
+        rest([]{ throw 13; }
     ));
 
     http_session.register_request_handler(
         method == http::verb::get && target == "/api/sum/{a}/{b}",
-        taar::handler::rest([](int a, int b)
+        rest([](int a, int b)
         {
             return boost::json::value {
                 {"a", a},
@@ -137,22 +144,36 @@ int main(int argc, char* argv[])
                 {"result", a + b}
             };
         },
-        taar::handler::path_arg("a"),
-        taar::handler::path_arg("b")
+        path_arg("a"),
+        path_arg("b")
+    ));
+
+    http_session.register_request_handler(
+        method == http::verb::post && target == "/api/sum",
+        rest([](int a, int b)
+        {
+            return boost::json::value {
+                {"a", a},
+                {"b", b},
+                {"result", a + b}
+            };
+        },
+        header_arg("a"),
+        with_default(header_arg("b"), 42)
     ));
 
     http_session.register_request_handler(
         method == http::verb::post && target == "/api/store/",
-        taar::handler::rest([](const std::string& value)
+        rest([](const std::string& value)
         {
             std::cout << "Storing value = " << value << '\n';
         },
-        taar::handler::query_arg("value")
+        query_arg("value")
     ));
 
     http_session.register_request_handler(
         method == http::verb::get && target == "/{*}",
-        taar::handler::htdocs {argv[2]}
+        htdocs {argv[2]}
     );
 
     taar::cancellation_signals cancellation_signals;

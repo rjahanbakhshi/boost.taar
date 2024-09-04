@@ -29,6 +29,8 @@ target_sources(
         test_response_from_user.cpp
         test_rest.cpp
         test_rest_arg.cpp
+        test_rest_arg_cast_builtin.cpp
+        test_rest_arg_cast_user.cpp
         test_specialization_of.cpp
         test_super_type.cpp
         test_template_parser.cpp
