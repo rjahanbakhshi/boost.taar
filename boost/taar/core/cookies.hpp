@@ -24,7 +24,7 @@ namespace detail {
 
 constexpr auto ctl_chars =
     boost::urls::grammar::lut_chars {[](char ch){ return ch <= '\31'; }} +
-    boost::urls::grammar::lut_chars {'\127'};
+    boost::urls::grammar::lut_chars {'\177'}; // DEL
 constexpr auto separators_chars =
     boost::urls::grammar::lut_chars {"()<>@,;:\\\"/[]?={} \t"};
 constexpr auto token_chars =

@@ -108,7 +108,7 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_cookie)
     using taar::error;
 
     http::request<http::string_body> req{http::verb::get, "", 10};
-    req.set(http::field::cookie, "cookie1=value1; cookie2=value2; cookie3=value3");
+    req.set(http::field::cookie, "cookie1=value1; cookie2=value2;cookie3=value3");
     context ctx;
 
     BOOST_TEST((rest_arg<std::string, cookie_arg>{cookie_arg("cookie1")}(0, req, ctx) == "value1"));

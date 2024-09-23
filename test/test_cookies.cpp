@@ -71,6 +71,18 @@ BOOST_AUTO_TEST_CASE(test_cookies_parser)
     BOOST_TEST(c1.size() == 6);
     BOOST_TEST(c1.at("good3") == "val;ue");
     BOOST_TEST(c1.at("good4") == "val");
+
+    BOOST_TEST((parse_cookies("nosp1=17;nosp2=19", c1) == error::success));
+    BOOST_TEST(c1.size() == 8);
+    BOOST_TEST(c1.contains("nosp1"));
+    BOOST_TEST(c1.at("nosp1") == "17");
+    BOOST_TEST(c1.contains("nosp2"));
+    BOOST_TEST(c1.at("nosp2") == "19");
+
+    BOOST_TEST((parse_cookies("W=Z", c1) == error::success));
+    BOOST_TEST(c1.size() == 9);
+    BOOST_TEST(c1.contains("W"));
+    BOOST_TEST(c1.at("W") == "Z");
 }
 
 } // namespace

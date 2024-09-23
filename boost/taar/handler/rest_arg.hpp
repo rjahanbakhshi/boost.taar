@@ -12,6 +12,7 @@
 
 #include <boost/taar/handler/rest_arg_cast.hpp>
 #include <boost/taar/matcher/context.hpp>
+#include <boost/taar/core/cookies.hpp>
 #include <boost/taar/core/callable_traits.hpp>
 #include <boost/taar/core/always_false.hpp>
 #include <boost/taar/core/specialization_of.hpp>
@@ -367,38 +368,17 @@ struct cookie_arg
         const boost::beast::http::request_header<>& request,
         const matcher::context&) const
     {
-        auto header_iter = request.find(boost::beast::http::field::cookie);
-        if (header_iter != request.end())
+        cookies parsed_cookies;
+        auto r = request.equal_range(boost::beast::http::field::cookie);
+        for (; r.first != r.second; ++r.first)
         {
-            auto const& cookie = header_iter->value();
-            std::remove_cvref_t<decltype(cookie)>::size_type pos = 0;
-            while (pos < cookie.size())
-            {
-                auto end = cookie.find('=', pos);
-                if (end >= cookie.size())
-                {
-                    return error::invalid_request_format;
-                }
+            parse_cookies(r.first->value(), parsed_cookies);
+        }
 
-                if (name_ == cookie.substr(pos, end - pos))
-                {
-                    // Name matched
-                    pos = end + 1;
-                    if (pos < cookie.size())
-                    {
-                        end = cookie.find("; ", pos);
-                        return cookie.substr(pos, end - pos);
-                    }
-
-                    return "";
-                }
-
-                pos = cookie.find("; ", end);
-                if (pos < cookie.size())
-                {
-                    pos += 2;
-                }
-            }
+        auto const iter = parsed_cookies.find(name_);
+        if (iter != parsed_cookies.end())
+        {
+            return iter->second;
         }
 
         return error::argument_not_found;
