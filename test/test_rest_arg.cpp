@@ -8,6 +8,7 @@
 //
 
 #include "boost/taar/core/error.hpp"
+#include "boost/taar/core/form_kvp.hpp"
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/taar/handler/rest_arg.hpp>
 #include <boost/test/unit_test.hpp>
@@ -204,6 +205,48 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_json_body)
 
     BOOST_CHECK_THROW(
         (rest_arg<boost::json::value, json_body_arg>{json_body_arg("text/plain")}(0, req, ctx)),
+        boost::system::system_error);
+}
+
+BOOST_AUTO_TEST_CASE(test_rest_arg_url_encoded_from_data)
+{
+    namespace http = boost::beast::http;
+    namespace taar = boost::taar;
+    using taar::matcher::context;
+    using taar::handler::rest_arg;
+    using taar::handler::url_encoded_from_data_arg;
+    using taar::handler::all_content_types;
+    using taar::form_kvp;
+
+    http::request<http::string_body> req{http::verb::get, "/", 10};
+    req.insert(http::field::content_type, "application/x-www-form-urlencoded");
+    req.body() = R"(everything=42&hello=world&hello%20world=13%2042)";
+    req.prepare_payload();
+    context ctx;
+
+    form_kvp expected_result {
+        {"everything", "42"},
+        {"hello", "world"},
+        {"hello world", "13 42"}};
+
+    BOOST_TEST((
+      rest_arg<form_kvp, url_encoded_from_data_arg>{url_encoded_from_data_arg()}(0, req, ctx) ==
+      expected_result));
+
+    BOOST_TEST((
+      rest_arg<form_kvp, url_encoded_from_data_arg>{url_encoded_from_data_arg("application/x-www-form-urlencoded")}(0, req, ctx) ==
+      expected_result));
+
+    BOOST_TEST((
+      rest_arg<form_kvp, url_encoded_from_data_arg>{url_encoded_from_data_arg(all_content_types)}(0, req, ctx) ==
+      expected_result));
+
+    BOOST_TEST((
+      rest_arg<form_kvp, url_encoded_from_data_arg>{url_encoded_from_data_arg("application/x-www-form-urlencoded", "text/plain")}(0, req, ctx) ==
+      expected_result));
+
+    BOOST_CHECK_THROW(
+        (rest_arg<form_kvp, url_encoded_from_data_arg>{url_encoded_from_data_arg("text/plain")}(0, req, ctx)),
         boost::system::system_error);
 }
 

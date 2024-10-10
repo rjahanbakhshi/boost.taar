@@ -28,6 +28,7 @@ target_sources(
         boost/taar/core/constexpr_string.hpp
         boost/taar/core/cookies.hpp
         boost/taar/core/error.hpp
+        boost/taar/core/form_kvp.hpp
         boost/taar/core/ignore_and_rethrow.hpp
         boost/taar/core/is_awaitable.hpp
         boost/taar/core/is_http_response.hpp

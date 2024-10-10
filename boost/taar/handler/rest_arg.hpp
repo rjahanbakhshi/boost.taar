@@ -13,6 +13,7 @@
 #include <boost/taar/handler/rest_arg_cast.hpp>
 #include <boost/taar/matcher/context.hpp>
 #include <boost/taar/core/cookies.hpp>
+#include <boost/taar/core/form_kvp.hpp>
 #include <boost/taar/core/callable_traits.hpp>
 #include <boost/taar/core/always_false.hpp>
 #include <boost/taar/core/specialization_of.hpp>
@@ -21,6 +22,7 @@
 #include <boost/beast/http/message.hpp>
 #include <boost/beast/http/field.hpp>
 #include <boost/url/parse.hpp>
+#include <boost/url/parse_query.hpp>
 #include <boost/url/ignore_case.hpp>
 #include <boost/json/parse.hpp>
 #include <boost/json/value.hpp>
@@ -477,6 +479,64 @@ struct json_body_arg
             return error::invalid_request_format;
         }
         return json;
+    }
+
+    std::unordered_set<std::string> content_types_;
+};
+
+// REST arg provider from the request body for application/x-www-form-urlencoded
+struct url_encoded_from_data_arg
+{
+    template <detail::string_like... T>
+    url_encoded_from_data_arg(T&&... content_types)
+        : content_types_ {std::forward<T>(content_types)...}
+    {
+        if constexpr (sizeof...(T) == 0)
+        {
+            content_types_.emplace("application/x-www-form-urlencoded");
+        }
+    }
+
+    std::string name() const
+    {
+        return "url_encoded_from_data";
+    }
+
+    url_encoded_from_data_arg(all_content_types_t)
+    {}
+
+    boost::system::result<form_kvp> operator()(
+        const boost::beast::http::request<boost::beast::http::string_body>& request,
+        const matcher::context&) const
+    {
+        if (!content_types_.empty())
+        {
+            auto range = request.equal_range(boost::beast::http::field::content_type);
+            if (std::find_if(range.first, range.second, [&](auto const& elem)
+                {
+                    return content_types_.contains(elem.value());
+                }) == range.second)
+            {
+                return error::invalid_content_type;
+            }
+        }
+
+        auto pev = boost::urls::parse_query(request.body());
+        if (!pev)
+        {
+            return error::invalid_request_format;
+        }
+
+        form_kvp result;
+        for (auto const& param : pev.value())
+        {
+            boost::urls::decode_view decoded_key {param.key};
+            boost::urls::decode_view decoded_value {param.value};
+            result.emplace(
+                std::string(decoded_key.begin(), decoded_key.end()),
+                std::string(decoded_value.begin(), decoded_value.end()));
+        }
+        return result;
     }
 
     std::unordered_set<std::string> content_types_;
