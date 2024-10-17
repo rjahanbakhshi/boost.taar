@@ -220,7 +220,7 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_url_encoded_from_data)
 
     http::request<http::string_body> req{http::verb::get, "/", 10};
     req.insert(http::field::content_type, "application/x-www-form-urlencoded");
-    req.body() = R"(everything=42&hello=world&hello%20world=13%2042)";
+    req.body() = R"(everything=42&hello=world&hello+world=13%2042)";
     req.prepare_payload();
     context ctx;
 

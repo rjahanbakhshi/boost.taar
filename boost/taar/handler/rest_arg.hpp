@@ -530,8 +530,9 @@ struct url_encoded_from_data_arg
         form_kvp result;
         for (auto const& param : pev.value())
         {
-            boost::urls::decode_view decoded_key {param.key};
-            boost::urls::decode_view decoded_value {param.value};
+            using namespace boost::urls;
+            boost::urls::decode_view decoded_key {param.key, encoding_opts{true}};
+            boost::urls::decode_view decoded_value {param.value, encoding_opts{true}};
             result.emplace(
                 std::string(decoded_key.begin(), decoded_key.end()),
                 std::string(decoded_value.begin(), decoded_value.end()));
