@@ -119,45 +119,90 @@ public:
                 std::forward<ArgsType>(args)...)}
     {}
 
-    response_builder set_version(unsigned version)
+    // Following overloads will be replaced when P0847R7 becomes widely available
+    auto&& set_version(unsigned version) &
+    {
+        impl_->set_version(version);
+        return *this;
+    }
+
+    auto&& set_version(unsigned version) &&
     {
         impl_->set_version(version);
         return std::move(*this);
     }
 
-    response_builder set_status(boost::beast::http::status status)
+    auto&& set_status(boost::beast::http::status status) &
+    {
+        impl_->set_status(status);
+        return *this;
+    }
+
+    auto&& set_status(boost::beast::http::status status) &&
     {
         impl_->set_status(status);
         return std::move(*this);
     }
 
-    response_builder insert_header(
+    auto&& insert_header(
         std::string_view name,
-        std::string_view const& value)
+        std::string_view const& value) &
+    {
+        impl_->insert_header(name, value);
+        return *this;
+    }
+
+    auto&& insert_header(
+        std::string_view name,
+        std::string_view const& value) &&
     {
         impl_->insert_header(name, value);
         return std::move(*this);
     }
 
-    response_builder insert_header(
+    auto&& insert_header(
         boost::beast::http::field field,
-            std::string_view const& value)
+            std::string_view const& value) &
+    {
+        impl_->insert_header(field, value);
+        return *this;
+    }
+
+    auto&& insert_header(
+        boost::beast::http::field field,
+            std::string_view const& value) &&
     {
         impl_->insert_header(field, value);
         return std::move(*this);
     }
 
-    response_builder set_header(
+    auto&& set_header(
         std::string_view name,
-        std::string_view const& value)
+        std::string_view const& value) &
+    {
+        impl_->set_header(name, value);
+        return *this;
+    }
+
+    auto&& set_header(
+        std::string_view name,
+        std::string_view const& value) &&
     {
         impl_->set_header(name, value);
         return std::move(*this);
     }
 
-    response_builder set_header(
+    auto&& set_header(
         boost::beast::http::field field,
-            std::string_view const& value)
+            std::string_view const& value) &
+    {
+        impl_->set_header(field, value);
+        return *this;
+    }
+
+    auto&& set_header(
+        boost::beast::http::field field,
+            std::string_view const& value) &&
     {
         impl_->set_header(field, value);
         return std::move(*this);
