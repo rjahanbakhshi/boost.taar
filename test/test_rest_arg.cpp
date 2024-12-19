@@ -208,13 +208,13 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_json_body)
         boost::system::system_error);
 }
 
-BOOST_AUTO_TEST_CASE(test_rest_arg_url_encoded_from_data)
+BOOST_AUTO_TEST_CASE(test_rest_arg_url_encoded_form_data)
 {
     namespace http = boost::beast::http;
     namespace taar = boost::taar;
     using taar::matcher::context;
     using taar::handler::rest_arg;
-    using taar::handler::url_encoded_from_data_arg;
+    using taar::handler::url_encoded_form_data_arg;
     using taar::handler::all_content_types;
     using taar::form_kvp;
 
@@ -230,23 +230,23 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_url_encoded_from_data)
         {"hello world", "13 42"}};
 
     BOOST_TEST((
-      rest_arg<form_kvp, url_encoded_from_data_arg>{url_encoded_from_data_arg()}(0, req, ctx) ==
+      rest_arg<form_kvp, url_encoded_form_data_arg>{url_encoded_form_data_arg()}(0, req, ctx) ==
       expected_result));
 
     BOOST_TEST((
-      rest_arg<form_kvp, url_encoded_from_data_arg>{url_encoded_from_data_arg("application/x-www-form-urlencoded")}(0, req, ctx) ==
+      rest_arg<form_kvp, url_encoded_form_data_arg>{url_encoded_form_data_arg("application/x-www-form-urlencoded")}(0, req, ctx) ==
       expected_result));
 
     BOOST_TEST((
-      rest_arg<form_kvp, url_encoded_from_data_arg>{url_encoded_from_data_arg(all_content_types)}(0, req, ctx) ==
+      rest_arg<form_kvp, url_encoded_form_data_arg>{url_encoded_form_data_arg(all_content_types)}(0, req, ctx) ==
       expected_result));
 
     BOOST_TEST((
-      rest_arg<form_kvp, url_encoded_from_data_arg>{url_encoded_from_data_arg("application/x-www-form-urlencoded", "text/plain")}(0, req, ctx) ==
+      rest_arg<form_kvp, url_encoded_form_data_arg>{url_encoded_form_data_arg("application/x-www-form-urlencoded", "text/plain")}(0, req, ctx) ==
       expected_result));
 
     BOOST_CHECK_THROW(
-        (rest_arg<form_kvp, url_encoded_from_data_arg>{url_encoded_from_data_arg("text/plain")}(0, req, ctx)),
+        (rest_arg<form_kvp, url_encoded_form_data_arg>{url_encoded_form_data_arg("text/plain")}(0, req, ctx)),
         boost::system::system_error);
 }
 

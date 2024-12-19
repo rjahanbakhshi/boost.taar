@@ -485,10 +485,10 @@ struct json_body_arg
 };
 
 // REST arg provider from the request body for application/x-www-form-urlencoded
-struct url_encoded_from_data_arg
+struct url_encoded_form_data_arg
 {
     template <detail::string_like... T>
-    url_encoded_from_data_arg(T&&... content_types)
+    url_encoded_form_data_arg(T&&... content_types)
         : content_types_ {std::forward<T>(content_types)...}
     {
         if constexpr (sizeof...(T) == 0)
@@ -499,10 +499,10 @@ struct url_encoded_from_data_arg
 
     std::string name() const
     {
-        return "url_encoded_from_data";
+        return "url_encoded_form_data";
     }
 
-    url_encoded_from_data_arg(all_content_types_t)
+    url_encoded_form_data_arg(all_content_types_t)
     {}
 
     boost::system::result<form_kvp> operator()(
