@@ -13,7 +13,7 @@ project(
     DESCRIPTION "A collection of tools to facilitate web server and client development."
 )
 
-find_package(Boost 1.84 COMPONENTS url json system REQUIRED)
+find_package(Boost 1.84 CONFIG COMPONENTS url json system REQUIRED)
 
 add_library(${PROJECT_NAME} INTERFACE)
 set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 23)

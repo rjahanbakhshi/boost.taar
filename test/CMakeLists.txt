@@ -1,6 +1,6 @@
 project(boost-taar-test)
 
-find_package(Boost 1.83 COMPONENTS test REQUIRED)
+find_package(Boost 1.84 CONFIG REQUIRED)
 
 add_executable(${PROJECT_NAME})
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 23)

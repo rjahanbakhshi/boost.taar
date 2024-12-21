@@ -1,6 +1,6 @@
 project(boost-taar-examples)
 
-find_package(Boost 1.83 COMPONENTS test REQUIRED)
+find_package(Boost 1.84 CONFIG REQUIRED)
 
 add_executable(htdocs_server EXCLUDE_FROM_ALL)
 set_target_properties(htdocs_server PROPERTIES CXX_STANDARD 23)
