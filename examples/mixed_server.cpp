@@ -150,16 +150,17 @@ int main(int argc, char* argv[])
 
     http_session.register_request_handler(
         method == http::verb::post && target == "/api/sum",
-        rest([](int a, int b)
+        rest([](int a, int b, bool negate)
         {
             return boost::json::value {
                 {"a", a},
                 {"b", b},
-                {"result", a + b}
+                {"result", (a + b) * (negate ? -1 : 1)}
             };
         },
         header_arg("a"),
-        with_default(header_arg("b"), 42)
+        with_default(header_arg("b"), 42),
+        with_default(query_arg("negate"), false)
     ));
 
     http_session.register_request_handler(

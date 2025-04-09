@@ -2,15 +2,16 @@ import os
 from conan import ConanFile
 from conan.tools.files import copy
 from conan.tools.cmake import cmake_layout, CMake
+from conan.tools.build import check_min_cppstd
 
-class BoostTaar(ConanFile):
+class BoostTaarConan(ConanFile):
     name = "boost-taar"
     version = "0.0.10"
     license = "Boost Software License, Version 1.0"
     author = "Reza Jahanbakhshi <reza.jahanbakhshi@gmail.com>"
     url = "https://github.com/rjahanbakhshi/boost.taar"
     description = "A header-only library for web server and client development"
-    topics = ("boost", "asio", "http", "network", "web", "taar")
+    topics = ("boost", "asio", "beast", "http", "network", "web", "taar")
     settings = "os", "arch", "compiler", "build_type"
     exports_sources = [
         "boost/*",
@@ -24,7 +25,10 @@ class BoostTaar(ConanFile):
     generators = "CMakeToolchain", "CMakeDeps"
 
     def requirements(self):
-        self.requires("boost/1.84.0")
+        self.requires("boost/1.86.0")
+
+    def validate(self):
+        check_min_cppstd(self, 23)
 
     def layout(self):
         cmake_layout(self)

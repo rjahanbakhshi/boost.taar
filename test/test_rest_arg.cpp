@@ -273,10 +273,15 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_with_default)
         with_default(header_arg("hval1"), "world").name() ==
         header_arg("hval1").name());
 
+    BOOST_TEST(
+        with_default(query_arg("qval3"), false).name() ==
+        header_arg("qval3").name());
+
     BOOST_TEST((rest_arg<int, with_default<query_arg, int>>{with_default(query_arg("qval1"), 42)}(0, req, ctx) == 13));
     BOOST_TEST((rest_arg<int, with_default<query_arg, int>>{with_default(query_arg("qval2"), 42)}(0, req, ctx) == 42));
     BOOST_TEST((rest_arg<std::string, with_default<header_arg, const char*>>{with_default(header_arg("hval1"), "world")}(0, req, ctx) == "Hello"));
     BOOST_TEST((rest_arg<std::string_view, with_default<header_arg, const char*>>{with_default(header_arg("hval2"), "world")}(0, req, ctx) == "world"));
+    BOOST_TEST((rest_arg<int, with_default<query_arg, bool>>{with_default(query_arg("qval3"), false)}(0, req, ctx) == false));
 
     //BOOST_TEST((
     //  rest_arg<int, with_default<query_arg, int>>{with_default(query_arg("qval1"), 42)}(0, req, ctx) == 13));

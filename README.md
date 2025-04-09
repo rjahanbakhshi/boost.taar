@@ -284,3 +284,4 @@ like if it needs cookies or other things to be preparsed and put into contexts.
 - support for generating above metadata in rest handlers.
 - parse cookies only when it is requested in the metadata (currently rest handler
 reparse cookies everytime)
+- use std::reference_wrapper for handling function object reference parameters.

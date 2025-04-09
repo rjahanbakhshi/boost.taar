@@ -37,6 +37,12 @@ inline auto tag_invoke(rest_arg_cast_built_in_tag<Type>, Type&& from)
     return std::forward<Type>(from);
 }
 
+template <typename Type>
+inline auto tag_invoke(rest_arg_cast_built_in_tag<Type>, const Type& from)
+{
+    return from;
+}
+
 inline bool tag_invoke(rest_arg_cast_built_in_tag<bool>, std::string_view const& from)
 {
     if (boost::iequals(from, "true")) return true;
