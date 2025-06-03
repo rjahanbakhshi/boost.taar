@@ -157,19 +157,27 @@ struct rest_arg
             }
             else if constexpr (
                 specialization_of<std::optional, arg_type> &&
-                detail::is_rest_arg_provider<arg_provider_type> &&
-                rest_arg_castable<typename arg_provider_result_type::value_type, arg_type>)
+                detail::is_rest_arg_provider<arg_provider_type>)
             {
-                // It's necessary to store the retrieved value to make sure it outlives
-                // the call operator. Case in point, std::string -> std::string_view
-                provider_result_ = arg_provider_(request, context);
-                if (provider_result_.has_error() &&
-                    provider_result_.error() == error::argument_not_found)
+                if constexpr (rest_arg_castable<typename arg_provider_result_type::value_type, typename arg_type::value_type>)
                 {
-                    return std::nullopt;
-                }
+                    // It's necessary to store the retrieved value to make sure it outlives
+                    // the call operator. Case in point, std::string -> std::string_view
+                    provider_result_ = arg_provider_(request, context);
+                    if (provider_result_.has_error() &&
+                        provider_result_.error() == error::argument_not_found)
+                    {
+                        return std::nullopt;
+                    }
 
-                return rest_arg_cast<arg_type>(std::move(provider_result_.value()));
+                    return rest_arg_cast<typename arg_type::value_type>(std::move(provider_result_.value()));
+                }
+                else
+                {
+                    static_assert(
+                        always_false<arg_provider_type, typename arg_type::value_type>,
+                        "Incompatible optional rest arg provider!");
+                }
             }
             else if constexpr (
                 detail::is_rest_arg_provider<arg_provider_type> &&

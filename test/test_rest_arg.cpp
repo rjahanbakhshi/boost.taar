@@ -77,6 +77,41 @@ BOOST_AUTO_TEST_CASE(test_rest_arg)
     BOOST_TEST((rest_arg<std::string, header_arg>{header_arg(http::field::host)}(0, req, ctx) == "boost.org"));
 }
 
+BOOST_AUTO_TEST_CASE(test_rest_arg_optional)
+{
+    namespace http = boost::beast::http;
+    namespace taar = boost::taar;
+    using taar::matcher::context;
+    using taar::handler::rest_arg;
+    using taar::handler::query_arg;
+    using taar::handler::path_arg;
+    using taar::handler::header_arg;
+    using taar::handler::cookie_arg;
+    using taar::handler::string_body_arg;
+    using taar::handler::json_body_arg;
+
+    http::request<http::string_body> req{http::verb::get, "/?a=13", 10};
+    req.insert("header1", "value1");
+    req.insert("pi", "3.14");
+    context ctx;
+    ctx.path_args = {{"a", "13"}, {"b", "42"}};
+
+    BOOST_TEST((rest_arg<std::optional<int>, query_arg>{query_arg("a")}(0, req, ctx) == 13));
+    BOOST_TEST((rest_arg<std::optional<int>, query_arg>{query_arg("b")}(0, req, ctx) == std::nullopt));
+    BOOST_TEST((rest_arg<std::optional<std::string>, query_arg>{query_arg("a")}(0, req, ctx) == "13"));
+    BOOST_TEST((rest_arg<std::optional<std::string_view>, query_arg>{query_arg("b")}(0, req, ctx) == std::nullopt));
+
+    BOOST_TEST((rest_arg<std::optional<int>, path_arg>{path_arg("a")}(0, req, ctx) == 13));
+    BOOST_TEST((rest_arg<std::optional<int>, path_arg>{path_arg("d")}(0, req, ctx) == std::nullopt));
+    BOOST_TEST((rest_arg<std::optional<std::string>, path_arg>{path_arg("b")}(0, req, ctx) == "42"));
+    BOOST_TEST((rest_arg<std::optional<std::string>, path_arg>{path_arg("c")}(0, req, ctx) == std::nullopt));
+
+    BOOST_TEST((rest_arg<std::optional<std::string>, header_arg>{header_arg("header1")}(0, req, ctx) == "value1"));
+    BOOST_TEST((rest_arg<std::optional<std::string>, header_arg>{header_arg("header2")}(0, req, ctx) == std::nullopt));
+    BOOST_TEST((rest_arg<std::optional<float>, header_arg>{header_arg("pi")}(0, req, ctx) == 3.14f));
+    BOOST_TEST((rest_arg<std::optional<float>, header_arg>{header_arg("di")}(0, req, ctx) == std::nullopt));
+}
+
 BOOST_AUTO_TEST_CASE(test_rest_arg_multiple_headers)
 {
     namespace http = boost::beast::http;
