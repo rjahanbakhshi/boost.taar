@@ -66,7 +66,7 @@ struct constexpr_string
 namespace literals {
 
 template <constexpr_string CS>
-constexpr auto operator"" _cs() {
+constexpr auto operator""_cs() {
     return CS;
 }
 
