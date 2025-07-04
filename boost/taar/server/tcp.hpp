@@ -49,13 +49,13 @@ template <typename SessionHandler> // TODO: SessionHandler concept for callable 
     rebind_executor<tcp::acceptor> acceptor {co_await this_coro::executor};
 
     // Open the acceptor
-    acceptor.open(query->endpoint().protocol());
+    acceptor.open(query.begin()->endpoint().protocol());
 
     // Allow address reuse
     acceptor.set_option(net::socket_base::reuse_address(true));
 
     // Bind to the server address
-    acceptor.bind(query->endpoint());
+    acceptor.bind(query.begin()->endpoint());
 
     // Start listening for connections
     acceptor.listen(net::socket_base::max_listen_connections);
