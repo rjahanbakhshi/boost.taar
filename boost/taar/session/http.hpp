@@ -74,13 +74,29 @@ template <
     bool isRequest,
     typename Body,
     typename Fields>
+requires (beast::http::is_mutable_body_writer<Body>::value)
 auto async_write(
     StreamType& stream,
-    ::boost::beast::http::message<isRequest, Body, Fields>&& message)
+    ::boost::beast::http::message<isRequest, Body, Fields>& message)
 {
     return ::boost::beast::http::async_write(
         stream,
-        std::move(message));
+        message);
+}
+
+template <
+    typename StreamType,
+    bool isRequest,
+    typename Body,
+    typename Fields>
+requires (! beast::http::is_mutable_body_writer<Body>::value)
+auto async_write(
+    StreamType& stream,
+    ::boost::beast::http::message<isRequest, Body, Fields> const& message)
+{
+    return ::boost::beast::http::async_write(
+        stream,
+        message);
 }
 
 } // detail

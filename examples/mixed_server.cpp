@@ -7,6 +7,7 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
 
+#include <boost/beast/http/file_body_fwd.hpp>
 #include <boost/taar/handler/htdocs.hpp>
 #include <boost/taar/handler/rest.hpp>
 #include <boost/taar/session/http.hpp>
@@ -25,7 +26,9 @@
 #include <boost/asio/io_context.hpp>
 #include <boost/json/value.hpp>
 #include <exception>
+#include <filesystem>
 #include <iostream>
+#include <fstream>
 #include <cstdlib>
 #include <stdexcept>
 
@@ -165,11 +168,49 @@ int main(int argc, char* argv[])
 
     http_session.register_request_handler(
         method == http::verb::post && target == "/api/store/",
-        rest([](const std::string& value)
+        rest([](std::string const& file, const std::string& value)
         {
             std::cout << "Storing value = " << value << '\n';
+            auto path = std::filesystem::temp_directory_path() / file;
+            std::ofstream ofs(path);
+            ofs << value;
+            ofs.close();
         },
+        query_arg("file"),
         query_arg("value")
+    ));
+
+    http_session.register_request_handler(
+        method == http::verb::get && target == "/api/restore/",
+        rest([](std::string const& file)
+        {
+            std::cout << "Retoring value from " << file << '\n';
+            auto path = std::filesystem::temp_directory_path() / file;
+
+            namespace http = boost::beast::http;
+            using boost::beast::file_mode;
+            using boost::beast::error_code;
+
+            http::file_body::value_type body;
+            error_code ec;
+            body.open(path.c_str(), file_mode::scan, ec);
+            if (ec)
+            {
+                throw std::runtime_error("Failed to open temp file: " + ec.message());
+            }
+
+            auto const size = body.size();
+
+            http::response<http::file_body> response {http::status::ok, 11};
+            response.set(http::field::content_type, "application/octet-stream");
+            response.set(http::field::content_disposition, std::format("attachment; filename=\"{}\"", file));
+            response.content_length(size);
+            response.body() = std::move(body);
+            response.prepare_payload();
+
+            return response;
+        },
+        query_arg("file")
     ));
 
     http_session.register_request_handler(

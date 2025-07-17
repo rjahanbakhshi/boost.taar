@@ -402,4 +402,32 @@ BOOST_AUTO_TEST_CASE(test_rest_awaitable_handler)
             response_from_t<decltype(rh(req, ctx))::value_type>>, "Failed!");
 }
 
+BOOST_AUTO_TEST_CASE(test_rest_file_response)
+{
+    namespace http = boost::beast::http;
+    namespace taar = boost::taar;
+    using taar::matcher::context;
+    using taar::has_response_from;
+    using taar::response_from_t;
+    using taar::awaitable;
+    using taar::is_awaitable;
+    using resp_t = http::response<http::file_body>;
+
+    http::request<http::empty_body> req;
+    context ctx;
+
+    auto l = []() -> awaitable<resp_t> {
+        resp_t response{http::status::ok, 11};
+        co_return response;
+    };
+    auto rh = taar::handler::rest(l);
+
+    static_assert(is_awaitable<decltype(rh(req, ctx))>, "Failed!");
+    static_assert(has_response_from<decltype(rh(req, ctx))::value_type>, "Failed!");
+    static_assert(
+        std::is_same_v<
+            response_from_t<resp_t>,
+            response_from_t<decltype(rh(req, ctx))::value_type>>, "Failed!");
+}
+
 } // namespace
