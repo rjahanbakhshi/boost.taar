@@ -109,6 +109,13 @@ BOOST_AUTO_TEST_CASE(test_matcher_template_parser)
     BOOST_TEST(result.value()[0] == "first");
     BOOST_TEST(result.value()[1] == "{second}");
     BOOST_TEST(result.value()[2] == "third");
+
+    result = parse_template("/first/!$&'()*+,;=:@second/third");
+    BOOST_TEST(!result.has_error());
+    BOOST_TEST(result.value().size() == 3);
+    BOOST_TEST(result.value()[0] == "first");
+    BOOST_TEST(result.value()[1] == "!$&'()*+,;=:@second");
+    BOOST_TEST(result.value()[2] == "third");
 }
 
 } // namespace
