@@ -20,10 +20,17 @@ set_target_properties(awaitable_server PROPERTIES UNITY_BUILD ${ENABLE_UNITY_BUI
 target_sources(awaitable_server PRIVATE awaitable_server.cpp)
 target_link_libraries(awaitable_server PRIVATE boost-taar)
 
+add_executable(fuzz_server EXCLUDE_FROM_ALL)
+set_target_properties(fuzz_server PROPERTIES CXX_STANDARD 23)
+set_target_properties(fuzz_server PROPERTIES UNITY_BUILD ${ENABLE_UNITY_BUILD})
+target_sources(fuzz_server PRIVATE fuzz_server.cpp)
+target_link_libraries(fuzz_server PRIVATE boost-taar)
+
 add_custom_target(
     examples DEPENDS
         htdocs_server
         mixed_server
         awaitable_server
+        fuzz_server
 )
 

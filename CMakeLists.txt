@@ -6,6 +6,12 @@ endif()
 
 set(ENABLE_CLANG_TIDY OFF CACHE BOOL "Enable clang-tidy for supported targets.")
 set(ENABLE_UNITY_BUILD OFF CACHE BOOL "Enable unity build.")
+set(ENABLE_AFL OFF CACHE BOOL "Enable AFL++ fuzzing")
+
+if(ENABLE_AFL)
+    set(CMAKE_C_COMPILER "/usr/bin/afl-clang-lto")
+    set(CMAKE_CXX_COMPILER "/usr/bin/afl-clang-lto++")
+endif()
 
 project(
     boost-taar
