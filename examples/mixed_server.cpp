@@ -7,7 +7,6 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
 
-#include <boost/beast/http/file_body_fwd.hpp>
 #include <boost/taar/handler/htdocs.hpp>
 #include <boost/taar/handler/rest.hpp>
 #include <boost/taar/session/http.hpp>
@@ -163,6 +162,21 @@ int main(int argc, char* argv[])
         },
         header_arg("a"),
         with_default(header_arg("b"), 42),
+        with_default(query_arg("negate"), false)
+    ));
+
+    http_session.register_request_handler(
+        method == http::verb::post && target == "/api/add13",
+        rest([](int a, int b, bool negate)
+        {
+            return boost::json::value {
+                {"a", a},
+                {"b", b},
+                {"result", (a + b) * (negate ? -1 : 1)}
+            };
+        },
+        header_arg("a"),
+        13,
         with_default(query_arg("negate"), false)
     ));
 

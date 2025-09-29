@@ -60,16 +60,45 @@ concept is_rest_arg_provider = requires
 };
 
 template <typename ArgProviderType>
-using arg_provider_request = std::conditional_t<
-    is_rest_arg_provider<ArgProviderType>,
-    std::remove_cvref_t<callable_arg_type<ArgProviderType, 0>>,
-    boost::beast::http::request_header<>>;
+struct arg_provider_request
+{
+    static auto choose_type()
+    {
+        if constexpr (is_rest_arg_provider<ArgProviderType>)
+            return typename std::type_identity<std::remove_cvref_t<callable_arg_type<ArgProviderType, 0>>>{};
+        else
+            return typename std::type_identity<boost::beast::http::request_header<>>{};
+    }
+    using type = typename decltype(choose_type())::type;
+};
 
 template <typename ArgProviderType>
-using arg_provider_result = std::conditional_t<
-    is_rest_arg_provider<ArgProviderType>,
-    callable_result_type<ArgProviderType>,
-    ArgProviderType>;
+using arg_provider_request_t = typename arg_provider_request<ArgProviderType>::type;
+
+template <typename ArgProviderType>
+struct arg_provider_result
+{
+    static auto choose_type()
+    {
+        if constexpr (is_rest_arg_provider<ArgProviderType>)
+            return typename std::type_identity<callable_result_type<ArgProviderType>>{};
+        else
+            return typename std::type_identity<ArgProviderType>{};
+    }
+    using type = typename decltype(choose_type())::type;
+};
+
+template <typename ArgProviderType>
+using arg_provider_result_t = typename arg_provider_result<ArgProviderType>::type;
+
+template <typename ArgProviderType>
+std::string arg_provider_name(ArgProviderType&& ap)
+{
+    if constexpr (is_rest_arg_provider<ArgProviderType>)
+        return std::forward<ArgProviderType>(ap).name();
+    else
+        return "";
+}
 
 } // namespace detail
 
@@ -79,8 +108,8 @@ struct with_default
 {
     using arg_provider_type = ArgProviderType;
     using value_type = ValueType;
-    using arg_provider_request_type = detail::arg_provider_request<arg_provider_type>;
-    using arg_provider_result_type = detail::arg_provider_result<arg_provider_type>;
+    using arg_provider_request_type = detail::arg_provider_request_t<arg_provider_type>;
+    using arg_provider_result_type = detail::arg_provider_result_t<arg_provider_type>;
 
     with_default(arg_provider_type arg_provider, value_type default_value)
         : arg_provider_ {std::move(arg_provider)}
@@ -122,8 +151,8 @@ struct rest_arg
 {
     using arg_type = std::remove_cvref_t<ArgType>;
     using arg_provider_type = std::remove_cvref_t<ArgProviderType>;
-    using arg_provider_request_type = detail::arg_provider_request<arg_provider_type>;
-    using arg_provider_result_type = detail::arg_provider_result<arg_provider_type>;
+    using arg_provider_request_type = detail::arg_provider_request_t<arg_provider_type>;
+    using arg_provider_result_type = detail::arg_provider_result_t<arg_provider_type>;
 
     rest_arg(arg_provider_type arg_provider)
         : arg_provider_ {std::move(arg_provider)}
@@ -136,57 +165,56 @@ struct rest_arg
     {
         try
         {
-            if constexpr (
-                specialization_of<with_default, arg_provider_type> &&
-                rest_arg_castable<typename arg_provider_result_type::value_type, arg_type>)
+            if constexpr (detail::is_rest_arg_provider<arg_provider_type>)
             {
-                static_assert(
-                    rest_arg_castable<typename arg_provider_type::value_type, arg_type>,
-                    "Incompatible rest arg default value!");
-
-                // It's necessary to store the retrieved value to make sure it outlives
-                // the call operator. Case in point, std::string -> std::string_view
-                provider_result_ = arg_provider_(request, context);
-                if (provider_result_.has_error() &&
-                    provider_result_.error() == error::argument_not_found)
+                if constexpr (
+                    specialization_of<with_default, arg_provider_type> &&
+                    rest_arg_castable<typename arg_provider_result_type::value_type, arg_type>)
                 {
-                    return rest_arg_cast<arg_type>(arg_provider_.default_value());
-                }
+                    static_assert(
+                        rest_arg_castable<typename arg_provider_type::value_type, arg_type>,
+                        "Incompatible rest arg default value!");
 
-                return rest_arg_cast<arg_type>(std::move(provider_result_.value()));
-            }
-            else if constexpr (
-                specialization_of<std::optional, arg_type> &&
-                detail::is_rest_arg_provider<arg_provider_type>)
-            {
-                if constexpr (rest_arg_castable<typename arg_provider_result_type::value_type, typename arg_type::value_type>)
-                {
                     // It's necessary to store the retrieved value to make sure it outlives
                     // the call operator. Case in point, std::string -> std::string_view
                     provider_result_ = arg_provider_(request, context);
                     if (provider_result_.has_error() &&
                         provider_result_.error() == error::argument_not_found)
                     {
-                        return std::nullopt;
+                        return rest_arg_cast<arg_type>(arg_provider_.default_value());
                     }
 
-                    return rest_arg_cast<typename arg_type::value_type>(std::move(provider_result_.value()));
+                    return rest_arg_cast<arg_type>(std::move(provider_result_.value()));
                 }
-                else
+                else if constexpr (specialization_of<std::optional, arg_type>)
                 {
-                    static_assert(
-                        always_false<arg_provider_type, typename arg_type::value_type>,
-                        "Incompatible optional rest arg provider!");
+                    if constexpr (rest_arg_castable<typename arg_provider_result_type::value_type, typename arg_type::value_type>)
+                    {
+                        // It's necessary to store the retrieved value to make sure it outlives
+                        // the call operator. Case in point, std::string -> std::string_view
+                        provider_result_ = arg_provider_(request, context);
+                        if (provider_result_.has_error() &&
+                            provider_result_.error() == error::argument_not_found)
+                        {
+                            return std::nullopt;
+                        }
+
+                        return rest_arg_cast<typename arg_type::value_type>(std::move(provider_result_.value()));
+                    }
+                    else
+                    {
+                        static_assert(
+                            always_false<arg_provider_type, typename arg_type::value_type>,
+                            "Incompatible optional rest arg provider!");
+                    }
                 }
-            }
-            else if constexpr (
-                detail::is_rest_arg_provider<arg_provider_type> &&
-                rest_arg_castable<typename arg_provider_result_type::value_type, arg_type>)
-            {
-                // It's necessary to store the retrieved value to make sure it outlives
-                // the call operator. Case in point, std::string -> std::string_view
-                provider_result_ = arg_provider_(request, context);
-                return rest_arg_cast<arg_type>(std::move(provider_result_.value()));
+                else if constexpr (rest_arg_castable<typename arg_provider_result_type::value_type, arg_type>)
+                {
+                    // It's necessary to store the retrieved value to make sure it outlives
+                    // the call operator. Case in point, std::string -> std::string_view
+                    provider_result_ = arg_provider_(request, context);
+                    return rest_arg_cast<arg_type>(std::move(provider_result_.value()));
+                }
             }
             else if constexpr (rest_arg_castable<arg_provider_type, arg_type>)
             {
@@ -207,7 +235,7 @@ struct rest_arg
                     "{} - REST arg({}:{})",
                     e.what(),
                     index + 1,
-                    arg_provider_.name())};
+                    detail::arg_provider_name(arg_provider_))};
         }
         catch(...)
         {
@@ -216,7 +244,7 @@ struct rest_arg
                 std::format(
                     "REST arg({}:{})",
                     index + 1,
-                    arg_provider_.name())};
+                    detail::arg_provider_name(arg_provider_))};
         }
     }
 

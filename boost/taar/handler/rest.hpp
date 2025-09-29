@@ -33,7 +33,7 @@ namespace detail {
 template <typename... T>
 concept compatible_arg_providers = requires
 {
-    requires have_super_type_v<detail::arg_provider_request<T>...>;
+    requires have_super_type_v<detail::arg_provider_request_t<T>...>;
 };
 
 template <typename... T>
@@ -41,7 +41,7 @@ struct common_requests_type_impl
 {
     static_assert(compatible_arg_providers<T...>, "Incompatible arg providers.");
 
-    using type = super_type_t<detail::arg_provider_request<T>...>;
+    using type = super_type_t<detail::arg_provider_request_t<T>...>;
 };
 
 template <typename... T>
@@ -79,9 +79,9 @@ inline auto rest_for_callable(
         "The number of REST arguments providers must be equal to number of "
         "callable arguments.");
 
-    static_assert(
-        (detail::is_rest_arg_provider<std::remove_cvref_t<ArgProvidersType>> && ...),
-        "Invalid REST arg provider!");
+    //static_assert(
+    //    (detail::is_rest_arg_provider<std::remove_cvref_t<ArgProvidersType>> && ...),
+    //    "Invalid REST arg provider!");
 
     using request_type = detail::common_requests_type_t<
         std::remove_reference_t<ArgProvidersType>...>;

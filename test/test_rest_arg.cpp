@@ -24,6 +24,7 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_provider)
     using namespace boost::taar::handler;
 
     static_assert(!is_rest_arg_provider<int>, "Failed!");
+    static_assert(!is_rest_arg_provider<float>, "Failed!");
     static_assert(!is_rest_arg_provider<void>, "Failed!");
     static_assert(!is_rest_arg_provider<void()>, "Failed!");
     static_assert(is_rest_arg_provider<std::string(int, const context&)>, "Failed!");
@@ -75,6 +76,10 @@ BOOST_AUTO_TEST_CASE(test_rest_arg)
     BOOST_TEST((rest_arg<std::string_view, header_arg>{header_arg("pi")}(0, req, ctx) == "3.14"));
     BOOST_TEST((rest_arg<float, header_arg>{header_arg("pi")}(0, req, ctx) == 3.14f));
     BOOST_TEST((rest_arg<std::string, header_arg>{header_arg(http::field::host)}(0, req, ctx) == "boost.org"));
+
+    BOOST_TEST((rest_arg<int, float>{3.14f}(0, req, ctx) == 3));
+    BOOST_TEST((rest_arg<float, float>{3.14f}(0, req, ctx) == 3.14f));
+    BOOST_TEST((rest_arg<std::string, char const*>{"Hi"}(0, req, ctx) == "Hi"));
 }
 
 BOOST_AUTO_TEST_CASE(test_rest_arg_optional)

@@ -32,7 +32,7 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_provider_request_type)
 {
     namespace http = boost::beast::http;
     namespace taar= boost::taar;
-    using taar::handler::detail::arg_provider_request;
+    using taar::handler::detail::arg_provider_request_t;
     using taar::handler::detail::common_requests_type_t;
     using taar::handler::detail::compatible_arg_providers;
     using taar::matcher::context;
@@ -46,10 +46,13 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_provider_request_type)
     using provider_empty = void(const empty_req&, const context&);
     using provider_file = void(const file_req&, const context&);
 
-    static_assert(std::is_same_v<arg_provider_request<provider_header>, req_header>, "Failed!");
-    static_assert(std::is_same_v<arg_provider_request<provider_string>, string_req>, "Failed!");
-    static_assert(std::is_same_v<arg_provider_request<provider_empty>, empty_req>, "Failed!");
-    static_assert(std::is_same_v<arg_provider_request<provider_file>, file_req>, "Failed!");
+    static_assert(std::is_same_v<arg_provider_request_t<provider_header>, req_header>, "Failed!");
+    static_assert(std::is_same_v<arg_provider_request_t<provider_string>, string_req>, "Failed!");
+    static_assert(std::is_same_v<arg_provider_request_t<provider_empty>, empty_req>, "Failed!");
+    static_assert(std::is_same_v<arg_provider_request_t<provider_file>, file_req>, "Failed!");
+    static_assert(std::is_same_v<arg_provider_request_t<int>, req_header>, "Failed!");
+    static_assert(std::is_same_v<arg_provider_request_t<float>, req_header>, "Failed!");
+    static_assert(std::is_same_v<arg_provider_request_t<std::string>, req_header>, "Failed!");
 
     static_assert(std::is_same_v<common_requests_type_t<>, empty_req>, "Failed!");
     static_assert(std::is_same_v<common_requests_type_t<provider_header>, empty_req>, "Failed!");
