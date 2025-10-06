@@ -7,7 +7,7 @@ from conan.tools.build import check_min_cppstd
 class BoostTaarConan(ConanFile):
     name = "boost-taar"
     version = "0.0.16"
-    license = "Boost Software License, Version 1.0"
+    license = "Boost Software License 1.0"
     author = "Reza Jahanbakhshi <reza.jahanbakhshi@gmail.com>"
     url = "https://github.com/rjahanbakhshi/boost.taar"
     description = "A header-only library for web server and client development"
