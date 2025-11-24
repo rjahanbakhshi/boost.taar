@@ -81,7 +81,7 @@ BOOST_AUTO_TEST_CASE(test_http_session)
     );
 
     http_session.register_request_handler(
-        method == http::verb::get && target == "/special/{*}",
+        method == http::verb::get && target == "/special/{*path}",
         [](
             const http::request<http::empty_body>& request,
             const taar::matcher::context& context) -> http::message_generator
@@ -91,7 +91,7 @@ BOOST_AUTO_TEST_CASE(test_http_session)
                 request.version()};
             res.set(boost::beast::http::field::content_type, "text/html");
             res.keep_alive(request.keep_alive());
-            res.body() = "Special path is: " + context.path_args.at("*");
+            res.body() = "Special path is: " + context.path_args.at("*path");
             res.prepare_payload();
             return res;
         }

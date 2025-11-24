@@ -17,7 +17,6 @@
 #include <boost/taar/matcher/detail/join_with.hpp>
 #include <boost/beast/http/message.hpp>
 #include <boost/url/url_view.hpp>
-#include <iterator>
 #include <ranges>
 #include <vector>
 #include <string>
@@ -31,66 +30,112 @@ struct target_t
 
     friend auto operator==(target_t, std::string_view target_template)
     {
-        auto ptt = parse_template(target_template);
-        std::vector<std::string> ptt_segments {ptt.value().begin(), ptt.value().end()};
+        auto const ptt = parse_template(target_template);
+        parsed_template template_segments {ptt.value().begin(), ptt.value().end()};
+
         return matcher::operand
         {
-            [ptt_segments = std::move(ptt_segments)](
+            [template_segments = std::move(template_segments)](
                 const request_type&,
                 context& context,
                 const boost::urls::url_view& parsed_target)
             {
-                auto target_iter = parsed_target.segments().begin();
-                auto template_iter = ptt_segments.begin();
-                for (;;)
+                auto const& target_segments = parsed_target.segments();
+
+                auto target_iter = target_segments.begin();
+                auto template_iter = template_segments.begin();
+
+                auto greedy_target_iter = target_segments.end();
+                std::string greedy_param_name;
+
+                auto finish_greedy_param_if_any = [&]()
                 {
-                    if (template_iter == ptt_segments.end())
+                    if (greedy_param_name.empty())
                     {
-                        break;
-                    }
-                    auto const& template_value = *template_iter;
-
-                    if (template_value == "{*}")
-                    {
-                        using namespace std::ranges;
-                        using namespace std::views;
-
-                        context.path_args.emplace(
-                            "*",
-                            subrange(target_iter, parsed_target.segments().end()) |
-                                detail::join_with('/') |
-                                detail::to<std::string>());
-                        return true;
+                        return;
                     }
 
-                    if (target_iter == parsed_target.segments().end())
+                    using namespace std::ranges;
+                    using namespace std::views;
+
+                    context.path_args.emplace(
+                        greedy_param_name,
+                        subrange(greedy_target_iter, target_iter) |
+                            detail::join_with('/') |
+                            detail::to<std::string>());
+
+                    greedy_param_name.clear();
+                };
+
+                while (template_iter != template_segments.end())
+                {
+                    auto const& template_type = template_iter->type;
+                    auto const& template_value = template_iter->value;
+
+                    if (template_type == template_segment_type::greedy_param)
+                    {
+                        finish_greedy_param_if_any();
+
+                        greedy_target_iter = target_iter;
+                        greedy_param_name = template_value;
+
+                        ++template_iter;
+                        if (template_iter == template_segments.end())
+                        {
+                            // greedy param at the end, consume all remaining target segments
+                            target_iter = target_segments.end();
+                            break;
+                        }
+                        else if (target_iter != target_segments.end())
+                        {
+                            ++target_iter;
+                        }
+
+                        continue;
+                    }
+
+                    if (target_iter == target_segments.end())
                     {
                         break;
                     }
                     auto const& target_value = *target_iter;
 
-                    if (template_value.size() >= 2 &&
-                        template_value.front() == '{' &&
-                        template_value.back() == '}')
+                    if (template_type == template_segment_type::param)
                     {
-                        context.path_args.emplace(
-                            std::string {
-                                std::next(template_value.begin()),
-                                std::prev(template_value.end())},
-                            target_value);
-                    }
-                    else if (template_value != target_value)
-                    {
-                        return false;
+                        finish_greedy_param_if_any();
+                        context.path_args.emplace(template_value, target_value);
+
+                        ++target_iter;
+                        ++template_iter;
+
+                        continue;
                     }
 
-                    ++target_iter;
-                    ++template_iter;
+                    // template_type == template_segment_type::literal
+                    if (template_value == target_value)
+                    {
+                        finish_greedy_param_if_any();
+
+                        ++target_iter;
+                        ++template_iter;
+
+                        continue;
+                    }
+
+                    if (!greedy_param_name.empty())
+                    {
+                        ++target_iter;
+                        continue;
+                    }
+
+                    return false;
                 }
 
+                finish_greedy_param_if_any();
+
                 return
-                    target_iter == parsed_target.segments().end() &&
-                    template_iter == ptt_segments.end();
+                    target_iter == target_segments.end() &&
+                    template_iter == template_segments.end();
             }
         };
     }
