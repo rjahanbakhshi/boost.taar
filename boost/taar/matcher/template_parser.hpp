@@ -95,7 +95,7 @@ struct template_segment_ref
 
 using parsed_template_ref = std::vector<template_segment_ref>;
 
-inline constexpr boost::system::result<parsed_template_ref> parse_template(
+inline /*constexpr*/ boost::system::result<parsed_template_ref> parse_template(
     std::string_view path)
 {
     enum class states : char
