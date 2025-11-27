@@ -94,7 +94,7 @@ using arg_provider_result_t = typename arg_provider_result<ArgProviderType>::typ
 template <typename ArgProviderType>
 std::string arg_provider_name(ArgProviderType&& ap)
 {
-    if constexpr (is_rest_arg_provider<ArgProviderType>)
+    if constexpr (is_rest_arg_provider<std::remove_cvref_t<ArgProviderType>>)
         return std::forward<ArgProviderType>(ap).name();
     else
         return "";

@@ -7,6 +7,7 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
 
+#include <boost/beast/http/status.hpp>
 #include <boost/taar/handler/htdocs.hpp>
 #include <boost/taar/handler/rest.hpp>
 #include <boost/taar/session/http.hpp>
@@ -24,12 +25,29 @@
 #include <boost/asio/bind_cancellation_slot.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/json/value.hpp>
+#include <boost/json/value_from.hpp>
+#include <boost/json/serialize.hpp>
+#include <boost/describe.hpp>
 #include <exception>
 #include <filesystem>
 #include <iostream>
 #include <fstream>
 #include <cstdlib>
 #include <stdexcept>
+
+struct obj
+{
+    int a;
+    int b;
+};
+
+BOOST_DESCRIBE_STRUCT(
+    obj, (),
+    (
+        a,
+        b,
+    )
+);
 
 int main(int argc, char* argv[])
 {
@@ -54,6 +72,8 @@ int main(int argc, char* argv[])
     using taar::handler::query_arg;
     using taar::handler::header_arg;
     using taar::handler::path_arg;
+    using taar::handler::json_body_arg;
+    using taar::handler::all_content_types;
     using taar::handler::with_default;
 
     net::io_context io_context;
@@ -87,6 +107,27 @@ int main(int argc, char* argv[])
             {
                 std::rethrow_exception(eptr);
             }
+            catch(const boost::system::system_error& e)
+            {
+                std::cerr << e.what() << '\n';
+
+                std::string error_msg;
+                http::status status {};
+                if (e.code().category() == boost::taar::error_category())
+                {
+                    error_msg = e.code().message();
+                    status = http::status::bad_request;
+                }
+                else
+                {
+                    error_msg = e.what();
+                    status = http::status::internal_server_error;
+                }
+
+                return
+                    response_builder(boost::json::value{{"soft_error", error_msg}})
+                        .set_status(status);
+            }
             catch (const std::exception& e)
             {
                 std::cerr << e.what() << '\n';
@@ -105,7 +146,7 @@ int main(int argc, char* argv[])
     );
 
     http_session.register_request_handler(
-        method == http::verb::get && target == "/special/{*}",
+        method == http::verb::get && target == "/special/{*path}",
         [](
             const http::request<http::empty_body>& request,
             const context& context) -> http::message_generator
@@ -115,7 +156,7 @@ int main(int argc, char* argv[])
                 request.version()};
             res.set(boost::beast::http::field::content_type, "text/html");
             res.keep_alive(request.keep_alive());
-            res.body() = "Special path is: " + context.path_args.at("*");
+            res.body() = "Special path is: " + context.path_args.at("path");
             res.prepare_payload();
             return res;
         }
@@ -228,7 +269,18 @@ int main(int argc, char* argv[])
     ));
 
     http_session.register_request_handler(
-        method == http::verb::get && target == "/{*}",
+        method == http::verb::get && target == "/api/echo-obj/",
+        rest([](const obj& value)
+        {
+            auto jv = boost::json::value_from(value);
+            std::cout << "Received: " << boost::json::serialize(jv) << '\n';
+            return jv;
+        },
+        json_body_arg(all_content_types)
+    ));
+
+    http_session.register_request_handler(
+        method == http::verb::get && target == "/{*path}",
         htdocs {argv[2]}
     );
 

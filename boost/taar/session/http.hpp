@@ -139,10 +139,38 @@ public:
         : wrapped_soft_error_handler_ {
             [](
                 std::exception_ptr eptr,
-                rebind_executor<boost::beast::tcp_stream>&,
-                boost::beast::http::request_header<>&,
+                rebind_executor<boost::beast::tcp_stream>& stream,
+                boost::beast::http::request_header<>& req,
                 cancellation_signals&) -> awaitable<bool>
             {
+                std::exception_ptr ex;
+                std::string error_msg;
+                try
+                {
+                    std::rethrow_exception(eptr);
+                }
+                catch(const boost::system::system_error& e)
+                {
+                    if (e.code().category() == error_category())
+                    {
+                        error_msg = e.code().message();
+                    }
+                    ex = std::current_exception();
+                }
+                catch (...)
+                {
+                    ex = std::current_exception();
+                }
+
+                if (!error_msg.empty())
+                {
+                    auto response = response_from(error_msg);
+                    response.result(boost::beast::http::status::bad_request);
+                    bool keep_alive = response.keep_alive();
+                    co_await detail::async_write(stream, std::move(response));
+                    co_return keep_alive;
+                }
+
                 std::rethrow_exception(eptr);
             }
         }
@@ -338,8 +366,7 @@ public:
                 http::request_parser<body_type> body_parser {std::move(header_parser)};
                 auto [req_ec, req_sz] = co_await async_read(stream, buffer, body_parser);
 
-                std::exception_ptr ex;
-                std::string error_msg;
+                std::exception_ptr eptr;
                 try
                 {
                     auto response = co_await response_from_invoke(
@@ -351,31 +378,14 @@ public:
                     co_await detail::async_write(stream, std::move(response));
                     co_return keep_alive;
                 }
-                catch(const boost::system::system_error& e)
-                {
-                    if (e.code().category() == error_category())
-                    {
-                        error_msg = e.what();
-                    }
-                    ex = std::current_exception();
-                }
                 catch (...)
                 {
-                    ex = std::current_exception();
-                }
-
-                if (!error_msg.empty())
-                {
-                    auto response = response_from(error_msg);
-                    response.result(boost::beast::http::status::bad_request);
-                    bool keep_alive = response.keep_alive();
-                    co_await detail::async_write(stream, std::move(response));
-                    co_return keep_alive;
+                    eptr = std::current_exception();
                 }
 
                 // An exception is thrown within the request handler.
                 co_return co_await wrapped_soft_error_handler_(
-                    ex,
+                    eptr,
                     stream,
                     body_parser.get(),
                     signals);
@@ -424,7 +434,7 @@ public:
                 cancellation_signals& signals) mutable
             -> awaitable<bool>
             {
-                auto response = co_await response_from_invoke(std::move(handler), eptr);
+                auto response = co_await response_from_invoke(handler, eptr);
                 bool keep_alive = response.keep_alive();
                 co_await detail::async_write(stream, std::move(response));
                 co_return keep_alive;
