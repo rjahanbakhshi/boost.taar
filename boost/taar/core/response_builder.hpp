@@ -11,7 +11,6 @@
 #define BOOST_TAAR_CORE_RESPONSE_BUILDER_HPP
 
 #include <boost/beast/http/message_generator.hpp>
-#include <boost/taar/core/pack_element.hpp>
 #include <boost/taar/core/response_from.hpp>
 #include <boost/beast/http/fields.hpp>
 #include <boost/beast/http/status.hpp>

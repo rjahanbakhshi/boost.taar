@@ -38,4 +38,4 @@ concept member_function_of = is_member_function_of_v<T, U>;
 
 } // namespace boost::taar
 
-#endif // BOOST_TAAR_CORE_ALWAYS_FALSE_HPP
+#endif // BOOST_TAAR_CORE_MEMBER_FUNCTION_OF_HPP

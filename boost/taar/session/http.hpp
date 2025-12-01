@@ -16,15 +16,13 @@
 #include <boost/taar/matcher/operand.hpp>
 #include <boost/taar/core/response_from.hpp>
 #include <boost/taar/core/cookies.hpp>
-#include <boost/taar/core/move_only_function.hpp>
 #include <boost/taar/core/member_function_of.hpp>
-#include <boost/taar/core/callable_traits.hpp>
-#include <boost/taar/core/specialization_of.hpp>
 #include <boost/taar/core/cancellation_signals.hpp>
 #include <boost/taar/core/awaitable.hpp>
 #include <boost/taar/core/rebind_executor.hpp>
 #include <boost/taar/core/is_awaitable.hpp>
 #include <boost/taar/core/error.hpp>
+#include <boost/taar/type_traits/callable.hpp>
 #include <boost/beast/http/read.hpp>
 #include <boost/beast/http/write.hpp>
 #include <boost/beast/http/message_generator.hpp>
@@ -38,10 +36,11 @@
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/url/url_view.hpp>
-#include <exception>
+#include <functional>
 #include <type_traits>
 #include <vector>
 #include <utility>
+#include <exception>
 
 namespace boost::taar::session {
 namespace detail {
@@ -104,14 +103,14 @@ auto async_write(
 class http
 {
 private:
-    using matcher_type = move_only_function<
+    using matcher_type = std::move_only_function<
         bool(
             const boost::beast::http::request_header<>&,
             matcher::context&,
             const boost::urls::url_view&,
             const cookies&)>;
 
-    using request_handler_wrapper_type = move_only_function<
+    using request_handler_wrapper_type = std::move_only_function<
         awaitable<bool>(
             const matcher::context&,
             rebind_executor<boost::beast::tcp_stream>&,
@@ -125,14 +124,14 @@ private:
         request_handler_wrapper_type handler;
     };
 
-    using soft_error_handler_wrapper_type = move_only_function<
+    using soft_error_handler_wrapper_type = std::move_only_function<
         awaitable<bool>(
             std::exception_ptr,
             rebind_executor<boost::beast::tcp_stream>&,
             boost::beast::http::request_header<>&,
             cancellation_signals&)>;
 
-    using hard_error_handler_type = move_only_function<void(std::exception_ptr)>;
+    using hard_error_handler_type = std::move_only_function<void(std::exception_ptr)>;
 
 public:
     http()
@@ -235,7 +234,7 @@ public:
                 }
 
                 auto iter = std::ranges::find_if(matcher_handlers_,
-                    [&](auto const& matcher_handler) -> bool
+                    [&](auto&& matcher_handler) -> bool
                     {
                         context.path_args.clear();
                         return matcher_handler.matcher(
@@ -360,7 +359,7 @@ public:
                 cancellation_signals& signals) mutable
             -> awaitable<bool>
             {
-                using request_type = std::remove_cvref_t<callable_arg_type<RequestHandler, 0>>;
+                using request_type = std::remove_cvref_t<type_traits::callable_arg<RequestHandler, 0>>;
                 using body_type = request_type::body_type;
 
                 http::request_parser<body_type> body_parser {std::move(header_parser)};

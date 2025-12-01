@@ -7,7 +7,7 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
 
-#include <boost/taar/core/super_type.hpp>
+#include <boost/taar/type_traits/super_type.hpp>
 #include <boost/test/unit_test.hpp>
 #include <type_traits>
 
@@ -18,9 +18,9 @@ struct derrived : base {};
 struct derrived2 : derrived {};
 struct derrived3 : base {};
 
-BOOST_AUTO_TEST_CASE(test_matcher_super_type)
+BOOST_AUTO_TEST_CASE(test_type_traits_super_type)
 {
-    using namespace boost::taar;
+    using namespace boost::taar::type_traits;
     static_assert(have_super_type_v<base>, "Failed!");
     static_assert(have_super_type_v<base, derrived>, "Failed!");
     static_assert(have_super_type_v<base, derrived, derrived2>, "Failed!");

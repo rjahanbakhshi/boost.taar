@@ -12,7 +12,7 @@
 
 #include <boost/taar/handler/rest_arg_cast_tag.hpp>
 #include <boost/taar/core/error.hpp>
-#include <boost/taar/core/always_false.hpp>
+#include <boost/taar/type_traits/always_false.hpp>
 #include <boost/json/value.hpp>
 #include <boost/json/value_to.hpp>
 #include <boost/algorithm/string/predicate.hpp>
@@ -191,7 +191,7 @@ inline constexpr decltype(auto) rest_arg_cast(FromType&& from)
     }
     else
     {
-        static_assert(always_false<FromType, ToType>, "Not a REST arg castable type!");
+        static_assert(type_traits::always_false<FromType, ToType>, "Not a REST arg castable type!");
     }
 }
 

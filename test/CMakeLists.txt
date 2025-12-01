@@ -4,12 +4,18 @@ find_package(Boost 1.84 CONFIG REQUIRED)
 
 add_executable(${PROJECT_NAME})
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 23)
-set_target_properties(${PROJECT_NAME} PROPERTIES UNITY_BUILD ${ENABLE_UNITY_BUILD})
+
+set_target_properties(
+    ${PROJECT_NAME} PROPERTIES UNITY_BUILD
+    ${ENABLE_UNITY_BUILD})
+
 target_sources(
     ${PROJECT_NAME}
     PRIVATE
+        type_traits/test_callable.cpp
+        type_traits/test_super_type.cpp
+        type_traits/test_specialization_of.cpp
         test.cpp
-        test_callable_traits.cpp
         test_callable_with.cpp
         test_constexpr_string.cpp
         test_cookies.cpp
@@ -23,7 +29,6 @@ target_sources(
         test_matcher_target.cpp
         test_matcher_version.cpp
         test_member_function_of.cpp
-        test_pack_element.cpp
         test_response_builder.cpp
         test_response_from.cpp
         test_response_from_user.cpp
@@ -31,8 +36,6 @@ target_sources(
         test_rest_arg.cpp
         test_rest_arg_cast_builtin.cpp
         test_rest_arg_cast_user.cpp
-        test_specialization_of.cpp
-        test_super_type.cpp
         test_template_parser.cpp
         to_response.h
 )

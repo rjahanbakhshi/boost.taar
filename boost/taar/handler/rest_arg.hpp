@@ -14,10 +14,12 @@
 #include <boost/taar/matcher/context.hpp>
 #include <boost/taar/core/cookies.hpp>
 #include <boost/taar/core/form_kvp.hpp>
-#include <boost/taar/core/callable_traits.hpp>
-#include <boost/taar/core/always_false.hpp>
-#include <boost/taar/core/specialization_of.hpp>
 #include <boost/taar/core/error.hpp>
+#include <boost/taar/type_traits/has_call_operator.hpp>
+#include <boost/taar/type_traits/callable.hpp>
+#include <boost/taar/type_traits/always_false.hpp>
+#include <boost/taar/type_traits/specialization_of.hpp>
+#include <boost/taar/type_traits/string_like.hpp>
 #include <boost/beast/http/string_body.hpp>
 #include <boost/beast/http/message.hpp>
 #include <boost/beast/http/field.hpp>
@@ -43,20 +45,19 @@
 namespace boost::taar::handler {
 namespace detail {
 
-template <typename T>
-concept string_like = std::constructible_from<std::string, T>;
-
 template <typename ArgProviderType>
 concept is_rest_arg_provider = requires
 {
     requires (
         std::is_function_v<std::remove_pointer_t<ArgProviderType>> ||
-        has_call_operator<ArgProviderType>);
-    typename callable_result_type<ArgProviderType>;
-    requires callable_args_count<ArgProviderType> == 2;
-    typename callable_arg_type<ArgProviderType, 0>;
-    typename callable_arg_type<ArgProviderType, 1>;
-    requires std::is_convertible_v<callable_arg_type<ArgProviderType, 1>, const matcher::context&>;
+        type_traits::has_call_operator<ArgProviderType>);
+    typename type_traits::callable_result<ArgProviderType>;
+    requires type_traits::callable_args_count<ArgProviderType> == 2;
+    typename type_traits::callable_arg<ArgProviderType, 0>;
+    typename type_traits::callable_arg<ArgProviderType, 1>;
+    requires std::is_convertible_v<
+        type_traits::callable_arg<ArgProviderType, 1>,
+        const matcher::context&>;
 };
 
 template <typename ArgProviderType>
@@ -65,9 +66,12 @@ struct arg_provider_request
     static auto choose_type()
     {
         if constexpr (is_rest_arg_provider<ArgProviderType>)
-            return typename std::type_identity<std::remove_cvref_t<callable_arg_type<ArgProviderType, 0>>>{};
+            return typename std::type_identity<
+                std::remove_cvref_t<
+                    type_traits::callable_arg<ArgProviderType, 0>>>{};
         else
-            return typename std::type_identity<boost::beast::http::request_header<>>{};
+            return typename std::type_identity<
+                boost::beast::http::request_header<>>{};
     }
     using type = typename decltype(choose_type())::type;
 };
@@ -81,7 +85,8 @@ struct arg_provider_result
     static auto choose_type()
     {
         if constexpr (is_rest_arg_provider<ArgProviderType>)
-            return typename std::type_identity<callable_result_type<ArgProviderType>>{};
+            return typename std::type_identity<
+                type_traits::callable_result<ArgProviderType>>{};
         else
             return typename std::type_identity<ArgProviderType>{};
     }
@@ -168,7 +173,7 @@ struct rest_arg
             if constexpr (detail::is_rest_arg_provider<arg_provider_type>)
             {
                 if constexpr (
-                    specialization_of<with_default, arg_provider_type> &&
+                    type_traits::specialization_of<with_default, arg_provider_type> &&
                     rest_arg_castable<typename arg_provider_result_type::value_type, arg_type>)
                 {
                     static_assert(
@@ -186,7 +191,7 @@ struct rest_arg
 
                     return rest_arg_cast<arg_type>(std::move(provider_result_.value()));
                 }
-                else if constexpr (specialization_of<std::optional, arg_type>)
+                else if constexpr (type_traits::specialization_of<std::optional, arg_type>)
                 {
                     if constexpr (rest_arg_castable<typename arg_provider_result_type::value_type, typename arg_type::value_type>)
                     {
@@ -204,7 +209,7 @@ struct rest_arg
                     else
                     {
                         static_assert(
-                            always_false<arg_provider_type, typename arg_type::value_type>,
+                            type_traits::always_false<arg_provider_type, typename arg_type::value_type>,
                             "Incompatible optional rest arg provider!");
                     }
                 }
@@ -223,7 +228,7 @@ struct rest_arg
             else
             {
                 static_assert(
-                    always_false<arg_provider_type, arg_type>,
+                    type_traits::always_false<arg_provider_type, arg_type>,
                     "Incompatible rest arg provider!");
             }
         }
@@ -431,7 +436,7 @@ constexpr all_content_types_t all_content_types {};
 // REST arg provider from the request body as string
 struct string_body_arg
 {
-    template <detail::string_like... T>
+    template <type_traits::string_like... T>
     string_body_arg(T&&... content_types)
         : content_types_ {std::forward<T>(content_types)...}
     {
@@ -474,7 +479,7 @@ struct string_body_arg
 // REST arg provider from the request body as json value
 struct json_body_arg
 {
-    template <detail::string_like... T>
+    template <type_traits::string_like... T>
     json_body_arg(T&&... content_types)
         : content_types_ {std::forward<T>(content_types)...}
     {
@@ -523,7 +528,7 @@ struct json_body_arg
 // REST arg provider from the request body for application/x-www-form-urlencoded
 struct url_encoded_form_data_arg
 {
-    template <detail::string_like... T>
+    template <type_traits::string_like... T>
     url_encoded_form_data_arg(T&&... content_types)
         : content_types_ {std::forward<T>(content_types)...}
     {

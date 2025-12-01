@@ -12,13 +12,13 @@
 
 #include <boost/taar/handler/rest_arg.hpp>
 #include <boost/taar/matcher/context.hpp>
-#include <boost/taar/core/callable_traits.hpp>
 #include <boost/taar/core/member_function_of.hpp>
 #include <boost/taar/core/response_from.hpp>
-#include <boost/taar/core/super_type.hpp>
 #include <boost/taar/core/is_awaitable.hpp>
 #include <boost/taar/core/awaitable.hpp>
 #include <boost/taar/core/error.hpp>
+#include <boost/taar/type_traits/callable.hpp>
+#include <boost/taar/type_traits/super_type.hpp>
 #include <boost/beast/http/message_generator.hpp>
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/field.hpp>
@@ -33,7 +33,7 @@ namespace detail {
 template <typename... T>
 concept compatible_arg_providers = requires
 {
-    requires have_super_type_v<detail::arg_provider_request_t<T>...>;
+    requires type_traits::have_super_type_v<detail::arg_provider_request_t<T>...>;
 };
 
 template <typename... T>
@@ -41,7 +41,7 @@ struct common_requests_type_impl
 {
     static_assert(compatible_arg_providers<T...>, "Incompatible arg providers.");
 
-    using type = super_type_t<detail::arg_provider_request_t<T>...>;
+    using type = type_traits::super_type_t<detail::arg_provider_request_t<T>...>;
 };
 
 template <typename... T>
@@ -75,7 +75,7 @@ inline auto rest_for_callable(
     using noref_fn_type = std::remove_reference_t<CallableType>;
 
     static_assert(
-        callable_args_count<noref_fn_type> == sizeof...(ArgProvidersType),
+        type_traits::callable_args_count<noref_fn_type> == sizeof...(ArgProvidersType),
         "The number of REST arguments providers must be equal to number of "
         "callable arguments.");
 
@@ -94,7 +94,7 @@ inline auto rest_for_callable(
         decltype(response_from_invoke(
             callable,
             rest_arg<
-                callable_arg_type<noref_fn_type, Indexes>,
+                type_traits::callable_arg<noref_fn_type, Indexes>,
                 std::remove_reference_t<ArgProvidersType>
             > {arg_providers}(Indexes, request, context)...
         ))
@@ -102,7 +102,7 @@ inline auto rest_for_callable(
         co_return co_await response_from_invoke(
             callable,
             rest_arg<
-                callable_arg_type<noref_fn_type, Indexes>,
+                type_traits::callable_arg<noref_fn_type, Indexes>,
                 std::remove_reference_t<ArgProvidersType>
             > {arg_providers}(Indexes, request, context)...
         );
@@ -123,7 +123,7 @@ inline auto rest_for_memfn(
     using noref_fn_type = std::remove_reference_t<MemFnType>;
 
     static_assert(
-        callable_args_count<noref_fn_type> == sizeof...(ArgProvidersType),
+        type_traits::callable_args_count<noref_fn_type> == sizeof...(ArgProvidersType),
         "The number of REST arguments providers must be equal to number of "
         "callable arguments.");
 
@@ -144,7 +144,7 @@ inline auto rest_for_memfn(
             memfn,
             std::forward<ObjectType>(object),
             rest_arg<
-                callable_arg_type<noref_fn_type, Indexes>,
+                type_traits::callable_arg<noref_fn_type, Indexes>,
                 std::remove_reference_t<ArgProvidersType>
             > {arg_providers}(Indexes, request, context)...
         ))
@@ -153,7 +153,7 @@ inline auto rest_for_memfn(
             memfn,
             std::forward<ObjectType>(object),
             rest_arg<
-                callable_arg_type<noref_fn_type, Indexes>,
+                type_traits::callable_arg<noref_fn_type, Indexes>,
                 std::remove_reference_t<ArgProvidersType>
             > {arg_providers}(Indexes, request, context)...
         );

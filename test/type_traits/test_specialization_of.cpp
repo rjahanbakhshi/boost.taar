@@ -7,7 +7,7 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
 
-#include <boost/taar/core/specialization_of.hpp>
+#include <boost/taar/type_traits/specialization_of.hpp>
 #include <boost/test/unit_test.hpp>
 
 namespace {
@@ -38,7 +38,7 @@ using fs_class2 = ps_class2<float>;
 
 BOOST_AUTO_TEST_CASE(test_specialization_of)
 {
-    using namespace boost::taar;
+    using namespace boost::taar::type_traits;
     static_assert(is_specialization_of_v<class1, fs_class1>, "Failed!");
     static_assert(specialization_of<class1, fs_class1>, "Failed!");
 

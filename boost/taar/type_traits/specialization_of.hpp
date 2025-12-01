@@ -7,12 +7,12 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
 
-#ifndef BOOST_TAAR_CORE_SPECIALIZATION_OF_HPP
-#define BOOST_TAAR_CORE_SPECIALIZATION_OF_HPP
+#ifndef BOOST_TAAR_TYPE_TRAITS_SPECIALIZATION_OF_HPP
+#define BOOST_TAAR_TYPE_TRAITS_SPECIALIZATION_OF_HPP
 
 #include <type_traits>
 
-namespace boost::taar {
+namespace boost::taar::type_traits {
 
 template <template <typename...> class, typename>
 struct is_specialization_of : std::false_type {};
@@ -29,6 +29,6 @@ template <template <typename...> class TemplateType, typename SpecializationType
 concept specialization_of =
     is_specialization_of_v<TemplateType, SpecializationType>;
 
-} // namespace boost::taar::matcher
+} // namespace boost::taar::type_traits
 
-#endif // BOOST_TAAR_CORE_SPECIALIZATION_OF_HPP
+#endif // BOOST_TAAR_TYPE_TRAITS_SPECIALIZATION_OF_HPP

@@ -13,7 +13,6 @@
 #include <boost/taar/core/awaitable.hpp>
 #include <boost/taar/core/is_awaitable.hpp>
 #include <boost/taar/core/is_http_response.hpp>
-#include <boost/taar/core/always_false.hpp>
 #include <boost/taar/core/response_from_tag.hpp>
 #include <boost/beast/http/message_generator.hpp>
 #include <boost/beast/http/message.hpp>

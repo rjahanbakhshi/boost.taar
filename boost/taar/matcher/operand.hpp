@@ -12,10 +12,10 @@
 
 #include <boost/taar/matcher/context.hpp>
 #include <boost/taar/core/cookies.hpp>
-#include <boost/taar/core/callable_traits.hpp>
-#include <boost/taar/core/specialization_of.hpp>
 #include <boost/taar/matcher/detail/callable_with.hpp>
-#include <boost/taar/core/super_type.hpp>
+#include <boost/taar/type_traits/specialization_of.hpp>
+#include <boost/taar/type_traits/super_type.hpp>
+#include <boost/taar/type_traits/callable.hpp>
 #include <boost/url/url_view.hpp>
 #include <type_traits>
 #include <utility>
@@ -151,7 +151,7 @@ public:
     }
 
     template <typename RHSType>
-    requires (!specialization_of<matcher::operand, std::remove_cvref_t<RHSType>>)
+    requires (!type_traits::specialization_of<matcher::operand, std::remove_cvref_t<RHSType>>)
     friend auto operator&&(
         operand lhs_operand,
         RHSType&& rhs)
@@ -159,7 +159,7 @@ public:
         matcher::operand rhs_operand {std::forward<RHSType&&>(rhs)};
         using rhs_operand_type = decltype(rhs_operand);
         using rhs_request_type = typename rhs_operand_type::request_type;
-        using super_request_type = super_type_t<request_type, rhs_request_type>;
+        using super_request_type = type_traits::super_type_t<request_type, rhs_request_type>;
 
         constexpr auto with_target = with_parsed_target || rhs_operand_type::with_parsed_target;
         constexpr auto with_cookie = with_parsed_cookies || rhs_operand_type::with_parsed_cookies;
@@ -227,7 +227,7 @@ public:
     }
 
     template <typename LHSType>
-    requires (!specialization_of<matcher::operand, std::remove_cvref<LHSType>>)
+    requires (!type_traits::specialization_of<matcher::operand, std::remove_cvref<LHSType>>)
     friend auto operator&&(
         LHSType&& lhs,
         operand rhs_operand)
@@ -235,7 +235,7 @@ public:
         matcher::operand lhs_operand {std::forward<LHSType&&>(lhs)};
         using lhs_operand_type = decltype(lhs_operand);
         using lhs_request_type = typename lhs_operand_type::request_type;
-        using super_request_type = super_type_t<request_type, lhs_request_type>;
+        using super_request_type = type_traits::super_type_t<request_type, lhs_request_type>;
 
         constexpr auto with_target = with_parsed_target || lhs_operand_type::with_parsed_target;
         constexpr auto with_cookie = with_parsed_cookies || lhs_operand_type::with_parsed_cookies;
@@ -303,7 +303,7 @@ public:
     }
 
     template <typename RHSType>
-    requires (!specialization_of<matcher::operand, std::remove_cvref_t<RHSType>>)
+    requires (!type_traits::specialization_of<matcher::operand, std::remove_cvref_t<RHSType>>)
     friend auto operator||(
         operand lhs_operand,
         RHSType&& rhs)
@@ -311,7 +311,7 @@ public:
         matcher::operand rhs_operand {std::forward<RHSType&&>(rhs)};
         using rhs_operand_type = decltype(rhs_operand);
         using rhs_request_type = typename rhs_operand_type::request_type;
-        using super_request_type = super_type_t<request_type, rhs_request_type>;
+        using super_request_type = type_traits::super_type_t<request_type, rhs_request_type>;
 
         constexpr auto with_target = with_parsed_target || rhs_operand_type::with_parsed_target;
         constexpr auto with_cookie = with_parsed_cookies || rhs_operand_type::with_parsed_cookies;
@@ -379,7 +379,7 @@ public:
     }
 
     template <typename LHSType>
-    requires (!specialization_of<matcher::operand, std::remove_cvref<LHSType>>)
+    requires (!type_traits::specialization_of<matcher::operand, std::remove_cvref<LHSType>>)
     friend auto operator||(
         LHSType&& lhs,
         operand rhs_operand)
@@ -387,7 +387,7 @@ public:
         matcher::operand lhs_operand {std::forward<LHSType&&>(lhs)};
         using lhs_operand_type = decltype(lhs_operand);
         using lhs_request_type = typename lhs_operand_type::request_type;
-        using super_request_type = super_type_t<request_type, lhs_request_type>;
+        using super_request_type = type_traits::super_type_t<request_type, lhs_request_type>;
 
         constexpr auto with_target = with_parsed_target || lhs_operand_type::with_parsed_target;
         constexpr auto with_cookie = with_parsed_cookies || lhs_operand_type::with_parsed_cookies;
@@ -462,8 +462,8 @@ template <typename ObjectType>
 operand(ObjectType) ->
     operand<
         std::remove_cvref_t<
-            typename callable_traits<std::remove_cvref_t<ObjectType>
-        >::template arg_type<0>
+            typename type_traits::callable<std::remove_cvref_t<ObjectType>
+        >::template arg<0>
     >, ObjectType>;
 
 template <typename MatcherType>

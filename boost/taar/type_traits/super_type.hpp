@@ -7,13 +7,13 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
 
-#ifndef BOOST_TAAR_CORE_SUPER_TYPE_HPP
-#define BOOST_TAAR_CORE_SUPER_TYPE_HPP
+#ifndef BOOST_TAAR_TYPE_TRAITS_SUPER_TYPE_HPP
+#define BOOST_TAAR_TYPE_TRAITS_SUPER_TYPE_HPP
 
 #include <concepts>
 #include <type_traits>
 
-namespace boost::taar {
+namespace boost::taar::type_traits {
 
 // Type traits determining whether a group of types have a super type.
 template <typename... T>
@@ -79,6 +79,6 @@ struct super_type<T, U, Rest...>
 template <typename... T>
 using super_type_t = typename super_type<T...>::type;
 
-} // namespace boost::taar
+} // namespace boost::taar::type_traits
 
-#endif // BOOST_TAAR_CORE_SUPER_TYPE_HPP
+#endif // BOOST_TAAR_TYPE_TRAITS_SUPER_TYPE_HPP

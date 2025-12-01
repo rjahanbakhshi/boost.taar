@@ -207,4 +207,32 @@ BOOST_AUTO_TEST_CASE(test_http_session_move_only_handler)
         move_only_handler{13});
 }
 
+struct move_only_handler_const
+{
+    move_only_handler_const(int i) : value {i}
+    {}
+
+    move_only_handler_const(move_only_handler_const const&) = delete;
+    move_only_handler_const(move_only_handler_const&&) = default;
+    move_only_handler_const& operator=(move_only_handler_const const&) = delete;
+    move_only_handler_const& operator=(move_only_handler_const&&) = default;
+
+    int operator()(
+        const http::request<boost::beast::http::empty_body>& request,
+        const boost::taar::matcher::context&) const
+    {
+        return value;
+    }
+    int value;
+};
+
+BOOST_AUTO_TEST_CASE(test_http_session_move_only_handler_const)
+{
+    taar::session::http http_session;
+    move_only_handler_const fn{13};
+    http_session.register_request_handler(
+        method == http::verb::post,
+        std::move(fn));
+}
+
 } // namespace

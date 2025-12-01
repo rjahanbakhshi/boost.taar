@@ -21,9 +21,7 @@ set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 23)
 target_sources(
     ${PROJECT_NAME}
     PUBLIC FILE_SET HEADERS BASE_DIRS . FILES
-        boost/taar/core/always_false.hpp
         boost/taar/core/awaitable.hpp
-        boost/taar/core/callable_traits.hpp
         boost/taar/core/cancellation_signals.hpp
         boost/taar/core/constexpr_string.hpp
         boost/taar/core/cookies.hpp
@@ -33,14 +31,10 @@ target_sources(
         boost/taar/core/is_awaitable.hpp
         boost/taar/core/is_http_response.hpp
         boost/taar/core/member_function_of.hpp
-        boost/taar/core/move_only_function.hpp
-        boost/taar/core/pack_element.hpp
         boost/taar/core/rebind_executor.hpp
         boost/taar/core/response_builder.hpp
         boost/taar/core/response_from.hpp
         boost/taar/core/response_from_tag.hpp
-        boost/taar/core/specialization_of.hpp
-        boost/taar/core/super_type.hpp
         boost/taar/handler/htdocs.hpp
         boost/taar/handler/rest.hpp
         boost/taar/handler/rest_arg.hpp
@@ -59,6 +53,12 @@ target_sources(
         boost/taar/matcher/version.hpp
         boost/taar/server/tcp.hpp
         boost/taar/session/http.hpp
+        boost/taar/type_traits/always_false.hpp
+        boost/taar/type_traits/callable.hpp
+        boost/taar/type_traits/has_call_operator.hpp
+        boost/taar/type_traits/specialization_of.hpp
+        boost/taar/type_traits/string_like.hpp
+        boost/taar/type_traits/super_type.hpp
 )
 
 target_link_libraries(
