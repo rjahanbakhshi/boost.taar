@@ -96,6 +96,7 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_cast_builtin)
     BOOST_TEST(!rest_arg_cast<bool>("false"));
     BOOST_TEST(rest_arg_cast<std::string>(13) == "13");
     BOOST_TEST(rest_arg_cast<std::string>(42.13) == "42.13");
+    BOOST_TEST(rest_arg_cast<std::string>(13.42f) == "13.42");
     BOOST_TEST(rest_arg_cast<int>(42.13) == 42);
     BOOST_TEST(rest_arg_cast<float>(13) == 13.0);
     BOOST_TEST(rest_arg_cast<int>(3.14f) == 3);

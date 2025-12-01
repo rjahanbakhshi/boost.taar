@@ -207,6 +207,16 @@ int main(int argc, char* argv[])
     ));
 
     http_session.register_request_handler(
+        method == http::verb::get && target == "/api/mul",
+        rest([](float f, double d)
+        {
+            return f * d;
+        },
+        query_arg("f"),
+        query_arg("d")
+    ));
+
+    http_session.register_request_handler(
         method == http::verb::post && target == "/api/add13",
         rest([](int a, int b, bool negate)
         {

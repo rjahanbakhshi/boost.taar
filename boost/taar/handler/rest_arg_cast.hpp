@@ -107,18 +107,30 @@ inline std::string tag_invoke(rest_arg_cast_built_in_tag<std::string>, const Fro
 {
     std::string result(sizeof(FromType) * 4 + 1, '\0');
     std::to_chars_result tcr;
-    for(;;)
+    for(int i = 0; i < 3; ++i)
     {
         auto [ptr, ec] = std::to_chars(result.data(), result.data() + result.size(), from);
-        if (ec != std::errc::value_too_large)
+        if (ec == std::errc::value_too_large) [[unlikely]]
         {
-            result.resize(std::distance(result.data(), ptr));
-            break;
+            result.resize(result.size() * 2);
+            continue;
         }
-        result.resize(result.size());
+        else if (ec != std::errc()) [[unlikely]]
+        {
+            throw boost::system::system_error {
+                error::invalid_number_format,
+                "REST arg cast from string to number error"};
+        }
+
+        [[likely]]
+        result.resize(std::distance(result.data(), ptr));
+        return result;
     }
 
-    return result;
+    [[unlikely]]
+    throw boost::system::system_error {
+        error::invalid_number_format,
+        "REST arg cast from number to string error (number too large)"};
 }
 
 template <typename FromType, typename ToType> requires requires(FromType&& from)

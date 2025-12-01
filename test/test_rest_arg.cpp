@@ -75,6 +75,7 @@ BOOST_AUTO_TEST_CASE(test_rest_arg)
     BOOST_TEST((rest_arg<std::string_view, header_arg>{header_arg("header2")}(0, req, ctx) == "value2"));
     BOOST_TEST((rest_arg<std::string_view, header_arg>{header_arg("pi")}(0, req, ctx) == "3.14"));
     BOOST_TEST((rest_arg<float, header_arg>{header_arg("pi")}(0, req, ctx) == 3.14f));
+    BOOST_TEST((rest_arg<double, header_arg>{header_arg("pi")}(0, req, ctx) == 3.14));
     BOOST_TEST((rest_arg<std::string, header_arg>{header_arg(http::field::host)}(0, req, ctx) == "boost.org"));
 
     BOOST_TEST((rest_arg<int, float>{3.14f}(0, req, ctx) == 3));
