@@ -12,12 +12,14 @@
 
 #include <boost/taar/core/awaitable.hpp>
 #include <boost/system/error_code.hpp>
+#include <boost/asio/as_tuple.hpp>
+#include <boost/asio/async_result.hpp>
 #include <boost/asio/co_spawn.hpp>
+#include <boost/asio/deferred.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/post.hpp>
-#include <boost/asio/async_result.hpp>
+#include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
-#include <boost/asio/as_tuple.hpp>
 #include <coroutine>
 #include <exception>
 #include <functional>
@@ -213,6 +215,41 @@ public:
             };
 
             return awaitable_bridge_void{std::move(aw), *this, {}};
+        }
+
+        // Support for co_await boost::asio::this_coro::executor
+        auto await_transform(boost::asio::this_coro::executor_t) noexcept
+        {
+            struct executor_awaiter
+            {
+                promise_type& promise;
+
+                bool await_ready() const noexcept { return true; }
+                void await_suspend(handle_type) noexcept { }
+                executor_type await_resume() const
+                {
+                    if (!promise.executor_)
+                        throw std::runtime_error("async_generator: no executor set");
+                    return *promise.executor_;
+                }
+            };
+            return executor_awaiter{*this};
+        }
+
+        // Support for deferred operations (e.g., timer.async_wait() without explicit token)
+        template <typename Deferred>
+        auto await_transform(Deferred&& d)
+            -> decltype(
+                this->await_transform(
+                    std::forward<Deferred>(d)(
+                        boost::asio::use_awaitable_t<executor_type>{})))
+            requires boost::asio::is_deferred<std::decay_t<Deferred>>::value
+        {
+            // Invoke the deferred operation with use_awaitable to produce an awaitable,
+            // then forward to our existing awaitable bridge
+            return await_transform(
+                std::forward<Deferred>(d)(
+                    boost::asio::use_awaitable_t<executor_type>{}));
         }
 
         // Flattening awaiter for yielding inner generators

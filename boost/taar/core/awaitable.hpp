@@ -10,13 +10,24 @@
 #ifndef BOOST_TAAR_CORE_AWAITABLE_HPP
 #define BOOST_TAAR_CORE_AWAITABLE_HPP
 
-#include <boost/asio/io_context.hpp>
+#include <boost/asio/as_tuple.hpp>
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/use_awaitable.hpp>
 
 namespace boost::taar {
 
 template <typename T>
 using awaitable = boost::asio::awaitable<T, boost::asio::io_context::executor_type>;
+
+// Completion token for use in async operations within taar coroutines
+inline constexpr boost::asio::use_awaitable_t<
+    boost::asio::io_context::executor_type> use_awaitable{};
+
+// Tuple-style completion token (returns error_code instead of throwing)
+inline constexpr boost::asio::as_tuple_t<
+    boost::asio::use_awaitable_t<
+        boost::asio::io_context::executor_type>> use_awaitable_tuple{};
 
 } // namespace boost::taar
 

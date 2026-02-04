@@ -15,10 +15,12 @@
 #include <boost/taar/core/error.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/co_spawn.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <boost/beast/http/field.hpp>
 #include <boost/beast/http/status.hpp>
 #include <boost/system/system_error.hpp>
 #include <boost/test/unit_test.hpp>
+#include <chrono>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -458,6 +460,100 @@ BOOST_AUTO_TEST_CASE(test_chunked_response_chaining_inner_throws)
             }
             BOOST_TEST(caught);
 
+            completed = true;
+        },
+        [](std::exception_ptr ep)
+        {
+            if (ep) std::rethrow_exception(ep);
+        });
+
+    ioc.run();
+    BOOST_TEST(completed);
+}
+
+// Test co_await this_coro::executor support
+
+chunked_response<std::string> chunked_with_direct_timer()
+{
+    namespace net = boost::asio;
+    net::steady_timer timer{co_await net::this_coro::executor};
+
+    co_yield std::string{"first"};
+    timer.expires_after(std::chrono::milliseconds{1});
+    co_await timer.async_wait(net::use_awaitable_t<net::io_context::executor_type>{});
+    co_yield std::string{"second"};
+}
+
+BOOST_AUTO_TEST_CASE(test_chunked_response_this_coro_executor)
+{
+    boost::asio::io_context ioc;
+    bool completed = false;
+
+    boost::asio::co_spawn(ioc,
+        [&]() -> awaitable<void>
+        {
+            auto gen = chunked_with_direct_timer();
+            gen.set_executor(ioc.get_executor());
+
+            std::vector<std::string> values;
+            while (true)
+            {
+                auto [ec, value] = co_await gen.next();
+                if (!value)
+                    break;
+                values.push_back(*value);
+            }
+
+            BOOST_TEST(values.size() == 2u);
+            BOOST_TEST(values[0] == "first");
+            BOOST_TEST(values[1] == "second");
+            completed = true;
+        },
+        [](std::exception_ptr ep)
+        {
+            if (ep) std::rethrow_exception(ep);
+        });
+
+    ioc.run();
+    BOOST_TEST(completed);
+}
+
+// Test natural async syntax with deferred operations (no explicit completion token)
+
+chunked_response<std::string> chunked_with_natural_timer()
+{
+    namespace net = boost::asio;
+    net::steady_timer timer{co_await net::this_coro::executor};
+
+    co_yield std::string{"first"};
+    timer.expires_after(std::chrono::milliseconds{1});
+    co_await timer.async_wait();  // No token needed!
+    co_yield std::string{"second"};
+}
+
+BOOST_AUTO_TEST_CASE(test_chunked_response_deferred_operations)
+{
+    boost::asio::io_context ioc;
+    bool completed = false;
+
+    boost::asio::co_spawn(ioc,
+        [&]() -> awaitable<void>
+        {
+            auto gen = chunked_with_natural_timer();
+            gen.set_executor(ioc.get_executor());
+
+            std::vector<std::string> values;
+            while (true)
+            {
+                auto [ec, value] = co_await gen.next();
+                if (!value)
+                    break;
+                values.push_back(*value);
+            }
+
+            BOOST_TEST(values.size() == 2u);
+            BOOST_TEST(values[0] == "first");
+            BOOST_TEST(values[1] == "second");
             completed = true;
         },
         [](std::exception_ptr ep)
