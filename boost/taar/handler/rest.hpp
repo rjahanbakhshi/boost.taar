@@ -24,6 +24,7 @@
 #include <boost/beast/http/field.hpp>
 #include <boost/beast/http/string_body.hpp>
 #include <boost/beast/http/message.hpp>
+#include <tuple>
 #include <utility>
 #include <type_traits>
 
@@ -99,13 +100,22 @@ inline auto rest_for_callable(
             > {arg_providers}(Indexes, request, context)...
         ))
     {
-        co_return co_await response_from_invoke(
-            callable,
+        // Extract and store arguments in this coroutine's frame to ensure
+        // they outlive the generator. This prevents dangling references
+        // when response_from_invoke's frame is destroyed.
+        auto args = std::make_tuple(
             rest_arg<
                 type_traits::callable_arg<noref_fn_type, Indexes>,
                 std::remove_reference_t<ArgProvidersType>
             > {arg_providers}(Indexes, request, context)...
         );
+        co_return co_await std::apply(
+            [&callable](auto&&... a) {
+                return response_from_invoke(
+                    callable,
+                    std::forward<decltype(a)>(a)...);
+            },
+            std::move(args));
     };
 }
 
@@ -149,14 +159,23 @@ inline auto rest_for_memfn(
             > {arg_providers}(Indexes, request, context)...
         ))
     {
-        co_return co_await response_from_invoke(
-            memfn,
-            std::forward<ObjectType>(object),
+        // Extract and store arguments in this coroutine's frame to ensure
+        // they outlive the generator. This prevents dangling references
+        // when response_from_invoke's frame is destroyed.
+        auto args = std::make_tuple(
             rest_arg<
                 type_traits::callable_arg<noref_fn_type, Indexes>,
                 std::remove_reference_t<ArgProvidersType>
             > {arg_providers}(Indexes, request, context)...
         );
+        co_return co_await std::apply(
+            [&memfn, &object](auto&&... a) {
+                return response_from_invoke(
+                    memfn,
+                    std::forward<ObjectType>(object),
+                    std::forward<decltype(a)>(a)...);
+            },
+            std::move(args));
     };
 }
 
