@@ -21,14 +21,21 @@ set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 23)
 target_sources(
     ${PROJECT_NAME}
     PUBLIC FILE_SET HEADERS BASE_DIRS . FILES
+        boost/taar/core/async_generator.hpp
         boost/taar/core/awaitable.hpp
         boost/taar/core/cancellation_signals.hpp
+        boost/taar/core/chunk_body_from.hpp
+        boost/taar/core/chunk_body_from_tag.hpp
+        boost/taar/core/chunked_response.hpp
+        boost/taar/core/chunked_response_meta.hpp
         boost/taar/core/constexpr_string.hpp
         boost/taar/core/cookies.hpp
         boost/taar/core/error.hpp
         boost/taar/core/form_kvp.hpp
         boost/taar/core/ignore_and_rethrow.hpp
+        boost/taar/core/is_async_generator.hpp
         boost/taar/core/is_awaitable.hpp
+        boost/taar/core/is_chunked_response.hpp
         boost/taar/core/is_http_response.hpp
         boost/taar/core/member_function_of.hpp
         boost/taar/core/rebind_executor.hpp
