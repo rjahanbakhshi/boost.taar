@@ -11,6 +11,7 @@
 #define BOOST_TAAR_SESSION_HTTP_HPP
 
 #include <boost/asio/async_result.hpp>
+#include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/write.hpp>
 #include <boost/beast/http/fields.hpp>
 #include <boost/taar/matcher/context.hpp>
@@ -162,12 +163,16 @@ awaitable<bool> write_chunked_response(
     GeneratorType& generator,
     StreamType& stream,
     unsigned version,
-    bool keep_alive)
+    bool keep_alive,
+    ::boost::asio::cancellation_slot cancellation_slot = {})
 {
     namespace http = ::boost::beast::http;
+    namespace net = ::boost::asio;
     using T = generator_value_t<GeneratorType>;
 
     generator.set_executor(stream.get_executor());
+    if (cancellation_slot.is_connected())
+        generator.set_cancellation_slot(cancellation_slot);
 
     // Get first value BEFORE sending headers so exceptions propagate
     // to the soft error handler before any bytes are on the wire.
@@ -184,15 +189,21 @@ awaitable<bool> write_chunked_response(
     apply_chunked_metadata(generator, header_response);
 
     http::response_serializer<http::empty_body> serializer {header_response};
-    co_await http::async_write_header(stream, serializer);
+    auto [header_ec, header_sz] = co_await http::async_write_header(
+        stream, serializer, net::as_tuple(net::deferred));
+    if (header_ec)
+        co_return false;
 
     // Write first value if present
     if (first_value)
     {
         auto body = chunk_body_from(std::move(*first_value));
-        co_await ::boost::asio::async_write(
+        auto [write_ec, write_sz] = co_await net::async_write(
             stream,
-            http::make_chunk(::boost::asio::buffer(body)));
+            http::make_chunk(net::buffer(body)),
+            net::as_tuple(net::deferred));
+        if (write_ec)
+            co_return false;
 
         // Send remaining chunks
         while (true)
@@ -201,17 +212,21 @@ awaitable<bool> write_chunked_response(
             if (!value)
                 break;
 
-            auto body = chunk_body_from(std::move(*value));
-            co_await ::boost::asio::async_write(
+            auto chunk_body = chunk_body_from(std::move(*value));
+            auto [chunk_ec, chunk_sz] = co_await net::async_write(
                 stream,
-                http::make_chunk(::boost::asio::buffer(body)));
+                http::make_chunk(net::buffer(chunk_body)),
+                net::as_tuple(net::deferred));
+            if (chunk_ec)
+                co_return false;
         }
     }
 
-    // Send last chunk
-    co_await ::boost::asio::async_write(
+    // Send last chunk (best effort, ignore errors)
+    co_await net::async_write(
         stream,
-        http::make_chunk_last());
+        http::make_chunk_last(),
+        net::as_tuple(net::deferred));
 
     co_return keep_alive;
 }
@@ -487,6 +502,10 @@ public:
                 auto version = body_parser.get().version();
                 auto keep_alive = body_parser.get().keep_alive();
 
+                // Get cancellation slot from current coroutine for request-scoped cancellation
+                auto cs = co_await boost::asio::this_coro::cancellation_state;
+                auto cancellation_slot = cs.slot();
+
                 std::exception_ptr eptr;
                 try
                 {
@@ -498,7 +517,7 @@ public:
                             body_parser.get(),
                             context);
                         co_return co_await detail::write_chunked_response(
-                            generator, stream, version, keep_alive);
+                            generator, stream, version, keep_alive, cancellation_slot);
                     }
                     else if constexpr (is_async_generator<result_type>)
                     {
@@ -508,7 +527,7 @@ public:
                             body_parser.get(),
                             context);
                         co_return co_await detail::write_chunked_response(
-                            generator, stream, version, keep_alive);
+                            generator, stream, version, keep_alive, cancellation_slot);
                     }
                     else if constexpr (is_awaitable<result_type>)
                     {
@@ -520,7 +539,7 @@ public:
                                 body_parser.get(),
                                 context);
                             co_return co_await detail::write_chunked_response(
-                                generator, stream, version, keep_alive);
+                                generator, stream, version, keep_alive, cancellation_slot);
                         }
                         else if constexpr (is_async_generator<typename result_type::value_type>)
                         {
@@ -530,7 +549,7 @@ public:
                                 body_parser.get(),
                                 context);
                             co_return co_await detail::write_chunked_response(
-                                generator, stream, version, keep_alive);
+                                generator, stream, version, keep_alive, cancellation_slot);
                         }
                         else
                         {

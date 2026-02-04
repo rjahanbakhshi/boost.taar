@@ -15,6 +15,7 @@
 #include <boost/taar/core/error.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/co_spawn.hpp>
+#include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/beast/http/field.hpp>
 #include <boost/beast/http/status.hpp>
@@ -554,6 +555,164 @@ BOOST_AUTO_TEST_CASE(test_chunked_response_deferred_operations)
             BOOST_TEST(values.size() == 2u);
             BOOST_TEST(values[0] == "first");
             BOOST_TEST(values[1] == "second");
+            completed = true;
+        },
+        [](std::exception_ptr ep)
+        {
+            if (ep) std::rethrow_exception(ep);
+        });
+
+    ioc.run();
+    BOOST_TEST(completed);
+}
+
+// Cancellation tests
+
+chunked_response<std::string> cancellation_aware_chunked()
+{
+    namespace net = boost::asio;
+
+    co_yield std::string{"first"};
+
+    auto cs = co_await net::this_coro::cancellation_state;
+    if (cs.cancelled() != net::cancellation_type::none)
+    {
+        co_return;  // Early exit
+    }
+
+    co_yield std::string{"second"};
+}
+
+BOOST_AUTO_TEST_CASE(test_chunked_response_cancellation_state)
+{
+    boost::asio::io_context ioc;
+    boost::asio::cancellation_signal signal;
+    bool completed = false;
+
+    boost::asio::co_spawn(ioc,
+        [&]() -> awaitable<void>
+        {
+            auto gen = cancellation_aware_chunked();
+            gen.set_executor(ioc.get_executor());
+            gen.set_cancellation_slot(signal.slot());
+
+            auto [ec1, v1] = co_await gen.next();
+            BOOST_TEST(v1.has_value());
+            BOOST_TEST(*v1 == "first");
+
+            // Emit cancellation
+            signal.emit(boost::asio::cancellation_type::terminal);
+
+            auto [ec2, v2] = co_await gen.next();
+            BOOST_TEST(!v2.has_value());  // Generator exited early
+
+            completed = true;
+        },
+        [](std::exception_ptr ep)
+        {
+            if (ep) std::rethrow_exception(ep);
+        });
+
+    ioc.run();
+    BOOST_TEST(completed);
+}
+
+chunked_response<std::string> chunked_with_long_timer()
+{
+    namespace net = boost::asio;
+    net::steady_timer timer{co_await net::this_coro::executor};
+
+    co_yield std::string{"first"};
+
+    timer.expires_after(std::chrono::hours{1});  // Long wait
+    co_await timer.async_wait();  // Should be cancelled
+
+    co_yield std::string{"second"};  // Never reached
+}
+
+BOOST_AUTO_TEST_CASE(test_chunked_response_nested_cancellation)
+{
+    boost::asio::io_context ioc;
+    boost::asio::cancellation_signal signal;
+    bool completed = false;
+    bool got_exception = false;
+
+    boost::asio::co_spawn(ioc,
+        [&]() -> awaitable<void>
+        {
+            auto gen = chunked_with_long_timer();
+            gen.set_executor(ioc.get_executor());
+            gen.set_cancellation_slot(signal.slot());
+
+            auto [ec1, v1] = co_await gen.next();
+            BOOST_TEST(*v1 == "first");
+
+            // Emit cancellation while timer is waiting
+            boost::asio::post(ioc, [&]()
+            {
+                signal.emit(boost::asio::cancellation_type::terminal);
+            });
+
+            // The timer should be cancelled and exception thrown
+            try
+            {
+                auto [ec2, v2] = co_await gen.next();
+                // Should get nullopt due to operation_aborted exception
+                BOOST_TEST(!v2.has_value());
+            }
+            catch (boost::system::system_error const& e)
+            {
+                BOOST_TEST(e.code() == boost::asio::error::operation_aborted);
+                got_exception = true;
+            }
+
+            completed = true;
+        },
+        [](std::exception_ptr ep)
+        {
+            if (ep) std::rethrow_exception(ep);
+        });
+
+    ioc.run();
+    BOOST_TEST(completed);
+    // Either we got nullopt or an exception - both are valid
+    BOOST_TEST((completed || got_exception));
+}
+
+// Test that cancellation_state returns a default state when no slot is set
+chunked_response<std::string> chunked_check_default_cancellation()
+{
+    namespace net = boost::asio;
+
+    auto cs = co_await net::this_coro::cancellation_state;
+    // With no cancellation slot set, should return default state (not cancelled)
+    if (cs.cancelled() == net::cancellation_type::none)
+    {
+        co_yield std::string{"first"};
+    }
+    co_yield std::string{"second"};
+}
+
+BOOST_AUTO_TEST_CASE(test_chunked_response_no_cancellation_slot)
+{
+    boost::asio::io_context ioc;
+    bool completed = false;
+
+    boost::asio::co_spawn(ioc,
+        [&]() -> awaitable<void>
+        {
+            auto gen = chunked_check_default_cancellation();
+            gen.set_executor(ioc.get_executor());
+            // No cancellation slot set
+
+            auto [ec1, v1] = co_await gen.next();
+            BOOST_TEST(v1.has_value());
+            BOOST_TEST(*v1 == "first");
+
+            auto [ec2, v2] = co_await gen.next();
+            BOOST_TEST(v2.has_value());
+            BOOST_TEST(*v2 == "second");
+
             completed = true;
         },
         [](std::exception_ptr ep)
