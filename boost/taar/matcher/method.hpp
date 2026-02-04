@@ -26,7 +26,7 @@ struct method_t
         return matcher::operand
         {
             [verb = std::move(verb)](
-                const request_type& request,
+                request_type const& request,
                 context& context)
             {
                 return request.method_string() == verb;
@@ -39,7 +39,7 @@ struct method_t
         return matcher::operand
         {
             [verb = std::move(verb)](
-                const request_type& request,
+                request_type const& request,
                 context& context)
             {
                 return request.method() == verb;

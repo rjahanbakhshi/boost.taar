@@ -8,6 +8,7 @@
 //
 
 #include <boost/beast/http/status.hpp>
+#include <boost/taar/core/async_generator.hpp>
 #include <boost/taar/handler/htdocs.hpp>
 #include <boost/taar/handler/rest.hpp>
 #include <boost/taar/session/http.hpp>
@@ -90,7 +91,7 @@ int main(int argc, char* argv[])
             {
                 std::rethrow_exception(eptr);
             }
-            catch (const std::exception& e)
+            catch (std::exception const& e)
             {
                 std::cerr << e.what() << '\n';
             }
@@ -107,7 +108,7 @@ int main(int argc, char* argv[])
             {
                 std::rethrow_exception(eptr);
             }
-            catch(const boost::system::system_error& e)
+            catch(boost::system::system_error const& e)
             {
                 std::cerr << e.what() << '\n';
 
@@ -128,7 +129,7 @@ int main(int argc, char* argv[])
                     response_builder(boost::json::value{{"soft_error", error_msg}})
                         .set_status(status);
             }
-            catch (const std::exception& e)
+            catch (std::exception const& e)
             {
                 std::cerr << e.what() << '\n';
                 return
@@ -148,8 +149,8 @@ int main(int argc, char* argv[])
     http_session.register_request_handler(
         method == http::verb::get && target == "/special/{*path}",
         [](
-            const http::request<http::empty_body>& request,
-            const context& context) -> http::message_generator
+            http::request<http::empty_body> const& request,
+            context const& context) -> http::message_generator
         {
             http::response<http::string_body> res {
                 boost::beast::http::status::ok,
@@ -233,7 +234,7 @@ int main(int argc, char* argv[])
 
     http_session.register_request_handler(
         method == http::verb::post && target == "/api/store/",
-        rest([](std::string const& file, const std::string& value)
+        rest([](std::string const& file, std::string const& value)
         {
             std::cout << "Storing value = " << value << '\n';
             auto path = std::filesystem::temp_directory_path() / file;
@@ -280,7 +281,7 @@ int main(int argc, char* argv[])
 
     http_session.register_request_handler(
         method == http::verb::get && target == "/api/echo-obj/",
-        rest([](const obj& value)
+        rest([](obj const& value)
         {
             auto jv = boost::json::value_from(value);
             std::cout << "Received: " << boost::json::serialize(jv) << '\n';
@@ -288,6 +289,20 @@ int main(int argc, char* argv[])
         },
         json_body_arg(all_content_types)
     ));
+
+    http_session.register_request_handler(
+        method == http::verb::get && target == "/api/chunks",
+        [](
+            http::request<http::empty_body> const&,
+            context const&) -> taar::async_generator<std::string>
+        {
+            co_yield "Lorem ipsum dolor sit amet, consectetur adipiscing elit. ";
+            co_yield "Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. ";
+            co_yield "Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris. ";
+            co_yield "Duis aute irure dolor in reprehenderit in voluptate velit esse. ";
+            co_yield "Excepteur sint occaecat cupidatat non proident, sunt in culpa. ";
+        }
+    );
 
     http_session.register_request_handler(
         method == http::verb::get && target == "/{*path}",
@@ -302,7 +317,7 @@ int main(int argc, char* argv[])
             argv[1],
             http_session,
             cancellation_signals,
-            [](const net::ip::tcp::endpoint& endpoint)
+            [](net::ip::tcp::endpoint const& endpoint)
             {
                 std::clog << "HTTP server is listening on port " << endpoint.port() << '\n';
             }),

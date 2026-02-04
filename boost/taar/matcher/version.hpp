@@ -26,7 +26,7 @@ struct version_t
         return matcher::operand
         {
             [ver = std::move(ver)](
-                const request_type& request,
+                request_type const& request,
                 context& context)
             {
                 return request.version() == ver;
@@ -54,7 +54,7 @@ struct version_t
         return matcher::operand
         {
             [ver = std::move(ver)](
-                const request_type& request,
+                request_type const& request,
                 context& context)
             {
                 return request.version() < ver;
@@ -72,7 +72,7 @@ struct version_t
         return matcher::operand
         {
             [ver = std::move(ver)](
-                const request_type& request,
+                request_type const& request,
                 context& context)
             {
                 return request.version() > ver;

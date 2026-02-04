@@ -90,7 +90,7 @@ inline auto rest_for_callable(
     [
         callable = std::forward<CallableType>(callable),
         ...arg_providers = std::forward<ArgProvidersType>(arg_providers)
-    ](const request_type& request, const matcher::context& context) mutable ->
+    ](request_type const& request, matcher::context const& context) mutable ->
         decltype(response_from_invoke(
             callable,
             rest_arg<
@@ -139,7 +139,7 @@ inline auto rest_for_memfn(
         memfn,
         object = std::forward<ObjectType>(object),
         ...arg_providers = std::forward<ArgProvidersType>(arg_providers)
-    ](const request_type& request, const matcher::context& context) mutable ->
+    ](request_type const& request, matcher::context const& context) mutable ->
         decltype(response_from_invoke(
             memfn,
             std::forward<ObjectType>(object),

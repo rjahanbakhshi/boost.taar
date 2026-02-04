@@ -11,10 +11,16 @@
 #define BOOST_TAAR_SESSION_HTTP_HPP
 
 #include <boost/asio/async_result.hpp>
+#include <boost/asio/write.hpp>
 #include <boost/beast/http/fields.hpp>
 #include <boost/taar/matcher/context.hpp>
 #include <boost/taar/matcher/operand.hpp>
 #include <boost/taar/core/response_from.hpp>
+#include <boost/taar/core/chunk_body_from.hpp>
+#include <boost/taar/core/async_generator.hpp>
+#include <boost/taar/core/is_async_generator.hpp>
+#include <boost/taar/core/chunked_response.hpp>
+#include <boost/taar/core/is_chunked_response.hpp>
 #include <boost/taar/core/cookies.hpp>
 #include <boost/taar/core/member_function_of.hpp>
 #include <boost/taar/core/cancellation_signals.hpp>
@@ -25,6 +31,8 @@
 #include <boost/taar/type_traits/callable.hpp>
 #include <boost/beast/http/read.hpp>
 #include <boost/beast/http/write.hpp>
+#include <boost/beast/http/chunk_encode.hpp>
+#include <boost/beast/http/serializer.hpp>
 #include <boost/beast/http/message_generator.hpp>
 #include <boost/beast/http/message.hpp>
 #include <boost/beast/http/string_body.hpp>
@@ -98,6 +106,116 @@ auto async_write(
         message);
 }
 
+template <typename T>
+inline constexpr std::string_view default_chunk_content_type()
+{
+    if constexpr (std::same_as<std::remove_cvref_t<T>, boost::json::value>)
+        return "application/json";
+    else if constexpr (
+        std::same_as<std::remove_cvref_t<T>, std::vector<std::byte>> ||
+        std::same_as<std::remove_cvref_t<T>, std::span<std::byte const>>)
+        return "application/octet-stream";
+    else
+        return "text/plain";
+}
+
+template <typename GeneratorType>
+void apply_chunked_metadata(
+    GeneratorType&,
+    ::boost::beast::http::response<::boost::beast::http::empty_body>&)
+{
+    // For async_generator: no metadata to apply
+}
+
+template <typename T>
+void apply_chunked_metadata(
+    chunked_response<T>& response,
+    ::boost::beast::http::response<::boost::beast::http::empty_body>& header)
+{
+    namespace http = ::boost::beast::http;
+
+    header.result(response.status());
+
+    for (auto const& h : response.headers())
+    {
+        if (h.field != http::field::unknown)
+            header.set(h.field, h.value);
+        else
+            header.set(h.name, h.value);
+    }
+}
+
+template <typename GeneratorType>
+constexpr auto chunked_value_type_helper()
+{
+    if constexpr (is_chunked_response<GeneratorType>)
+        return std::type_identity<chunked_response_value_t<GeneratorType>>{};
+    else
+        return std::type_identity<async_generator_value_t<GeneratorType>>{};
+}
+
+template <typename GeneratorType>
+using generator_value_t = typename decltype(chunked_value_type_helper<GeneratorType>())::type;
+
+template <typename GeneratorType, typename StreamType>
+awaitable<bool> write_chunked_response(
+    GeneratorType& generator,
+    StreamType& stream,
+    unsigned version,
+    bool keep_alive)
+{
+    namespace http = ::boost::beast::http;
+    using T = generator_value_t<GeneratorType>;
+
+    generator.set_executor(stream.get_executor());
+
+    // Get first value BEFORE sending headers so exceptions propagate
+    // to the soft error handler before any bytes are on the wire.
+    auto [first_ec, first_value] = co_await generator.next();
+    generator.rethrow_if_exception();
+
+    // Send chunked response header
+    http::response<http::empty_body> header_response {http::status::ok, version};
+    header_response.set(http::field::transfer_encoding, "chunked");
+    header_response.set(http::field::content_type, default_chunk_content_type<T>());
+    header_response.keep_alive(keep_alive);
+
+    // Apply metadata from chunked_response (no-op for async_generator)
+    apply_chunked_metadata(generator, header_response);
+
+    http::response_serializer<http::empty_body> serializer {header_response};
+    co_await http::async_write_header(stream, serializer);
+
+    // Write first value if present
+    if (first_value)
+    {
+        auto body = chunk_body_from(std::move(*first_value));
+        co_await ::boost::asio::async_write(
+            stream,
+            http::make_chunk(::boost::asio::buffer(body)));
+
+        // Send remaining chunks
+        while (true)
+        {
+            auto [ec, value] = co_await generator.next();
+            if (!value)
+                break;
+
+            auto body = chunk_body_from(std::move(*value));
+            co_await ::boost::asio::async_write(
+                stream,
+                http::make_chunk(::boost::asio::buffer(body)));
+        }
+    }
+
+    // Send last chunk
+    co_await ::boost::asio::async_write(
+        stream,
+        http::make_chunk_last());
+
+    co_return keep_alive;
+}
+
 } // detail
 
 class http
@@ -105,14 +223,14 @@ class http
 private:
     using matcher_type = std::move_only_function<
         bool(
-            const boost::beast::http::request_header<>&,
+            boost::beast::http::request_header<> const&,
             matcher::context&,
-            const boost::urls::url_view&,
-            const cookies&)>;
+            boost::urls::url_view const&,
+            cookies const&)>;
 
     using request_handler_wrapper_type = std::move_only_function<
         awaitable<bool>(
-            const matcher::context&,
+            matcher::context const&,
             rebind_executor<boost::beast::tcp_stream>&,
             boost::beast::flat_buffer&,
             boost::beast::http::request_parser<boost::beast::http::buffer_body>&,
@@ -148,7 +266,7 @@ public:
                 {
                     std::rethrow_exception(eptr);
                 }
-                catch(const boost::system::system_error& e)
+                catch(boost::system::system_error const& e)
                 {
                     if (e.code().category() == error_category())
                     {
@@ -344,15 +462,15 @@ public:
 
         matcher_handlers_.emplace_back(
             [this, operand = std::move(operand)](
-                const http::request_header<>& request,
+                http::request_header<> const& request,
                 matcher::context& context,
-                const boost::urls::url_view& parsed_target,
-                const cookies& parsed_cookies)
+                boost::urls::url_view const& parsed_target,
+                cookies const& parsed_cookies)
             {
                 return operand(request, context, parsed_target, parsed_cookies);
             },
             [this, request_handler = std::move(request_handler)](
-                const matcher::context& context,
+                matcher::context const& context,
                 rebind_executor<boost::beast::tcp_stream>& stream,
                 boost::beast::flat_buffer& buffer,
                 boost::beast::http::request_parser<boost::beast::http::buffer_body>& header_parser,
@@ -361,21 +479,84 @@ public:
             {
                 using request_type = std::remove_cvref_t<type_traits::callable_arg<RequestHandler, 0>>;
                 using body_type = request_type::body_type;
+                using result_type = type_traits::callable_result<RequestHandler>;
 
                 http::request_parser<body_type> body_parser {std::move(header_parser)};
                 auto [req_ec, req_sz] = co_await async_read(stream, buffer, body_parser);
 
+                auto version = body_parser.get().version();
+                auto keep_alive = body_parser.get().keep_alive();
+
                 std::exception_ptr eptr;
                 try
                 {
-                    auto response = co_await response_from_invoke(
-                        std::move(request_handler),
-                        body_parser.get(),
-                        context);
+                    if constexpr (is_chunked_response<result_type>)
+                    {
+                        // Sync handler returning chunked_response<T>
+                        auto generator = std::invoke(
+                            std::move(request_handler),
+                            body_parser.get(),
+                            context);
+                        co_return co_await detail::write_chunked_response(
+                            generator, stream, version, keep_alive);
+                    }
+                    else if constexpr (is_async_generator<result_type>)
+                    {
+                        // Sync handler returning async_generator<T>
+                        auto generator = std::invoke(
+                            std::move(request_handler),
+                            body_parser.get(),
+                            context);
+                        co_return co_await detail::write_chunked_response(
+                            generator, stream, version, keep_alive);
+                    }
+                    else if constexpr (is_awaitable<result_type>)
+                    {
+                        if constexpr (is_chunked_response<typename result_type::value_type>)
+                        {
+                            // Async handler returning awaitable<chunked_response<T>>
+                            auto generator = co_await std::invoke(
+                                std::move(request_handler),
+                                body_parser.get(),
+                                context);
+                            co_return co_await detail::write_chunked_response(
+                                generator, stream, version, keep_alive);
+                        }
+                        else if constexpr (is_async_generator<typename result_type::value_type>)
+                        {
+                            // Async handler returning awaitable<async_generator<T>>
+                            auto generator = co_await std::invoke(
+                                std::move(request_handler),
+                                body_parser.get(),
+                                context);
+                            co_return co_await detail::write_chunked_response(
+                                generator, stream, version, keep_alive);
+                        }
+                        else
+                        {
+                            // Existing awaitable path
+                            auto response = co_await response_from_invoke(
+                                std::move(request_handler),
+                                body_parser.get(),
+                                context);
 
-                    bool keep_alive = response.keep_alive();
-                    co_await detail::async_write(stream, std::move(response));
-                    co_return keep_alive;
+                            bool keep_alive = response.keep_alive();
+                            co_await detail::async_write(stream, std::move(response));
+                            co_return keep_alive;
+                        }
+                    }
+                    else
+                    {
+                        // Existing path: response_from_invoke -> async_write
+                        auto response = co_await response_from_invoke(
+                            std::move(request_handler),
+                            body_parser.get(),
+                            context);
+
+                        bool keep_alive = response.keep_alive();
+                        co_await detail::async_write(stream, std::move(response));
+                        co_return keep_alive;
+                    }
                 }
                 catch (...)
                 {

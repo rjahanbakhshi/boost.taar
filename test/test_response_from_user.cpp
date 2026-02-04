@@ -24,7 +24,7 @@ struct custom_type
     int i;
 };
 
-auto tag_invoke(boost::taar::response_from_tag<custom_type>, const custom_type& c)
+auto tag_invoke(boost::taar::response_from_tag<custom_type>, custom_type const& c)
 {
     return boost::taar::response_from(c.i);
 }

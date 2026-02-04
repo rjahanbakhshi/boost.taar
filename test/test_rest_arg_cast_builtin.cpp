@@ -21,13 +21,13 @@ struct jsonable
 {
     int i;
     std::string s;
-    friend bool operator==(const jsonable& lhs, const jsonable& rhs)
+    friend bool operator==(jsonable const& lhs, jsonable const& rhs)
     {
         return lhs.i == rhs.i && lhs.s == rhs.s;
     }
 };
 
-jsonable tag_invoke(const boost::json::value_to_tag<jsonable>&, const boost::json::value& jv)
+jsonable tag_invoke(boost::json::value_to_tag<jsonable> const&, boost::json::value const& jv)
 {
     auto const& obj = jv.as_object();
     return jsonable {

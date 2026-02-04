@@ -14,8 +14,11 @@
 #include <boost/beast/http/string_body.hpp>
 #include <boost/beast/http/field.hpp>
 #include <boost/test/unit_test.hpp>
+#include <cstddef>
+#include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace {
 
@@ -59,7 +62,7 @@ BOOST_AUTO_TEST_CASE(test_response_from_built_in)
     static_assert(std::is_same_v<decltype(response_from('a')), response_from_t<char>>);
     static_assert(std::is_same_v<decltype(response_from(13)), response_from_t<int>>);
     static_assert(std::is_same_v<decltype(response_from(13)), response_from_t<int&>>);
-    static_assert(std::is_same_v<decltype(response_from(13)), response_from_t<const int&>>);
+    static_assert(std::is_same_v<decltype(response_from(13)), response_from_t<int const&>>);
 
     BOOST_TEST(response_from().count(http::field::content_type) == 0);
     BOOST_TEST(response_from().result() == http::status::ok);
@@ -97,7 +100,7 @@ BOOST_AUTO_TEST_CASE(test_response_from_built_in)
     BOOST_TEST(response_from(i1).result() == http::status::ok);
     BOOST_TEST(response_from(i1).body() == "13");
 
-    const int i2 = 14;
+    int const i2 = 14;
     BOOST_TEST(response_from(i2).at(http::field::content_type) == "text/plain");
     BOOST_TEST(response_from(i2).result() == http::status::ok);
     BOOST_TEST(response_from(i2).body() == "14");
@@ -106,6 +109,21 @@ BOOST_AUTO_TEST_CASE(test_response_from_built_in)
     BOOST_TEST(response_from(std::move(i3)).at(http::field::content_type) == "text/plain");
     BOOST_TEST(response_from(std::move(i3)).result() == http::status::ok);
     BOOST_TEST(response_from(std::move(i3)).body() == "15");
+
+    static_assert(has_response_from<std::vector<std::byte>>, "Failed!");
+    static_assert(has_response_from<std::span<std::byte const>>, "Failed!");
+
+    std::vector<std::byte> bytes = {
+        std::byte{0x48}, std::byte{0x65}, std::byte{0x6c},
+        std::byte{0x6c}, std::byte{0x6f}};
+    BOOST_TEST(response_from(bytes).at(http::field::content_type) == "application/octet-stream");
+    BOOST_TEST(response_from(bytes).result() == http::status::ok);
+    BOOST_TEST(response_from(bytes).body() == "Hello");
+
+    std::span<std::byte const> byte_span {bytes};
+    BOOST_TEST(response_from(byte_span).at(http::field::content_type) == "application/octet-stream");
+    BOOST_TEST(response_from(byte_span).result() == http::status::ok);
+    BOOST_TEST(response_from(byte_span).body() == "Hello");
 }
 
 void void_fn(){}

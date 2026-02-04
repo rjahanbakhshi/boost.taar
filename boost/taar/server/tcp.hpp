@@ -31,7 +31,7 @@ template <typename SessionHandler> // TODO: SessionHandler concept for callable 
     std::string bind_port,
     SessionHandler&& session_handler,
     cancellation_signals& signals,
-    std::function<void(const boost::asio::ip::tcp::endpoint&)> local_endpoint_handler = nullptr)
+    std::function<void(boost::asio::ip::tcp::endpoint const&)> local_endpoint_handler = nullptr)
 {
     namespace net = boost::asio;
     namespace this_coro = net::this_coro;
@@ -72,7 +72,7 @@ template <typename SessionHandler> // TODO: SessionHandler concept for callable 
         auto [ec, socket] = co_await acceptor.async_accept();
         if (!ec)
         {
-            const auto executor = socket.get_executor();
+            auto const executor = socket.get_executor();
             co_spawn(
                 executor,
                 std::forward<SessionHandler>(session_handler)(std::move(socket), signals),

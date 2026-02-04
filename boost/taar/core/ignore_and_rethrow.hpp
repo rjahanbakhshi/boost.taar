@@ -16,7 +16,7 @@ namespace boost::taar {
 
 struct ignore_and_rethrow_t
 {
-    void operator()(const std::exception_ptr& eptr)
+    void operator()(std::exception_ptr const& eptr)
     {
         if (eptr)
         {
@@ -24,7 +24,7 @@ struct ignore_and_rethrow_t
         }
     }
 };
-static const ignore_and_rethrow_t ignore_and_rethrow;
+static ignore_and_rethrow_t const ignore_and_rethrow;
 
 } // namespace boost::taar
 

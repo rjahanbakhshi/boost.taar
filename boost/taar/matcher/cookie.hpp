@@ -33,9 +33,9 @@ struct cookie_t
             return matcher::operand
             {
                 [lhs = std::move(lhs), rhs = std::move(rhs)](
-                    const request_type&,
+                    request_type const&,
                     context&,
-                    const cookies& parsed_cookies)
+                    cookies const& parsed_cookies)
                 {
                     auto iter = parsed_cookies.find(lhs.name);
                     return
@@ -65,9 +65,9 @@ struct cookie_t
             return matcher::operand
             {
                 [cookie = std::move(cookie)](
-                    const request_type&,
+                    request_type const&,
                     context&,
-                    const cookies& parsed_cookies)
+                    cookies const& parsed_cookies)
                 {
                     return parsed_cookies.contains(cookie.name);
                 }

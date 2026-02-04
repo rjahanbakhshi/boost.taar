@@ -21,7 +21,10 @@
 #include <boost/json/serialize.hpp>
 #include <boost/json/value.hpp>
 #include <concepts>
+#include <cstddef>
+#include <span>
 #include <type_traits>
+#include <vector>
 
 namespace boost::taar {
 namespace detail {
@@ -109,12 +112,40 @@ inline auto tag_invoke(
 
 inline auto tag_invoke(
     response_from_built_in_tag<boost::json::value>,
-    const boost::json::value& value)
+    boost::json::value const& value)
 {
     namespace http = boost::beast::http;
     http::response<http::string_body> response {http::status::ok, 11};
     response.set(boost::beast::http::field::content_type, "application/json");
     response.body() = boost::json::serialize(value);
+    response.prepare_payload();
+    return response;
+}
+
+inline auto tag_invoke(
+    response_from_built_in_tag<std::vector<std::byte>>,
+    std::vector<std::byte> const& value)
+{
+    namespace http = boost::beast::http;
+    http::response<http::string_body> response {http::status::ok, 11};
+    response.set(boost::beast::http::field::content_type, "application/octet-stream");
+    response.body().assign(
+        reinterpret_cast<char const*>(value.data()),
+        value.size());
+    response.prepare_payload();
+    return response;
+}
+
+inline auto tag_invoke(
+    response_from_built_in_tag<std::span<std::byte const>>,
+    std::span<std::byte const> value)
+{
+    namespace http = boost::beast::http;
+    http::response<http::string_body> response {http::status::ok, 11};
+    response.set(boost::beast::http::field::content_type, "application/octet-stream");
+    response.body().assign(
+        reinterpret_cast<char const*>(value.data()),
+        value.size());
     response.prepare_payload();
     return response;
 }

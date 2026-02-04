@@ -50,7 +50,7 @@ int main(int argc, char* argv[])
     taar::session::http http_session;
 
     http_session.register_request_handler(
-        method == http::verb::get && target == "/{*}",
+        method == http::verb::get && target == "/{*path}",
         taar::handler::htdocs {argv[2]}
     );
 
@@ -62,7 +62,7 @@ int main(int argc, char* argv[])
             argv[1],
             http_session,
             cancellation_signals,
-            [](const net::ip::tcp::endpoint& endpoint)
+            [](net::ip::tcp::endpoint const& endpoint)
             {
                 std::clog << "HTTP server is listening on port " << endpoint.port() << '\n';
             }),

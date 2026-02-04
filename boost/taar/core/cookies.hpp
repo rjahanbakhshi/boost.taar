@@ -117,7 +117,7 @@ public:
         return items_.cend();
     }
 
-    [[nodiscard]] const mapped_type& at(key_type const& name) const
+    [[nodiscard]] mapped_type const& at(key_type const& name) const
     {
         return items_.at(name);
     }
@@ -127,7 +127,7 @@ public:
         return items_.at(name);
     }
 
-    [[nodiscard]] const mapped_type& operator[](key_type const& name) const
+    [[nodiscard]] mapped_type const& operator[](key_type const& name) const
     {
         return items_.at(name);
     }

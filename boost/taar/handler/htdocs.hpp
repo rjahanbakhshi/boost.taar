@@ -38,8 +38,8 @@ public:
     {}
 
     boost::beast::http::message_generator operator()(
-        const request_type& request,
-        const boost::taar::matcher::context& context) const
+        request_type const& request,
+        boost::taar::matcher::context const& context) const
     {
         namespace fs = std::filesystem;
         namespace http = boost::beast::http;
@@ -125,7 +125,7 @@ public:
             response.keep_alive(request.keep_alive());
             return response;
         }
-        catch(const std::exception& e)
+        catch(std::exception const& e)
         {
             return text_response(
                 request,
@@ -143,7 +143,7 @@ public:
 
 private:
     static boost::beast::http::message_generator text_response(
-        const request_type& request,
+        request_type const& request,
         boost::beast::http::status status,
         std::string message)
     {

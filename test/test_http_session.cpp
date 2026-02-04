@@ -13,8 +13,10 @@
 #include <boost/taar/matcher/method.hpp>
 #include <boost/taar/matcher/target.hpp>
 #include <boost/taar/core/response_builder.hpp>
+#include <boost/taar/core/async_generator.hpp>
 #include <boost/taar/core/awaitable.hpp>
 #include <boost/test/unit_test.hpp>
+#include <string>
 
 namespace {
 
@@ -26,8 +28,8 @@ using taar::matcher::target;
 struct object_type
 {
     http::message_generator fn1_const(
-        const http::request<boost::beast::http::empty_body>& request,
-        const boost::taar::matcher::context&) const
+        http::request<boost::beast::http::empty_body> const& request,
+        boost::taar::matcher::context const&) const
     {
         http::response<http::string_body> res {
             boost::beast::http::status::ok,
@@ -40,8 +42,8 @@ struct object_type
     }
 
     http::message_generator fn1(
-        const http::request<boost::beast::http::empty_body>& request,
-        const boost::taar::matcher::context& context)
+        http::request<boost::beast::http::empty_body> const& request,
+        boost::taar::matcher::context const& context)
     {
         return fn1_const(request, context);
     }
@@ -61,7 +63,7 @@ BOOST_AUTO_TEST_CASE(test_http_session)
             {
                 std::rethrow_exception(eptr);
             }
-            catch (const std::exception& e)
+            catch (std::exception const& e)
             {
                 std::cerr << e.what() << '\n';
             }
@@ -83,8 +85,8 @@ BOOST_AUTO_TEST_CASE(test_http_session)
     http_session.register_request_handler(
         method == http::verb::get && target == "/special/{*path}",
         [](
-            const http::request<http::empty_body>& request,
-            const taar::matcher::context& context) -> http::message_generator
+            http::request<http::empty_body> const& request,
+            taar::matcher::context const& context) -> http::message_generator
         {
             http::response<http::string_body> res {
                 boost::beast::http::status::ok,
@@ -123,7 +125,7 @@ BOOST_AUTO_TEST_CASE(test_http_session)
 
     http_session.register_request_handler(
         method == http::verb::post && target == "/api/store/",
-        taar::handler::rest([](const std::string& value)
+        taar::handler::rest([](std::string const& value)
         {
         },
         taar::handler::query_arg("value"))
@@ -141,7 +143,7 @@ BOOST_AUTO_TEST_CASE(test_http_session)
         &object
     );
 
-    const object_type const_object;
+    object_type const const_object;
     http_session.register_request_handler(
         method == http::verb::post && target == "/api/custom",
         &object_type::fn1_const,
@@ -166,8 +168,8 @@ BOOST_AUTO_TEST_CASE(test_http_session_soft_error_handler)
 }
 
 taar::awaitable<int> awaitable_handler(
-    const http::request<boost::beast::http::empty_body>& request,
-    const boost::taar::matcher::context&)
+    http::request<boost::beast::http::empty_body> const& request,
+    boost::taar::matcher::context const&)
 {
     co_return 10;
 }
@@ -191,8 +193,8 @@ struct move_only_handler
     move_only_handler& operator=(move_only_handler&&) = default;
 
     int operator()(
-        const http::request<boost::beast::http::empty_body>& request,
-        const boost::taar::matcher::context&)
+        http::request<boost::beast::http::empty_body> const& request,
+        boost::taar::matcher::context const&)
     {
         return value;
     }
@@ -218,8 +220,8 @@ struct move_only_handler_const
     move_only_handler_const& operator=(move_only_handler_const&&) = default;
 
     int operator()(
-        const http::request<boost::beast::http::empty_body>& request,
-        const boost::taar::matcher::context&) const
+        http::request<boost::beast::http::empty_body> const& request,
+        boost::taar::matcher::context const&) const
     {
         return value;
     }
@@ -233,6 +235,47 @@ BOOST_AUTO_TEST_CASE(test_http_session_move_only_handler_const)
     http_session.register_request_handler(
         method == http::verb::post,
         std::move(fn));
+}
+
+taar::async_generator<std::string> chunked_handler(
+    http::request<boost::beast::http::empty_body> const& request,
+    boost::taar::matcher::context const&)
+{
+    co_yield "first chunk";
+    co_yield "second chunk";
+}
+
+taar::awaitable<taar::async_generator<std::string>> async_chunked_handler(
+    http::request<boost::beast::http::empty_body> const& request,
+    boost::taar::matcher::context const&)
+{
+    co_return chunked_handler(request, {});
+}
+
+BOOST_AUTO_TEST_CASE(test_http_session_chunked_handler)
+{
+    taar::session::http http_session;
+
+    // Sync handler returning async_generator
+    http_session.register_request_handler(
+        method == http::verb::get && target == "/api/stream",
+        &chunked_handler);
+
+    // Lambda returning async_generator
+    http_session.register_request_handler(
+        method == http::verb::get && target == "/api/stream2",
+        [](
+            http::request<http::empty_body> const& request,
+            taar::matcher::context const& context) -> taar::async_generator<std::string>
+        {
+            co_yield "chunk1";
+            co_yield "chunk2";
+        });
+
+    // Async handler returning awaitable<async_generator>
+    http_session.register_request_handler(
+        method == http::verb::get && target == "/api/stream3",
+        &async_chunked_handler);
 }
 
 } // namespace

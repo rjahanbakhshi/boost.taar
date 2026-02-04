@@ -13,7 +13,7 @@
 namespace {
 
 void void_fn();
-void my_function(int, double&, const float&) {}
+void my_function(int, double&, float const&) {}
 
 struct functor
 {
@@ -43,7 +43,7 @@ BOOST_AUTO_TEST_CASE(test_type_traits_callable)
     static_assert(callable<decltype(&my_function)>::args_count == 3, "Failed!");
     static_assert(std::is_same_v<
         callable<decltype(&my_function)>::signature,
-        void(int, double&, const float&)>, "Failed!");
+        void(int, double&, float const&)>, "Failed!");
     static_assert(std::is_same_v<
         callable<decltype(&my_function)>::result,
         void>, "Failed!");
@@ -55,12 +55,12 @@ BOOST_AUTO_TEST_CASE(test_type_traits_callable)
         double&>, "Failed!");
     static_assert(std::is_same_v<
         callable<decltype(&my_function)>::arg<2>,
-        const float&>, "Failed!");
+        float const&>, "Failed!");
 
     static_assert(callable<decltype(my_function)>::args_count == 3, "Failed!");
     static_assert(std::is_same_v<
         callable<decltype(my_function)>::signature,
-        void(int, double&, const float&)>, "Failed!");
+        void(int, double&, float const&)>, "Failed!");
     static_assert(std::is_same_v<
         callable<decltype(my_function)>::result,
         void>, "Failed!");
@@ -72,7 +72,7 @@ BOOST_AUTO_TEST_CASE(test_type_traits_callable)
         double&>, "Failed!");
     static_assert(std::is_same_v<
         callable<decltype(my_function)>::arg<2>,
-        const float&>, "Failed!");
+        float const&>, "Failed!");
 
     functor f;
     static_assert(callable<decltype(f)>::args_count == 3, "Failed!");
@@ -144,7 +144,7 @@ BOOST_AUTO_TEST_CASE(test_type_traits_callable_aliases)
     static_assert(callable_args_count<decltype(my_function)> == 3, "Failed!");
     static_assert(std::is_same_v<
         callable_signature<decltype(my_function)>,
-        void(int, double&, const float&)>, "Failed!");
+        void(int, double&, float const&)>, "Failed!");
     static_assert(std::is_same_v<
         callable_result<decltype(my_function)>,
         void>, "Failed!");
@@ -156,7 +156,7 @@ BOOST_AUTO_TEST_CASE(test_type_traits_callable_aliases)
         double&>, "Failed!");
     static_assert(std::is_same_v<
         callable_arg<decltype(my_function), 2>,
-        const float&>, "Failed!");
+        float const&>, "Failed!");
 }
 
 } // namespace

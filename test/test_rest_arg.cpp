@@ -27,8 +27,8 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_provider)
     static_assert(!is_rest_arg_provider<float>, "Failed!");
     static_assert(!is_rest_arg_provider<void>, "Failed!");
     static_assert(!is_rest_arg_provider<void()>, "Failed!");
-    static_assert(is_rest_arg_provider<std::string(int, const context&)>, "Failed!");
-    static_assert(is_rest_arg_provider<std::string(*)(int, const context&)>, "Failed!");
+    static_assert(is_rest_arg_provider<std::string(int, context const&)>, "Failed!");
+    static_assert(is_rest_arg_provider<std::string(*)(int, context const&)>, "Failed!");
     static_assert(is_rest_arg_provider<void(int, context&)>, "Failed!");
     static_assert(is_rest_arg_provider<int(int, context)>, "Failed!");
     static_assert(!is_rest_arg_provider<int(int, bool)>, "Failed!");
@@ -320,8 +320,8 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_with_default)
 
     BOOST_TEST((rest_arg<int, with_default<query_arg, int>>{with_default(query_arg("qval1"), 42)}(0, req, ctx) == 13));
     BOOST_TEST((rest_arg<int, with_default<query_arg, int>>{with_default(query_arg("qval2"), 42)}(0, req, ctx) == 42));
-    BOOST_TEST((rest_arg<std::string, with_default<header_arg, const char*>>{with_default(header_arg("hval1"), "world")}(0, req, ctx) == "Hello"));
-    BOOST_TEST((rest_arg<std::string_view, with_default<header_arg, const char*>>{with_default(header_arg("hval2"), "world")}(0, req, ctx) == "world"));
+    BOOST_TEST((rest_arg<std::string, with_default<header_arg, char const*>>{with_default(header_arg("hval1"), "world")}(0, req, ctx) == "Hello"));
+    BOOST_TEST((rest_arg<std::string_view, with_default<header_arg, char const*>>{with_default(header_arg("hval2"), "world")}(0, req, ctx) == "world"));
     BOOST_TEST((rest_arg<int, with_default<query_arg, bool>>{with_default(query_arg("qval3"), false)}(0, req, ctx) == false));
 
     //BOOST_TEST((

@@ -21,7 +21,7 @@ struct constexpr_string
 {
     std::array<char, N> data;
 
-    constexpr constexpr_string(const char (&str)[N])
+    constexpr constexpr_string(char const (&str)[N])
     {
         for (std::size_t i = 0; i < N; ++i)
         {
@@ -29,7 +29,7 @@ struct constexpr_string
         }
     }
 
-    constexpr const char* c_str() const
+    constexpr char const* c_str() const
     {
         return data.data();
     }
@@ -50,7 +50,7 @@ struct constexpr_string
     }
 
     template <std::size_t RN>
-    friend constexpr bool operator==(const constexpr_string& lhs, const constexpr_string<RN>& rhs)
+    friend constexpr bool operator==(constexpr_string const& lhs, constexpr_string<RN> const& rhs)
     {
         if constexpr (N != RN)
         {

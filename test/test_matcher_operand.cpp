@@ -19,49 +19,49 @@ struct request_base {};
 struct request_derrived : request_base {};
 
 bool free_function(
-    const request_base& /*request*/,
+    request_base const& /*request*/,
     boost::taar::matcher::context& /*context*/)
 {
     return true;
 }
 
 std::optional<int> contextual_bool(
-    const request_derrived& /*request*/,
+    request_derrived const& /*request*/,
     boost::taar::matcher::context& /*context*/)
 {
     return {};
 }
 
 bool free_function_target(
-    const request_base& /*request*/,
+    request_base const& /*request*/,
     boost::taar::matcher::context& /*context*/,
-    const boost::urls::url_view& parsed_target)
+    boost::urls::url_view const& parsed_target)
 {
     return !parsed_target.segments().empty();
 }
 
 bool free_function_cookie(
-    const request_base& /*request*/,
+    request_base const& /*request*/,
     boost::taar::matcher::context& /*context*/,
-    const boost::taar::cookies& cookies)
+    boost::taar::cookies const& cookies)
 {
     return !cookies.empty();
 }
 
 bool free_function_target_cookie(
-    const request_base& /*request*/,
+    request_base const& /*request*/,
     boost::taar::matcher::context& /*context*/,
-    const boost::urls::url_view& parsed_target,
-    const boost::taar::cookies& cookies)
+    boost::urls::url_view const& parsed_target,
+    boost::taar::cookies const& cookies)
 {
     return !parsed_target.segments().empty() && !cookies.empty();
 }
 
 bool free_function_cookie_target(
-    const request_base& /*request*/,
+    request_base const& /*request*/,
     boost::taar::matcher::context& /*context*/,
-    const boost::taar::cookies& cookies,
-    const boost::urls::url_view& parsed_target)
+    boost::taar::cookies const& cookies,
+    boost::urls::url_view const& parsed_target)
 {
     return !parsed_target.segments().empty() && !cookies.empty();
 }
@@ -186,14 +186,14 @@ BOOST_AUTO_TEST_CASE(test_matcher_operand_lambda)
     context ctx;
 
     auto lambda = [](
-        const request_base& /*request*/,
+        request_base const& /*request*/,
         context& /*context*/)
     {
         return true;
     };
 
     auto cap_lambda = [lambda](
-        const request_derrived& request,
+        request_derrived const& request,
         context& context)
     {
         return !lambda(request, context);
@@ -221,7 +221,7 @@ BOOST_AUTO_TEST_CASE(test_matcher_operand_implicit)
     context ctx;
 
     auto lambda = [](
-        const request_base& /*request*/,
+        request_base const& /*request*/,
         context& /*context*/)
     {
         return true;

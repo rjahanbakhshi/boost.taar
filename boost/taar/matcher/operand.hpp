@@ -24,11 +24,11 @@ namespace boost::taar::matcher {
 
 template <typename RequestType, typename CallableType>
 requires (
-    detail::callable_with<CallableType, bool, const RequestType&, context&> ||
-    detail::callable_with<CallableType, bool, const RequestType&, context&, const boost::urls::url_view&> ||
-    detail::callable_with<CallableType, bool, const RequestType&, context&, const cookies&> ||
-    detail::callable_with<CallableType, bool, const RequestType&, context&, const boost::urls::url_view&, const cookies&> ||
-    detail::callable_with<CallableType, bool, const RequestType&, context&, const cookies&, const boost::urls::url_view&>)
+    detail::callable_with<CallableType, bool, RequestType const&, context&> ||
+    detail::callable_with<CallableType, bool, RequestType const&, context&, boost::urls::url_view const&> ||
+    detail::callable_with<CallableType, bool, RequestType const&, context&, cookies const&> ||
+    detail::callable_with<CallableType, bool, RequestType const&, context&, boost::urls::url_view const&, cookies const&> ||
+    detail::callable_with<CallableType, bool, RequestType const&, context&, cookies const&, boost::urls::url_view const&>)
 class operand
 {
 public:
@@ -39,29 +39,29 @@ public:
         detail::callable_with<
             CallableType,
             bool,
-            const RequestType&,
+            RequestType const&,
             context&,
-            const boost::urls::url_view&,
-            const cookies&> ? 4 :
+            boost::urls::url_view const&,
+            cookies const&> ? 4 :
         detail::callable_with<
             CallableType,
             bool,
-            const RequestType&,
+            RequestType const&,
             context&,
-            const cookies&,
-            const boost::urls::url_view&> ? 3 :
+            cookies const&,
+            boost::urls::url_view const&> ? 3 :
         detail::callable_with<
             CallableType,
             bool,
-            const RequestType&,
+            RequestType const&,
             context&,
-            const boost::urls::url_view&> ? 2 :
+            boost::urls::url_view const&> ? 2 :
         detail::callable_with<
             CallableType,
             bool,
-            const RequestType&,
+            RequestType const&,
             context&,
-            const cookies&> ? 1 : 0;
+            cookies const&> ? 1 : 0;
     static constexpr auto with_parsed_target =
         callabe_kind == 4 || callabe_kind == 3 || callabe_kind == 2;
     static constexpr auto with_parsed_cookies =
@@ -73,10 +73,10 @@ public:
     {}
 
     auto operator()(
-        const request_type& request,
+        request_type const& request,
         context& context,
-        const boost::urls::url_view& parsed_target,
-        const cookies& parsed_cookies) const
+        boost::urls::url_view const& parsed_target,
+        cookies const& parsed_cookies) const
     {
         if constexpr (callabe_kind == 4)
         {
@@ -106,10 +106,10 @@ public:
         {
             return matcher::operand {
                 [opr = std::move(opr)](
-                    const request_type& request,
+                    request_type const& request,
                     context& context,
-                    const boost::urls::url_view& parsed_target,
-                    const cookies& parsed_cookies)
+                    boost::urls::url_view const& parsed_target,
+                    cookies const& parsed_cookies)
                 {
                     return !opr.operator()(request, context, parsed_target, parsed_cookies);
                 }
@@ -119,9 +119,9 @@ public:
         {
             return matcher::operand {
                 [opr = std::move(opr)](
-                    const request_type& request,
+                    request_type const& request,
                     context& context,
-                    const boost::urls::url_view& parsed_target)
+                    boost::urls::url_view const& parsed_target)
                 {
                     return !opr.operator()(request, context, parsed_target, {});
                 }
@@ -131,9 +131,9 @@ public:
         {
             return matcher::operand {
                 [opr = std::move(opr)](
-                    const request_type& request,
+                    request_type const& request,
                     context& context,
-                    const cookies& parsed_cookies)
+                    cookies const& parsed_cookies)
                 {
                     return !opr.operator()(request, context, {}, parsed_cookies);
                 }
@@ -142,7 +142,7 @@ public:
         else
         {
             return matcher::operand {
-                [opr = std::move(opr)](const request_type& request, context& context)
+                [opr = std::move(opr)](request_type const& request, context& context)
                 {
                     return !opr.operator()(request, context, {}, {});
                 }
@@ -169,10 +169,10 @@ public:
             return matcher::operand
             {
                 [lhs_operand = std::move(lhs_operand), rhs_operand = std::move(rhs_operand)](
-                    const super_request_type& request,
+                    super_request_type const& request,
                     context& context,
-                    const boost::urls::url_view& parsed_target,
-                    const cookies& parsed_cookies)
+                    boost::urls::url_view const& parsed_target,
+                    cookies const& parsed_cookies)
                 {
                     return
                         lhs_operand(request, context, parsed_target, parsed_cookies) &&
@@ -185,9 +185,9 @@ public:
             return matcher::operand
             {
                 [lhs_operand = std::move(lhs_operand), rhs_operand = std::move(rhs_operand)](
-                    const super_request_type& request,
+                    super_request_type const& request,
                     context& context,
-                    const boost::urls::url_view& parsed_target)
+                    boost::urls::url_view const& parsed_target)
                 {
                     return
                         lhs_operand(request, context, parsed_target, {}) &&
@@ -200,9 +200,9 @@ public:
             return matcher::operand
             {
                 [lhs_operand = std::move(lhs_operand), rhs_operand = std::move(rhs_operand)](
-                    const super_request_type& request,
+                    super_request_type const& request,
                     context& context,
-                    const cookies& parsed_cookies)
+                    cookies const& parsed_cookies)
                 {
                     return
                         lhs_operand(request, context, {}, parsed_cookies) &&
@@ -215,7 +215,7 @@ public:
             return matcher::operand
             {
                 [lhs_operand = std::move(lhs_operand), rhs_operand = std::move(rhs_operand)](
-                    const super_request_type& request,
+                    super_request_type const& request,
                     context& context)
                 {
                     return
@@ -245,10 +245,10 @@ public:
             return matcher::operand
             {
                 [lhs_operand = std::move(lhs_operand), rhs_operand = std::move(rhs_operand)](
-                    const super_request_type& request,
+                    super_request_type const& request,
                     context& context,
-                    const boost::urls::url_view& parsed_target,
-                    const cookies& parsed_cookies)
+                    boost::urls::url_view const& parsed_target,
+                    cookies const& parsed_cookies)
                 {
                     return
                         lhs_operand(request, context, parsed_target, parsed_cookies) &&
@@ -261,9 +261,9 @@ public:
             return matcher::operand
             {
                 [lhs_operand = std::move(lhs_operand), rhs_operand = std::move(rhs_operand)](
-                    const super_request_type& request,
+                    super_request_type const& request,
                     context& context,
-                    const boost::urls::url_view& parsed_target)
+                    boost::urls::url_view const& parsed_target)
                 {
                     return
                         lhs_operand(request, context, parsed_target, {}) &&
@@ -276,9 +276,9 @@ public:
             return matcher::operand
             {
                 [lhs_operand = std::move(lhs_operand), rhs_operand = std::move(rhs_operand)](
-                    const super_request_type& request,
+                    super_request_type const& request,
                     context& context,
-                    const cookies& parsed_cookies)
+                    cookies const& parsed_cookies)
                 {
                     return
                         lhs_operand(request, context, {}, parsed_cookies) &&
@@ -291,7 +291,7 @@ public:
             return matcher::operand
             {
                 [lhs_operand = std::move(lhs_operand), rhs_operand = std::move(rhs_operand)](
-                    const super_request_type& request,
+                    super_request_type const& request,
                     context& context)
                 {
                     return
@@ -321,10 +321,10 @@ public:
             return matcher::operand
             {
                 [lhs_operand = std::move(lhs_operand), rhs_operand = std::move(rhs_operand)](
-                    const super_request_type& request,
+                    super_request_type const& request,
                     context& context,
-                    const boost::urls::url_view& parsed_target,
-                    const cookies& parsed_cookies)
+                    boost::urls::url_view const& parsed_target,
+                    cookies const& parsed_cookies)
                 {
                     return
                         lhs_operand(request, context, parsed_target, parsed_cookies) ||
@@ -337,9 +337,9 @@ public:
             return matcher::operand
             {
                 [lhs_operand = std::move(lhs_operand), rhs_operand = std::move(rhs_operand)](
-                    const super_request_type& request,
+                    super_request_type const& request,
                     context& context,
-                    const boost::urls::url_view& parsed_target)
+                    boost::urls::url_view const& parsed_target)
                 {
                     return
                         lhs_operand(request, context, parsed_target, {}) ||
@@ -352,9 +352,9 @@ public:
             return matcher::operand
             {
                 [lhs_operand = std::move(lhs_operand), rhs_operand = std::move(rhs_operand)](
-                    const super_request_type& request,
+                    super_request_type const& request,
                     context& context,
-                    const cookies& parsed_cookies)
+                    cookies const& parsed_cookies)
                 {
                     return
                         lhs_operand(request, context, {}, parsed_cookies) ||
@@ -367,7 +367,7 @@ public:
             return matcher::operand
             {
                 [lhs_operand = std::move(lhs_operand), rhs_operand = std::move(rhs_operand)](
-                    const super_request_type& request,
+                    super_request_type const& request,
                     context& context)
                 {
                     return
@@ -397,10 +397,10 @@ public:
             return matcher::operand
             {
                 [lhs_operand = std::move(lhs_operand), rhs_operand = std::move(rhs_operand)](
-                    const super_request_type& request,
+                    super_request_type const& request,
                     context& context,
-                    const boost::urls::url_view& parsed_target,
-                    const cookies& parsed_cookies)
+                    boost::urls::url_view const& parsed_target,
+                    cookies const& parsed_cookies)
                 {
                     return
                         lhs_operand(request, context, parsed_target, parsed_cookies) ||
@@ -413,9 +413,9 @@ public:
             return matcher::operand
             {
                 [lhs_operand = std::move(lhs_operand), rhs_operand = std::move(rhs_operand)](
-                    const super_request_type& request,
+                    super_request_type const& request,
                     context& context,
-                    const boost::urls::url_view& parsed_target)
+                    boost::urls::url_view const& parsed_target)
                 {
                     return
                         lhs_operand(request, context, parsed_target, {}) ||
@@ -428,9 +428,9 @@ public:
             return matcher::operand
             {
                 [lhs_operand = std::move(lhs_operand), rhs_operand = std::move(rhs_operand)](
-                    const super_request_type& request,
+                    super_request_type const& request,
                     context& context,
-                    const cookies& parsed_cookies)
+                    cookies const& parsed_cookies)
                 {
                     return
                         lhs_operand(request, context, {}, parsed_cookies) ||
@@ -443,7 +443,7 @@ public:
             return matcher::operand
             {
                 [lhs_operand = std::move(lhs_operand), rhs_operand = std::move(rhs_operand)](
-                    const super_request_type& request,
+                    super_request_type const& request,
                     context& context)
                 {
                     return

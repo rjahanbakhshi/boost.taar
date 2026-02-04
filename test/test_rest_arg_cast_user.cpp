@@ -22,13 +22,13 @@ using boost::taar::handler::rest_arg_cast;
 struct s1
 {
     int i;
-    friend bool operator==(const s1& lhs, const s1& rhs)
+    friend bool operator==(s1 const& lhs, s1 const& rhs)
     {
         return lhs.i == rhs.i;
     }
 };
 
-s1 tag_invoke(rest_arg_cast_tag<s1>, const std::string& from)
+s1 tag_invoke(rest_arg_cast_tag<s1>, std::string const& from)
 {
     return s1 { .i = std::atoi(from.c_str())};
 }

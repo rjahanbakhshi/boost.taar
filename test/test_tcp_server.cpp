@@ -26,6 +26,6 @@ BOOST_AUTO_TEST_CASE(test_tcp_server)
         "8080",
         http_session,
         cancellation_signals,
-        [](const net::ip::tcp::endpoint&){});
+        [](net::ip::tcp::endpoint const&){});
 }
 

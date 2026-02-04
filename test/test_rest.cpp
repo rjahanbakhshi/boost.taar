@@ -41,10 +41,10 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_provider_request_type)
     using empty_req = http::request<http::empty_body>;
     using file_req = http::request<http::file_body>;
 
-    using provider_header = void(const req_header&, const context&);
-    using provider_string = void(const string_req&, const context&);
-    using provider_empty = void(const empty_req&, const context&);
-    using provider_file = void(const file_req&, const context&);
+    using provider_header = void(req_header const&, context const&);
+    using provider_string = void(string_req const&, context const&);
+    using provider_empty = void(empty_req const&, context const&);
+    using provider_file = void(file_req const&, context const&);
 
     static_assert(std::is_same_v<arg_provider_request_t<provider_header>, req_header>, "Failed!");
     static_assert(std::is_same_v<arg_provider_request_t<provider_string>, string_req>, "Failed!");
@@ -248,7 +248,7 @@ struct jsonable
     std::string s;
 };
 
-jsonable tag_invoke(const boost::json::value_to_tag<jsonable>&, const boost::json::value& jv)
+jsonable tag_invoke(boost::json::value_to_tag<jsonable> const&, boost::json::value const& jv)
 {
     auto const& obj = jv.as_object();
     return jsonable {
@@ -258,15 +258,15 @@ jsonable tag_invoke(const boost::json::value_to_tag<jsonable>&, const boost::jso
 }
 
 void tag_invoke(
-    const boost::json::value_from_tag&,
+    boost::json::value_from_tag const&,
     boost::json::value& jv,
-    const jsonable& obj)
+    jsonable const& obj)
 {
     // Store the IP address as a 4-element array of octets
     jv = { {{"i", obj.i}, {"s", obj.s}} };
 }
 
-std::string accepts_jsonable(const jsonable& j)
+std::string accepts_jsonable(jsonable const& j)
 {
     return j.s + " = " + std::to_string(j.i);
 }
@@ -292,12 +292,12 @@ BOOST_AUTO_TEST_CASE(test_rest_invoke_with_jsonable)
 
 struct concat_handler
 {
-    std::string concat(const std::string& a, std::string_view b)
+    std::string concat(std::string const& a, std::string_view b)
     {
         return a + std::string{b};
     }
 
-    std::string const_concat(const std::string& a, std::string_view b) const
+    std::string const_concat(std::string const& a, std::string_view b) const
     {
         return std::string{b} + a;
     }
@@ -370,7 +370,7 @@ BOOST_AUTO_TEST_CASE(test_rest_string_body)
     req.prepare_payload();
     context ctx;
 
-    auto l = [](const std::string& str) { return str + " world!"; };
+    auto l = [](std::string const& str) { return str + " world!"; };
 
     auto rh = taar::handler::rest(
         l,
@@ -394,7 +394,7 @@ BOOST_AUTO_TEST_CASE(test_rest_awaitable_handler)
     http::request<http::string_body> req;
     context ctx;
 
-    auto l = [](const std::string& str) -> awaitable<std::string> { co_return str + " world!"; };
+    auto l = [](std::string const& str) -> awaitable<std::string> { co_return str + " world!"; };
     auto rh = taar::handler::rest(l, string_body_arg());
 
     static_assert(is_awaitable<decltype(rh(req, ctx))>, "Failed!");

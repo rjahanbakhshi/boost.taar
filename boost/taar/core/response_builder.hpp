@@ -24,9 +24,9 @@ class response_builder_impl_base
 public:
     response_builder_impl_base() = default;
     virtual ~response_builder_impl_base() = default;
-    response_builder_impl_base(const response_builder_impl_base&) = delete;
+    response_builder_impl_base(response_builder_impl_base const&) = delete;
     response_builder_impl_base(response_builder_impl_base&&) = default;
-    response_builder_impl_base& operator=(const response_builder_impl_base&) = delete;
+    response_builder_impl_base& operator=(response_builder_impl_base const&) = delete;
     response_builder_impl_base& operator=(response_builder_impl_base&&) = default;
 
     virtual void set_version(unsigned version) = 0;
@@ -55,7 +55,7 @@ template <typename... T>
 class response_builder_impl : public response_builder_impl_base
 {
 public:
-    response_builder_impl(const T&... args)
+    response_builder_impl(T const&... args)
         : response_{response_from(args...)}
     {}
 

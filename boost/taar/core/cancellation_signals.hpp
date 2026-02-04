@@ -22,7 +22,7 @@ class cancellation_signals
 public:
     void emit(boost::asio::cancellation_type ct = boost::asio::cancellation_type::all)
     {
-        const std::lock_guard<std::mutex> lock {mutex_};
+        std::lock_guard<std::mutex> const lock{mutex_};
         for (auto& signal: signals_)
         {
             signal.emit(ct);
@@ -31,7 +31,7 @@ public:
 
     boost::asio::cancellation_slot slot()
     {
-        const std::lock_guard<std::mutex> lock {mutex_};
+        std::lock_guard<std::mutex> const lock{mutex_};
 
         auto itr = std::find_if(
             signals_.begin(),

@@ -50,14 +50,14 @@ public:
         using BaseIter = std::ranges::iterator_t<R>;
         BaseIter current_;
         BaseIter end_;
-        const T* separator_;
+        T const* separator_;
         bool at_separator_;
 
         using value_type = std::string_view;
         using difference_type = std::ptrdiff_t;
 
         iterator() = default;
-        iterator(BaseIter current, BaseIter end, const T* separator)
+        iterator(BaseIter current, BaseIter end, T const* separator)
             : current_(current)
             , end_(end)
             , separator_(separator)
@@ -94,12 +94,12 @@ public:
             return tmp;
         }
 
-        friend bool operator==(const iterator& x, const iterator& y)
+        friend bool operator==(iterator const& x, iterator const& y)
         {
             return x.current_ == y.current_ && x.at_separator_ == y.at_separator_;
         }
 
-        friend bool operator!=(const iterator& x, const iterator& y)
+        friend bool operator!=(iterator const& x, iterator const& y)
         {
             return !(x == y);
         }

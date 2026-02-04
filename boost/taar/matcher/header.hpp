@@ -31,7 +31,7 @@ struct header_t
             return matcher::operand
             {
                 [lhs = std::move(lhs), rhs = std::move(rhs)](
-                    const request_type& request,
+                    request_type const& request,
                     context& context)
                 {
                     return request[lhs.key] == rhs;
@@ -59,7 +59,7 @@ struct header_t
             return matcher::operand
             {
                 [header = std::move(header)](
-                    const request_type& request,
+                    request_type const& request,
                     context& context)
                 {
                     return request.find(header.key) != request.end();

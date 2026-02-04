@@ -17,14 +17,14 @@ struct request {};
 struct context {};
 
 bool free_function(
-    const request& /*request*/,
+    request const& /*request*/,
     context& /*context*/)
 {
     return true;
 }
 
 int free_function_extra(
-    const request& /*request*/,
+    request const& /*request*/,
     context& /*context*/,
     int i = 0)
 {
@@ -32,14 +32,14 @@ int free_function_extra(
 }
 
 std::optional<int> contextual_bool(
-    const request& /*request*/,
+    request const& /*request*/,
     context& /*context*/)
 {
     return {};
 }
 
 static constexpr auto lambda = [](
-    const request& /*request*/,
+    request const& /*request*/,
     context& /*context*/)
 {
     return true;
@@ -61,10 +61,10 @@ struct callable
 BOOST_AUTO_TEST_CASE(test_matcher_callable_with)
 {
     using namespace boost::taar::matcher::detail;
-    static_assert(callable_with<decltype(&free_function), bool, const request&, context&>, "Failed!");
-    static_assert(callable_with<decltype(&free_function_extra), bool, const request&, context&, int>, "Failed!");
-    static_assert(callable_with<decltype(&contextual_bool), bool, const request&, context&>, "Failed!");
-    static_assert(callable_with<decltype(lambda), bool, const request&, context&>, "Failed!");
+    static_assert(callable_with<decltype(&free_function), bool, request const&, context&>, "Failed!");
+    static_assert(callable_with<decltype(&free_function_extra), bool, request const&, context&, int>, "Failed!");
+    static_assert(callable_with<decltype(&contextual_bool), bool, request const&, context&>, "Failed!");
+    static_assert(callable_with<decltype(lambda), bool, request const&, context&>, "Failed!");
     static_assert(callable_with<callable, bool, int, float>, "Failed!");
     static_assert(callable_with<callable, bool, int, double>, "Failed!");
     static_assert(callable_with<callable, int, int>, "Failed!");

@@ -28,6 +28,7 @@ enum class error
     invalid_cookie_format,
     invalid_boolean_format,
     invalid_number_format,
+    late_chunk_metadata,
 };
 
 #if (__cpp_constexpr >= 202211L)
@@ -37,7 +38,7 @@ inline boost::system::error_category const& error_category() noexcept
 {
     struct error_category_type : boost::system::error_category
     {
-        [[nodiscard]] const char* name() const noexcept override
+        [[nodiscard]] char const* name() const noexcept override
         {
             return "Taar error";
         }
@@ -70,6 +71,8 @@ inline boost::system::error_category const& error_category() noexcept
                 return "Invalid boolean format";
             case error::invalid_number_format:
                 return "Invalid number format";
+            case error::late_chunk_metadata:
+                return "Chunk metadata yielded after data.";
             }
 
             return "(Unknown error)";

@@ -16,7 +16,10 @@ target_sources(
         type_traits/test_super_type.cpp
         type_traits/test_specialization_of.cpp
         test.cpp
+        test_async_generator.cpp
         test_callable_with.cpp
+        test_chunk_body_from.cpp
+        test_chunked_response.cpp
         test_constexpr_string.cpp
         test_cookies.cpp
         test_tcp_server.cpp

@@ -57,7 +57,7 @@ concept is_rest_arg_provider = requires
     typename type_traits::callable_arg<ArgProviderType, 1>;
     requires std::is_convertible_v<
         type_traits::callable_arg<ArgProviderType, 1>,
-        const matcher::context&>;
+        matcher::context const&>;
 };
 
 template <typename ArgProviderType>
@@ -131,13 +131,13 @@ struct with_default
     }
 
     decltype(auto) operator()(
-        const arg_provider_request_type& request,
-        const matcher::context& context) const
+        arg_provider_request_type const& request,
+        matcher::context const& context) const
     {
         return arg_provider_(request, context);
     }
 
-    const value_type& default_value() const
+    value_type const& default_value() const
     {
         return default_value_;
     }
@@ -165,8 +165,8 @@ struct rest_arg
 
     arg_type operator()(
         std::size_t index,
-        const arg_provider_request_type& request,
-        const matcher::context& context) &&
+        arg_provider_request_type const& request,
+        matcher::context const& context) &&
     {
         try
         {
@@ -232,7 +232,7 @@ struct rest_arg
                     "Incompatible rest arg provider!");
             }
         }
-        catch(const std::exception& e)
+        catch(std::exception const& e)
         {
             throw boost::system::system_error{
                 error::invalid_argument_format,
@@ -264,14 +264,14 @@ struct path_arg
         : path_key_ {std::move(path_key)}
     {}
 
-    const std::string& name() const
+    std::string const& name() const
     {
         return path_key_;
     }
 
     boost::system::result<std::string> operator()(
-        const boost::beast::http::request_header<>&,
-        const matcher::context& context) const
+        boost::beast::http::request_header<> const&,
+        matcher::context const& context) const
     {
         auto iter = context.path_args.find(path_key_);
         if (iter != context.path_args.end())
@@ -294,14 +294,14 @@ struct query_arg
         , ic_ {std::move(ic)}
     {}
 
-    const std::string& name() const
+    std::string const& name() const
     {
         return query_key_;
     }
 
     boost::system::result<std::string> operator()(
-        const boost::beast::http::request_header<>& request,
-        const matcher::context&) const
+        boost::beast::http::request_header<> const& request,
+        matcher::context const&) const
     {
         auto url_view = boost::urls::parse_origin_form(request.target());
         if (!url_view)
@@ -319,7 +319,7 @@ struct query_arg
         auto iter = params.find(query_key_, ic_);
         if (iter != params.end())
         {
-            const auto& param = *iter;
+            auto const& param = *iter;
             return std::string {param.value};
         }
         return error::argument_not_found;
@@ -358,8 +358,8 @@ struct header_arg
     }
 
     boost::system::result<std::string> operator()(
-        const boost::beast::http::request_header<>& request,
-        const matcher::context&) const
+        boost::beast::http::request_header<> const& request,
+        matcher::context const&) const
     {
         boost::system::result<std::string> result;
 
@@ -402,14 +402,14 @@ struct cookie_arg
         : name_ {std::move(name)}
     {}
 
-    const std::string& name() const
+    std::string const& name() const
     {
         return name_;
     }
 
     boost::system::result<std::string> operator()(
-        const boost::beast::http::request_header<>& request,
-        const matcher::context&) const
+        boost::beast::http::request_header<> const& request,
+        matcher::context const&) const
     {
         cookies parsed_cookies;
         auto r = request.equal_range(boost::beast::http::field::cookie);
@@ -455,8 +455,8 @@ struct string_body_arg
     {}
 
     boost::system::result<std::string> operator()(
-        const boost::beast::http::request<boost::beast::http::string_body>& request,
-        const matcher::context&) const
+        boost::beast::http::request<boost::beast::http::string_body> const& request,
+        matcher::context const&) const
     {
         if (!content_types_.empty())
         {
@@ -498,8 +498,8 @@ struct json_body_arg
     {}
 
     boost::system::result<boost::json::value> operator()(
-        const boost::beast::http::request<boost::beast::http::string_body>& request,
-        const matcher::context&) const
+        boost::beast::http::request<boost::beast::http::string_body> const& request,
+        matcher::context const&) const
     {
         if (!content_types_.empty())
         {
@@ -547,8 +547,8 @@ struct url_encoded_form_data_arg
     {}
 
     boost::system::result<form_kvp> operator()(
-        const boost::beast::http::request<boost::beast::http::string_body>& request,
-        const matcher::context&) const
+        boost::beast::http::request<boost::beast::http::string_body> const& request,
+        matcher::context const&) const
     {
         if (!content_types_.empty())
         {

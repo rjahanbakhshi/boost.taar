@@ -38,7 +38,7 @@ inline auto tag_invoke(rest_arg_cast_built_in_tag<Type>, Type&& from)
 }
 
 template <typename Type>
-inline auto tag_invoke(rest_arg_cast_built_in_tag<Type>, const Type& from)
+inline auto tag_invoke(rest_arg_cast_built_in_tag<Type>, Type const& from)
 {
     return from;
 }
@@ -103,7 +103,7 @@ inline ToType tag_invoke(rest_arg_cast_built_in_tag<ToType>, std::string_view co
 template <typename FromType> requires (
     (!std::same_as<FromType, bool> && std::is_integral_v<FromType>) ||
     std::is_floating_point_v<FromType>)
-inline std::string tag_invoke(rest_arg_cast_built_in_tag<std::string>, const FromType& from)
+inline std::string tag_invoke(rest_arg_cast_built_in_tag<std::string>, FromType const& from)
 {
     std::string result(sizeof(FromType) * 4 + 1, '\0');
     std::to_chars_result tcr;
@@ -153,12 +153,12 @@ inline ToType tag_invoke(rest_arg_cast_built_in_tag<ToType>, FromType from)
 
 template <typename FromType, typename ToType> requires (
     std::same_as<FromType, boost::json::value>)
-inline ToType tag_invoke(rest_arg_cast_built_in_tag<ToType>, const FromType& jv)
+inline ToType tag_invoke(rest_arg_cast_built_in_tag<ToType>, FromType const& jv)
 {
     return boost::json::value_to<ToType>(jv);
 }
 
-inline char const* tag_invoke(rest_arg_cast_built_in_tag<char const*>, const std::string& from)
+inline char const* tag_invoke(rest_arg_cast_built_in_tag<char const*>, std::string const& from)
 {
     return from.c_str();
 }
