@@ -47,6 +47,18 @@ std::string_view content_type_from_extension(std::filesystem::path const& path)
     return "application/octet-stream";
 }
 
+// Helper generator for file header (demonstrates chaining)
+boost::taar::chunked_response<std::string> file_header(std::string const& filename)
+{
+    co_yield std::string{"=== Begin: " + filename + " ===\n"};
+}
+
+// Helper generator for file footer (demonstrates chaining)
+boost::taar::chunked_response<std::string> file_footer(std::string const& filename)
+{
+    co_yield std::string{"\n=== End: " + filename + " ===\n"};
+}
+
 } // namespace
 
 int main(int argc, char* argv[])
@@ -100,6 +112,38 @@ int main(int argc, char* argv[])
     );
 
     std::string doc_root = argv[2];
+
+    // Endpoint demonstrating generator chaining - wraps file with header/footer
+    http_session.register_request_handler(
+        method == http::verb::get && target == "/wrapped/{*path}",
+        [doc_root](
+            http::request<http::empty_body> const&,
+            context const& ctx) -> taar::chunked_response<std::string>
+        {
+            auto path = std::filesystem::path{doc_root} / ctx.path_args.at("path");
+            std::ifstream file{path, std::ios::binary};
+            if (!file)
+                throw std::runtime_error("File not found: " + path.string());
+
+            auto filename = path.filename().string();
+
+            // Set content-type to text for wrapped output
+            co_yield taar::set_header(http::field::content_type, "text/plain");
+
+            // Chain the header generator - yields its values inline
+            co_yield file_header(filename);
+
+            // Yield file content
+            char buffer[4096];
+            while (file.read(buffer, sizeof(buffer)) || file.gcount() > 0)
+            {
+                co_yield std::string{buffer, static_cast<std::size_t>(file.gcount())};
+            }
+
+            // Chain the footer generator - yields its values inline
+            co_yield file_footer(filename);
+        }
+    );
 
     http_session.register_request_handler(
         method == http::verb::get && target == "/{*path}",

@@ -206,4 +206,212 @@ BOOST_AUTO_TEST_CASE(test_async_generator_exception)
     BOOST_TEST(completed);
 }
 
+// Generator chaining tests
+
+async_generator<int> inner_gen()
+{
+    co_yield 10;
+    co_yield 20;
+}
+
+async_generator<int> outer_with_inner()
+{
+    co_yield 1;
+    co_yield inner_gen();
+    co_yield 100;
+}
+
+BOOST_AUTO_TEST_CASE(test_async_generator_chaining)
+{
+    boost::asio::io_context ioc;
+    bool completed = false;
+
+    boost::asio::co_spawn(ioc,
+        [&]() -> awaitable<void>
+        {
+            auto gen = outer_with_inner();
+            gen.set_executor(ioc.get_executor());
+
+            std::vector<int> values;
+
+            while (true)
+            {
+                auto [ec, value] = co_await gen.next();
+                if (!value)
+                    break;
+                values.push_back(*value);
+            }
+
+            BOOST_TEST(values.size() == 4u);
+            BOOST_TEST(values[0] == 1);
+            BOOST_TEST(values[1] == 10);
+            BOOST_TEST(values[2] == 20);
+            BOOST_TEST(values[3] == 100);
+            completed = true;
+        },
+        [](std::exception_ptr ep)
+        {
+            if (ep) std::rethrow_exception(ep);
+        });
+
+    ioc.run();
+    BOOST_TEST(completed);
+}
+
+async_generator<int> empty_inner()
+{
+    co_return;
+}
+
+async_generator<int> outer_with_empty_inner()
+{
+    co_yield 1;
+    co_yield empty_inner();
+    co_yield 2;
+}
+
+BOOST_AUTO_TEST_CASE(test_async_generator_chaining_empty_inner)
+{
+    boost::asio::io_context ioc;
+    bool completed = false;
+
+    boost::asio::co_spawn(ioc,
+        [&]() -> awaitable<void>
+        {
+            auto gen = outer_with_empty_inner();
+            gen.set_executor(ioc.get_executor());
+
+            std::vector<int> values;
+
+            while (true)
+            {
+                auto [ec, value] = co_await gen.next();
+                if (!value)
+                    break;
+                values.push_back(*value);
+            }
+
+            BOOST_TEST(values.size() == 2u);
+            BOOST_TEST(values[0] == 1);
+            BOOST_TEST(values[1] == 2);
+            completed = true;
+        },
+        [](std::exception_ptr ep)
+        {
+            if (ep) std::rethrow_exception(ep);
+        });
+
+    ioc.run();
+    BOOST_TEST(completed);
+}
+
+async_generator<int> throwing_inner()
+{
+    co_yield 1;
+    throw std::runtime_error("inner error");
+}
+
+async_generator<int> outer_with_throwing_inner()
+{
+    co_yield 0;
+    co_yield throwing_inner();
+    co_yield 100;  // Never reached
+}
+
+BOOST_AUTO_TEST_CASE(test_async_generator_chaining_inner_throws)
+{
+    boost::asio::io_context ioc;
+    bool completed = false;
+
+    boost::asio::co_spawn(ioc,
+        [&]() -> awaitable<void>
+        {
+            auto gen = outer_with_throwing_inner();
+            gen.set_executor(ioc.get_executor());
+
+            std::vector<int> values;
+
+            // Get first value (0 from outer)
+            auto [ec1, value1] = co_await gen.next();
+            BOOST_TEST(value1.has_value());
+            BOOST_TEST(*value1 == 0);
+            values.push_back(*value1);
+
+            // Get second value (1 from inner)
+            auto [ec2, value2] = co_await gen.next();
+            BOOST_TEST(value2.has_value());
+            BOOST_TEST(*value2 == 1);
+            values.push_back(*value2);
+
+            // Third call - inner throws, should get nullopt
+            auto [ec3, value3] = co_await gen.next();
+            BOOST_TEST(!value3.has_value());
+
+            // Exception is available via rethrow_if_exception
+            bool caught = false;
+            try
+            {
+                gen.rethrow_if_exception();
+            }
+            catch (std::runtime_error const& e)
+            {
+                BOOST_TEST(std::string(e.what()) == "inner error");
+                caught = true;
+            }
+            BOOST_TEST(caught);
+
+            completed = true;
+        },
+        [](std::exception_ptr ep)
+        {
+            if (ep) std::rethrow_exception(ep);
+        });
+
+    ioc.run();
+    BOOST_TEST(completed);
+}
+
+async_generator<int> outer_multiple_inner()
+{
+    co_yield inner_gen();  // 10, 20
+    co_yield inner_gen();  // 10, 20
+}
+
+BOOST_AUTO_TEST_CASE(test_async_generator_multiple_chaining)
+{
+    boost::asio::io_context ioc;
+    bool completed = false;
+
+    boost::asio::co_spawn(ioc,
+        [&]() -> awaitable<void>
+        {
+            auto gen = outer_multiple_inner();
+            gen.set_executor(ioc.get_executor());
+
+            std::vector<int> values;
+
+            while (true)
+            {
+                auto [ec, value] = co_await gen.next();
+                if (!value)
+                    break;
+                values.push_back(*value);
+            }
+
+            BOOST_TEST(values.size() == 4u);
+            BOOST_TEST(values[0] == 10);
+            BOOST_TEST(values[1] == 20);
+            BOOST_TEST(values[2] == 10);
+            BOOST_TEST(values[3] == 20);
+            completed = true;
+        },
+        [](std::exception_ptr ep)
+        {
+            if (ep) std::rethrow_exception(ep);
+        });
+
+    ioc.run();
+    BOOST_TEST(completed);
+}
+
 } // namespace

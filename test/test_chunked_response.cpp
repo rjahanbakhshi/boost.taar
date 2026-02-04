@@ -298,4 +298,175 @@ BOOST_AUTO_TEST_CASE(test_chunked_response_exception)
     BOOST_TEST(completed);
 }
 
+// Chunked response chaining tests
+
+chunked_response<std::string> inner_chunks()
+{
+    co_yield std::string{"inner1"};
+    co_yield std::string{"inner2"};
+}
+
+chunked_response<std::string> outer_with_inner_chunks()
+{
+    co_yield set_status(http::status::partial_content);
+    co_yield set_header(http::field::content_type, "text/plain");
+    co_yield std::string{"outer1"};
+    co_yield inner_chunks();  // inner1, inner2 (inner's metadata ignored)
+    co_yield std::string{"outer2"};
+}
+
+BOOST_AUTO_TEST_CASE(test_chunked_response_chaining)
+{
+    boost::asio::io_context ioc;
+    bool completed = false;
+
+    boost::asio::co_spawn(ioc,
+        [&]() -> awaitable<void>
+        {
+            auto gen = outer_with_inner_chunks();
+            gen.set_executor(ioc.get_executor());
+
+            std::vector<std::string> values;
+
+            while (true)
+            {
+                auto [ec, value] = co_await gen.next();
+                if (!value)
+                    break;
+                values.push_back(*value);
+            }
+
+            // Check values: outer1, inner1, inner2, outer2
+            BOOST_TEST(values.size() == 4u);
+            BOOST_TEST(values[0] == "outer1");
+            BOOST_TEST(values[1] == "inner1");
+            BOOST_TEST(values[2] == "inner2");
+            BOOST_TEST(values[3] == "outer2");
+
+            // Check metadata comes from outer only
+            BOOST_TEST(gen.status() == http::status::partial_content);
+            BOOST_TEST(gen.headers().size() == 1u);
+            BOOST_TEST(gen.headers()[0].field == http::field::content_type);
+            BOOST_TEST(gen.headers()[0].value == "text/plain");
+
+            completed = true;
+        },
+        [](std::exception_ptr ep)
+        {
+            if (ep) std::rethrow_exception(ep);
+        });
+
+    ioc.run();
+    BOOST_TEST(completed);
+}
+
+chunked_response<std::string> empty_inner_chunks()
+{
+    co_return;
+}
+
+chunked_response<std::string> outer_with_empty_inner_chunks()
+{
+    co_yield std::string{"before"};
+    co_yield empty_inner_chunks();
+    co_yield std::string{"after"};
+}
+
+BOOST_AUTO_TEST_CASE(test_chunked_response_chaining_empty_inner)
+{
+    boost::asio::io_context ioc;
+    bool completed = false;
+
+    boost::asio::co_spawn(ioc,
+        [&]() -> awaitable<void>
+        {
+            auto gen = outer_with_empty_inner_chunks();
+            gen.set_executor(ioc.get_executor());
+
+            std::vector<std::string> values;
+
+            while (true)
+            {
+                auto [ec, value] = co_await gen.next();
+                if (!value)
+                    break;
+                values.push_back(*value);
+            }
+
+            BOOST_TEST(values.size() == 2u);
+            BOOST_TEST(values[0] == "before");
+            BOOST_TEST(values[1] == "after");
+            completed = true;
+        },
+        [](std::exception_ptr ep)
+        {
+            if (ep) std::rethrow_exception(ep);
+        });
+
+    ioc.run();
+    BOOST_TEST(completed);
+}
+
+chunked_response<std::string> throwing_inner_chunks()
+{
+    co_yield std::string{"inner_ok"};
+    throw std::runtime_error("inner chunk error");
+}
+
+chunked_response<std::string> outer_with_throwing_inner_chunks()
+{
+    co_yield std::string{"outer_start"};
+    co_yield throwing_inner_chunks();
+    co_yield std::string{"outer_end"};  // Never reached
+}
+
+BOOST_AUTO_TEST_CASE(test_chunked_response_chaining_inner_throws)
+{
+    boost::asio::io_context ioc;
+    bool completed = false;
+
+    boost::asio::co_spawn(ioc,
+        [&]() -> awaitable<void>
+        {
+            auto gen = outer_with_throwing_inner_chunks();
+            gen.set_executor(ioc.get_executor());
+
+            // Get first value (outer_start)
+            auto [ec1, value1] = co_await gen.next();
+            BOOST_TEST(value1.has_value());
+            BOOST_TEST(*value1 == "outer_start");
+
+            // Get second value (inner_ok from inner)
+            auto [ec2, value2] = co_await gen.next();
+            BOOST_TEST(value2.has_value());
+            BOOST_TEST(*value2 == "inner_ok");
+
+            // Third call - inner throws, should get nullopt
+            auto [ec3, value3] = co_await gen.next();
+            BOOST_TEST(!value3.has_value());
+
+            // Exception is available via rethrow_if_exception
+            bool caught = false;
+            try
+            {
+                gen.rethrow_if_exception();
+            }
+            catch (std::runtime_error const& e)
+            {
+                BOOST_TEST(std::string(e.what()) == "inner chunk error");
+                caught = true;
+            }
+            BOOST_TEST(caught);
+
+            completed = true;
+        },
+        [](std::exception_ptr ep)
+        {
+            if (ep) std::rethrow_exception(ep);
+        });
+
+    ioc.run();
+    BOOST_TEST(completed);
+}
+
 } // namespace

@@ -11,7 +11,9 @@
 #define BOOST_TAAR_CORE_RESPONSE_FROM_HPP
 
 #include <boost/taar/core/awaitable.hpp>
+#include <boost/taar/core/is_async_generator.hpp>
 #include <boost/taar/core/is_awaitable.hpp>
+#include <boost/taar/core/is_chunked_response.hpp>
 #include <boost/taar/core/is_http_response.hpp>
 #include <boost/taar/core/response_from_tag.hpp>
 #include <boost/beast/http/message_generator.hpp>
@@ -221,7 +223,9 @@ awaitable<response_from_t<>>
 }
 
 template <typename CallableType, typename... ArgsType> requires (
-    has_response_from<std::invoke_result_t<CallableType, ArgsType...>>)
+    has_response_from<std::invoke_result_t<CallableType, ArgsType...>> &&
+    !is_async_generator<std::invoke_result_t<CallableType, ArgsType...>> &&
+    !is_chunked_response<std::invoke_result_t<CallableType, ArgsType...>>)
 inline auto response_from_invoke(
     CallableType&& callable,
     ArgsType&&... args) ->
@@ -250,7 +254,9 @@ awaitable<
 
 template <typename CallableType, typename... ArgsType> requires (
     is_awaitable<std::invoke_result_t<CallableType, ArgsType...>> &&
-    has_response_from<typename std::invoke_result_t<CallableType, ArgsType...>::value_type>)
+    has_response_from<typename std::invoke_result_t<CallableType, ArgsType...>::value_type> &&
+    !is_async_generator<typename std::invoke_result_t<CallableType, ArgsType...>::value_type> &&
+    !is_chunked_response<typename std::invoke_result_t<CallableType, ArgsType...>::value_type>)
 inline auto response_from_invoke(
     CallableType&& callable,
     ArgsType&&... args) ->
@@ -260,6 +266,60 @@ awaitable<
     co_return response_from(co_await std::invoke(
         std::forward<CallableType>(callable),
         std::forward<ArgsType>(args)...));
+}
+
+// Sync handler returning async_generator<T>
+template <typename CallableType, typename... ArgsType> requires (
+    is_async_generator<std::invoke_result_t<CallableType, ArgsType...>>)
+inline auto response_from_invoke(
+    CallableType&& callable,
+    ArgsType&&... args) ->
+awaitable<std::invoke_result_t<CallableType, ArgsType...>>
+{
+    co_return std::invoke(
+        std::forward<CallableType>(callable),
+        std::forward<ArgsType>(args)...);
+}
+
+// Sync handler returning chunked_response<T>
+template <typename CallableType, typename... ArgsType> requires (
+    is_chunked_response<std::invoke_result_t<CallableType, ArgsType...>>)
+inline auto response_from_invoke(
+    CallableType&& callable,
+    ArgsType&&... args) ->
+awaitable<std::invoke_result_t<CallableType, ArgsType...>>
+{
+    co_return std::invoke(
+        std::forward<CallableType>(callable),
+        std::forward<ArgsType>(args)...);
+}
+
+// Async handler returning awaitable<async_generator<T>>
+template <typename CallableType, typename... ArgsType> requires (
+    is_awaitable<std::invoke_result_t<CallableType, ArgsType...>> &&
+    is_async_generator<typename std::invoke_result_t<CallableType, ArgsType...>::value_type>)
+inline auto response_from_invoke(
+    CallableType&& callable,
+    ArgsType&&... args) ->
+awaitable<typename std::invoke_result_t<CallableType, ArgsType...>::value_type>
+{
+    co_return co_await std::invoke(
+        std::forward<CallableType>(callable),
+        std::forward<ArgsType>(args)...);
+}
+
+// Async handler returning awaitable<chunked_response<T>>
+template <typename CallableType, typename... ArgsType> requires (
+    is_awaitable<std::invoke_result_t<CallableType, ArgsType...>> &&
+    is_chunked_response<typename std::invoke_result_t<CallableType, ArgsType...>::value_type>)
+inline auto response_from_invoke(
+    CallableType&& callable,
+    ArgsType&&... args) ->
+awaitable<typename std::invoke_result_t<CallableType, ArgsType...>::value_type>
+{
+    co_return co_await std::invoke(
+        std::forward<CallableType>(callable),
+        std::forward<ArgsType>(args)...);
 }
 
 } // namespace boost::taar

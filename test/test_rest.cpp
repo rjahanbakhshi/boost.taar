@@ -17,7 +17,11 @@
 #include <boost/taar/matcher/target.hpp>
 #include <boost/taar/matcher/context.hpp>
 #include <boost/taar/core/awaitable.hpp>
+#include <boost/taar/core/async_generator.hpp>
+#include <boost/taar/core/chunked_response.hpp>
+#include <boost/taar/core/is_async_generator.hpp>
 #include <boost/taar/core/is_awaitable.hpp>
+#include <boost/taar/core/is_chunked_response.hpp>
 #include <boost/taar/core/response_from.hpp>
 #include <boost/beast/http/message.hpp>
 #include <boost/beast/http/parser.hpp>
@@ -431,6 +435,100 @@ BOOST_AUTO_TEST_CASE(test_rest_file_response)
         std::is_same_v<
             response_from_t<resp_t>,
             response_from_t<decltype(rh(req, ctx))::value_type>>, "Failed!");
+}
+
+BOOST_AUTO_TEST_CASE(test_rest_async_generator)
+{
+    namespace http = boost::beast::http;
+    namespace taar = boost::taar;
+    using taar::matcher::context;
+    using taar::async_generator;
+    using taar::is_async_generator;
+    using taar::is_awaitable;
+
+    http::request<http::empty_body> req;
+    context ctx;
+
+    auto gen_handler = []() -> async_generator<std::string> {
+        co_yield "chunk1";
+        co_yield "chunk2";
+    };
+
+    auto rh = taar::handler::rest(gen_handler);
+
+    static_assert(is_awaitable<decltype(rh(req, ctx))>, "Failed!");
+    static_assert(is_async_generator<typename decltype(rh(req, ctx))::value_type>, "Failed!");
+}
+
+BOOST_AUTO_TEST_CASE(test_rest_chunked_response)
+{
+    namespace http = boost::beast::http;
+    namespace taar = boost::taar;
+    using taar::matcher::context;
+    using taar::chunked_response;
+    using taar::set_status;
+    using taar::is_chunked_response;
+    using taar::is_awaitable;
+
+    http::request<http::empty_body> req;
+    context ctx;
+
+    auto chunked_handler = []() -> chunked_response<std::string> {
+        co_yield set_status(http::status::accepted);
+        co_yield "chunk1";
+    };
+
+    auto rh = taar::handler::rest(chunked_handler);
+
+    static_assert(is_awaitable<decltype(rh(req, ctx))>, "Failed!");
+    static_assert(is_chunked_response<typename decltype(rh(req, ctx))::value_type>, "Failed!");
+}
+
+BOOST_AUTO_TEST_CASE(test_rest_async_generator_with_args)
+{
+    namespace http = boost::beast::http;
+    namespace taar = boost::taar;
+    using taar::matcher::context;
+    using taar::handler::path_arg;
+    using taar::async_generator;
+    using taar::is_async_generator;
+    using taar::is_awaitable;
+
+    http::request<http::empty_body> req;
+    context ctx;
+    ctx.path_args = {{"count", "5"}};
+
+    auto gen_with_arg = [](int count) -> async_generator<std::string> {
+        for (int i = 0; i < count; ++i) co_yield std::to_string(i);
+    };
+
+    auto rh = taar::handler::rest(gen_with_arg, path_arg("count"));
+
+    static_assert(is_awaitable<decltype(rh(req, ctx))>, "Failed!");
+    static_assert(is_async_generator<typename decltype(rh(req, ctx))::value_type>, "Failed!");
+}
+
+BOOST_AUTO_TEST_CASE(test_rest_awaitable_async_generator)
+{
+    namespace http = boost::beast::http;
+    namespace taar = boost::taar;
+    using taar::matcher::context;
+    using taar::async_generator;
+    using taar::awaitable;
+    using taar::is_async_generator;
+    using taar::is_awaitable;
+
+    http::request<http::empty_body> req;
+    context ctx;
+
+    auto async_gen = []() -> awaitable<async_generator<std::string>> {
+        co_return []() -> async_generator<std::string> { co_yield "async"; }();
+    };
+
+    auto rh = taar::handler::rest(async_gen);
+
+    static_assert(is_awaitable<decltype(rh(req, ctx))>, "Failed!");
+    static_assert(is_async_generator<typename decltype(rh(req, ctx))::value_type>, "Failed!");
 }
 
 } // namespace

@@ -139,6 +139,99 @@ public:
             return {};
         }
 
+        // Flattening awaiter for yielding inner chunked_response generators
+        struct flatten_awaiter
+        {
+            chunked_response<T> inner;
+
+            bool await_ready() noexcept { return false; }
+
+            void await_suspend(handle_type h)
+            {
+                auto& promise = h.promise();
+                // Move inner into promise storage
+                promise.flattening_inner_storage_.emplace(std::move(inner));
+                promise.flattening_inner_ = &*promise.flattening_inner_storage_;
+                promise.flattening_outer_handle_ = h;
+                // Set inner's executor from outer
+                if (promise.executor_)
+                    promise.flattening_inner_->set_executor(*promise.executor_);
+
+                // Now drive the inner generator to get its first value.
+                // The completion_handler_ is still set from the outer's next() call.
+                if (promise.completion_handler_ && promise.executor_)
+                {
+                    auto handler = std::move(promise.completion_handler_);
+                    auto* inner_ptr = promise.flattening_inner_;
+                    auto exec = *promise.executor_;
+
+                    boost::asio::co_spawn(exec,
+                        [inner_ptr]() -> boost::taar::awaitable<std::tuple<boost::system::error_code, std::optional<T>>>
+                        {
+                            co_return co_await inner_ptr->next();
+                        },
+                        [&promise, h, handler = std::move(handler)](
+                            std::exception_ptr ep,
+                            std::tuple<boost::system::error_code, std::optional<T>> result) mutable
+                        {
+                            if (ep)
+                            {
+                                promise.exception_ = ep;
+                                promise.flattening_inner_ = nullptr;
+                                promise.flattening_inner_storage_.reset();
+                                promise.flattening_outer_handle_ = nullptr;
+                                handler(std::nullopt);
+                                return;
+                            }
+
+                            auto [ec, val] = std::move(result);
+                            if (val)
+                            {
+                                handler(std::move(val));
+                            }
+                            else
+                            {
+                                // Inner exhausted immediately - check for exception
+                                auto* inner_ptr = promise.flattening_inner_;
+                                try
+                                {
+                                    inner_ptr->rethrow_if_exception();
+                                }
+                                catch (...)
+                                {
+                                    promise.exception_ = std::current_exception();
+                                    promise.flattening_inner_ = nullptr;
+                                    promise.flattening_inner_storage_.reset();
+                                    promise.flattening_outer_handle_ = nullptr;
+                                    handler(std::nullopt);
+                                    return;
+                                }
+
+                                // Inner empty, resume outer
+                                promise.flattening_inner_ = nullptr;
+                                promise.flattening_inner_storage_.reset();
+                                promise.flattening_outer_handle_ = nullptr;
+
+                                promise.completion_handler_ = std::move(handler);
+                                h.resume();
+                            }
+                        });
+                }
+            }
+
+            void await_resume() noexcept
+            {
+                // Called when inner exhausted and outer resumes
+            }
+        };
+
+        flatten_awaiter yield_value(chunked_response<T> inner)
+        {
+            // Note: Inner's metadata is intentionally ignored - only outer's metadata is used
+            data_yielded_ = true;  // Yielding an inner generator counts as data yield
+            return {std::move(inner)};
+        }
+
         void return_void() noexcept {}
 
         void unhandled_exception()
@@ -245,6 +338,11 @@ public:
         boost::beast::http::status status_ = boost::beast::http::status::ok;
         std::vector<chunked_set_header> headers_;
         bool data_yielded_ = false;
+
+        // Flattening state
+        std::optional<chunked_response<T>> flattening_inner_storage_;
+        chunked_response<T>* flattening_inner_ = nullptr;
+        handle_type flattening_outer_handle_ = nullptr;
     };
 
     chunked_response() noexcept = default;
@@ -318,44 +416,125 @@ public:
             void(boost::system::error_code, std::optional<T>)>(
             [this](auto handler)
             {
-                if (handle_ && handle_.promise().exception_)
-                {
-                    auto& promise = handle_.promise();
-                    auto eptr = promise.exception_;
-                    promise.exception_ = nullptr;
-                    auto exec = boost::asio::get_associated_executor(handler);
-                    boost::asio::post(exec,
-                        [handler = std::move(handler), eptr]() mutable
-                        {
-                            std::rethrow_exception(eptr);
-                        });
-                    return;
-                }
-
-                if (!handle_ || handle_.done())
-                {
-                    auto exec = boost::asio::get_associated_executor(handler);
-                    boost::asio::post(exec,
-                        [handler = std::move(handler)]() mutable
-                        {
-                            handler(boost::system::error_code{}, std::nullopt);
-                        });
-                    return;
-                }
-
-                auto& promise = handle_.promise();
-                promise.completion_handler_ =
-                    [handler = std::move(handler)](std::optional<T> value) mutable
-                    {
-                        handler(boost::system::error_code{}, std::move(value));
-                    };
-
-                handle_.resume();
+                next_impl(std::move(handler));
             },
             token_type{});
     }
 
 private:
+    template <typename Handler>
+    void next_impl(Handler handler)
+    {
+        using boost::taar::awaitable;
+
+        if (handle_ && handle_.promise().exception_)
+        {
+            auto& promise = handle_.promise();
+            auto eptr = promise.exception_;
+            promise.exception_ = nullptr;
+            auto exec = boost::asio::get_associated_executor(handler);
+            boost::asio::post(exec,
+                [handler = std::move(handler), eptr]() mutable
+                {
+                    std::rethrow_exception(eptr);
+                });
+            return;
+        }
+
+        if (!handle_ || handle_.done())
+        {
+            auto exec = boost::asio::get_associated_executor(handler);
+            boost::asio::post(exec,
+                [handler = std::move(handler)]() mutable
+                {
+                    handler(boost::system::error_code{}, std::nullopt);
+                });
+            return;
+        }
+
+        auto& promise = handle_.promise();
+
+        // Check if we're in the middle of flattening an inner generator
+        if (promise.flattening_inner_)
+        {
+            auto* inner = promise.flattening_inner_;
+            auto exec = boost::asio::get_associated_executor(handler);
+
+            // Use co_spawn to drive the inner generator's next()
+            boost::asio::co_spawn(exec,
+                [inner]() -> awaitable<std::tuple<boost::system::error_code, std::optional<T>>>
+                {
+                    co_return co_await inner->next();
+                },
+                [this, handler = std::move(handler)](
+                    std::exception_ptr ep,
+                    std::tuple<boost::system::error_code, std::optional<T>> result) mutable
+                {
+                    auto& promise = handle_.promise();
+
+                    if (ep)
+                    {
+                        // Inner generator threw during iteration
+                        promise.exception_ = ep;
+                        promise.flattening_inner_ = nullptr;
+                        promise.flattening_inner_storage_.reset();
+                        promise.flattening_outer_handle_ = nullptr;
+                        handler(boost::system::error_code{}, std::nullopt);
+                        return;
+                    }
+
+                    auto [ec, val] = std::move(result);
+                    if (val)
+                    {
+                        // Inner yielded a value - pass to consumer
+                        handler(ec, std::move(val));
+                    }
+                    else
+                    {
+                        // Inner exhausted - check for inner's exception
+                        auto* inner_ptr = promise.flattening_inner_;
+                        try
+                        {
+                            inner_ptr->rethrow_if_exception();
+                        }
+                        catch (...)
+                        {
+                            promise.exception_ = std::current_exception();
+                            promise.flattening_inner_ = nullptr;
+                            promise.flattening_inner_storage_.reset();
+                            promise.flattening_outer_handle_ = nullptr;
+                            handler(boost::system::error_code{}, std::nullopt);
+                            return;
+                        }
+
+                        // Clear flattening state
+                        promise.flattening_inner_ = nullptr;
+                        promise.flattening_inner_storage_.reset();
+                        auto outer_handle = promise.flattening_outer_handle_;
+                        promise.flattening_outer_handle_ = nullptr;
+
+                        // Resume outer coroutine to get next value
+                        promise.completion_handler_ =
+                            [handler = std::move(handler)](std::optional<T> v) mutable
+                            {
+                                handler(boost::system::error_code{}, std::move(v));
+                            };
+                        outer_handle.resume();
+                    }
+                });
+            return;
+        }
+
+        // Normal path: set up completion handler and resume
+        promise.completion_handler_ =
+            [handler = std::move(handler)](std::optional<T> value) mutable
+            {
+                handler(boost::system::error_code{}, std::move(value));
+            };
+
+        handle_.resume();
+    }
+
     handle_type handle_ = nullptr;
 };
 
