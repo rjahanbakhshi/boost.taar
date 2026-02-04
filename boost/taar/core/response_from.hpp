@@ -273,12 +273,12 @@ template <typename CallableType, typename... ArgsType> requires (
     is_async_generator<std::invoke_result_t<CallableType, ArgsType...>>)
 inline auto response_from_invoke(
     CallableType&& callable,
-    ArgsType&&... args) ->
+    ArgsType... args) ->
 awaitable<std::invoke_result_t<CallableType, ArgsType...>>
 {
     co_return std::invoke(
         std::forward<CallableType>(callable),
-        std::forward<ArgsType>(args)...);
+        std::move(args)...);
 }
 
 // Sync handler returning chunked_response<T>
@@ -286,12 +286,12 @@ template <typename CallableType, typename... ArgsType> requires (
     is_chunked_response<std::invoke_result_t<CallableType, ArgsType...>>)
 inline auto response_from_invoke(
     CallableType&& callable,
-    ArgsType&&... args) ->
+    ArgsType... args) ->
 awaitable<std::invoke_result_t<CallableType, ArgsType...>>
 {
     co_return std::invoke(
         std::forward<CallableType>(callable),
-        std::forward<ArgsType>(args)...);
+        std::move(args)...);
 }
 
 // Async handler returning awaitable<async_generator<T>>
@@ -300,12 +300,12 @@ template <typename CallableType, typename... ArgsType> requires (
     is_async_generator<typename std::invoke_result_t<CallableType, ArgsType...>::value_type>)
 inline auto response_from_invoke(
     CallableType&& callable,
-    ArgsType&&... args) ->
+    ArgsType... args) ->
 awaitable<typename std::invoke_result_t<CallableType, ArgsType...>::value_type>
 {
     co_return co_await std::invoke(
         std::forward<CallableType>(callable),
-        std::forward<ArgsType>(args)...);
+        std::move(args)...);
 }
 
 // Async handler returning awaitable<chunked_response<T>>
@@ -314,12 +314,12 @@ template <typename CallableType, typename... ArgsType> requires (
     is_chunked_response<typename std::invoke_result_t<CallableType, ArgsType...>::value_type>)
 inline auto response_from_invoke(
     CallableType&& callable,
-    ArgsType&&... args) ->
+    ArgsType... args) ->
 awaitable<typename std::invoke_result_t<CallableType, ArgsType...>::value_type>
 {
     co_return co_await std::invoke(
         std::forward<CallableType>(callable),
-        std::forward<ArgsType>(args)...);
+        std::move(args)...);
 }
 
 } // namespace boost::taar
