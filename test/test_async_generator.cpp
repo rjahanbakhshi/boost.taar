@@ -622,6 +622,66 @@ BOOST_AUTO_TEST_CASE(test_async_generator_nested_cancellation)
     BOOST_TEST((completed || got_exception));
 }
 
+// Non-default-constructible type for testing
+struct non_default_constructible
+{
+    int value;
+    explicit non_default_constructible(int v) : value(v) {}
+    non_default_constructible() = delete;
+    non_default_constructible(non_default_constructible const&) = default;
+    non_default_constructible(non_default_constructible&&) = default;
+    non_default_constructible& operator=(non_default_constructible const&) = default;
+    non_default_constructible& operator=(non_default_constructible&&) = default;
+};
+
+awaitable<non_default_constructible> get_ndc_value()
+{
+    co_return non_default_constructible{42};
+}
+
+async_generator<int> generator_with_ndc_await()
+{
+    auto ndc = co_await get_ndc_value();
+    co_yield ndc.value;
+    auto ndc2 = co_await get_ndc_value();
+    co_yield ndc2.value + 1;
+}
+
+BOOST_AUTO_TEST_CASE(test_async_generator_non_default_constructible)
+{
+    boost::asio::io_context ioc;
+    bool completed = false;
+
+    boost::asio::co_spawn(ioc,
+        [&]() -> awaitable<void>
+        {
+            auto gen = generator_with_ndc_await();
+            gen.set_executor(ioc.get_executor());
+
+            std::vector<int> values;
+
+            while (true)
+            {
+                auto [ec, value] = co_await gen.next();
+                if (!value)
+                    break;
+                values.push_back(*value);
+            }
+
+            BOOST_TEST(values.size() == 2u);
+            BOOST_TEST(values[0] == 42);
+            BOOST_TEST(values[1] == 43);
+            completed = true;
+        },
+        [](std::exception_ptr ep)
+        {
+            if (ep) std::rethrow_exception(ep);
+        });
+
+    ioc.run();
+    BOOST_TEST(completed);
+}
+
 // Test that cancellation_state returns a default state when no slot is set
 async_generator<int> generator_check_default_cancellation()
 {

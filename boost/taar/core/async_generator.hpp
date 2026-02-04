@@ -26,6 +26,7 @@
 #include <coroutine>
 #include <exception>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <utility>
 
@@ -135,7 +136,7 @@ public:
             {
                 boost::asio::awaitable<U, Executor> inner;
                 promise_type& promise;
-                std::optional<U> result;
+                std::unique_ptr<U> result;
                 std::exception_ptr eptr;
 
                 bool await_ready() noexcept { return false; }
@@ -152,12 +153,20 @@ public:
                         return;
                     }
 
-                    auto completion_handler = [h, this](std::exception_ptr ep, U val) mutable
+                    // Wrap the awaitable to return optional<U> to avoid default construction
+                    // requirement in co_spawn's error path
+                    auto wrapper = [aw = std::move(inner)]() mutable
+                        -> boost::asio::awaitable<std::optional<U>, Executor>
+                    {
+                        co_return std::optional<U>{co_await std::move(aw)};
+                    };
+
+                    auto completion_handler = [h, this](std::exception_ptr ep, std::optional<U> val) mutable
                     {
                         if (ep)
                             eptr = ep;
-                        else
-                            result.emplace(std::move(val));
+                        else if (val)
+                            result = std::make_unique<U>(std::move(*val));
                         h.resume();
                     };
 
@@ -165,7 +174,7 @@ public:
                     {
                         boost::asio::co_spawn(
                             *p.executor_,
-                            std::move(inner),
+                            wrapper(),
                             boost::asio::bind_cancellation_slot(
                                 *p.cancellation_slot_,
                                 std::move(completion_handler)));
@@ -174,7 +183,7 @@ public:
                     {
                         boost::asio::co_spawn(
                             *p.executor_,
-                            std::move(inner),
+                            wrapper(),
                             std::move(completion_handler));
                     }
                 }
@@ -187,7 +196,7 @@ public:
                 }
             };
 
-            return awaitable_bridge{std::move(aw), *this, {}, {}};
+            return awaitable_bridge{std::move(aw), *this, nullptr, {}};
         }
 
         // Specialization for awaitable<void>

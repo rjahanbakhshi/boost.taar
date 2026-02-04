@@ -679,6 +679,66 @@ BOOST_AUTO_TEST_CASE(test_chunked_response_nested_cancellation)
     BOOST_TEST((completed || got_exception));
 }
 
+// Non-default-constructible type for testing
+struct chunked_non_default_constructible
+{
+    int value;
+    explicit chunked_non_default_constructible(int v) : value(v) {}
+    chunked_non_default_constructible() = delete;
+    chunked_non_default_constructible(chunked_non_default_constructible const&) = default;
+    chunked_non_default_constructible(chunked_non_default_constructible&&) = default;
+    chunked_non_default_constructible& operator=(chunked_non_default_constructible const&) = default;
+    chunked_non_default_constructible& operator=(chunked_non_default_constructible&&) = default;
+};
+
+awaitable<chunked_non_default_constructible> get_chunked_ndc_value()
+{
+    co_return chunked_non_default_constructible{42};
+}
+
+chunked_response<int> chunked_with_ndc_await()
+{
+    auto ndc = co_await get_chunked_ndc_value();
+    co_yield ndc.value;
+    auto ndc2 = co_await get_chunked_ndc_value();
+    co_yield ndc2.value + 1;
+}
+
+BOOST_AUTO_TEST_CASE(test_chunked_response_non_default_constructible)
+{
+    boost::asio::io_context ioc;
+    bool completed = false;
+
+    boost::asio::co_spawn(ioc,
+        [&]() -> awaitable<void>
+        {
+            auto gen = chunked_with_ndc_await();
+            gen.set_executor(ioc.get_executor());
+
+            std::vector<int> values;
+
+            while (true)
+            {
+                auto [ec, value] = co_await gen.next();
+                if (!value)
+                    break;
+                values.push_back(*value);
+            }
+
+            BOOST_TEST(values.size() == 2u);
+            BOOST_TEST(values[0] == 42);
+            BOOST_TEST(values[1] == 43);
+            completed = true;
+        },
+        [](std::exception_ptr ep)
+        {
+            if (ep) std::rethrow_exception(ep);
+        });
+
+    ioc.run();
+    BOOST_TEST(completed);
+}
+
 // Test that cancellation_state returns a default state when no slot is set
 chunked_response<std::string> chunked_check_default_cancellation()
 {
