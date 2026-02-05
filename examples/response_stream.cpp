@@ -120,7 +120,7 @@ chunked_response<std::string> fetch_url_chunked(
 
     // Gracefully close the socket
     beast::error_code ec;
-    stream.socket().shutdown(tcp::socket::shutdown_both, ec);
+    std::ignore = stream.socket().shutdown(tcp::socket::shutdown_both, ec);
 }
 
 } // namespace

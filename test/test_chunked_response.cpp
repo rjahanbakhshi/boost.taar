@@ -893,4 +893,235 @@ BOOST_AUTO_TEST_CASE(test_chunked_response_auto_executor_with_chaining)
     BOOST_TEST(completed);
 }
 
+// ============================================================================
+// Cancellation slot collision regression tests
+//
+// These tests exercise the exact trigger paths for the use-after-free bug
+// where a shared cancellation_slot was reused across multiple co_spawn +
+// bind_cancellation_slot operations. Each bind_cancellation_slot replaced the
+// previous co_spawn_cancellation_handler, destroying its internal signal while
+// outstanding frames still referenced it.
+//
+// Run under valgrind to verify no invalid memory accesses:
+//   valgrind --leak-check=full build/test/boost-taar-test \
+//       --run_test=test_chunked_response_flatten_async_inner_with_cancellation_slot
+// ============================================================================
+
+// Inner generator that performs async timer waits.
+// When flattened inside an outer generator that has a cancellation slot set,
+// each co_await triggers await_transform which co_spawns with a cancellation
+// signal. Under the old code this co_spawn replaced the flattening co_spawn's
+// handler on the shared slot, causing use-after-free.
+chunked_response<std::string> inner_with_async_timer_ops()
+{
+    namespace net = boost::asio;
+    net::steady_timer timer{co_await net::this_coro::executor};
+
+    timer.expires_after(std::chrono::milliseconds{1});
+    co_await timer.async_wait();
+    co_yield std::string{"inner_a"};
+
+    timer.expires_after(std::chrono::milliseconds{1});
+    co_await timer.async_wait();
+    co_yield std::string{"inner_b"};
+}
+
+// Outer generator that flattens two async inner generators with regular yields
+// in between — maximises the number of cancellation slot interactions.
+chunked_response<std::string> outer_flattening_async_inners()
+{
+    co_yield std::string{"outer_start"};
+    co_yield inner_with_async_timer_ops();   // flatten first inner
+    co_yield std::string{"outer_middle"};
+    co_yield inner_with_async_timer_ops();   // flatten second inner
+    co_yield std::string{"outer_end"};
+}
+
+// Primary UAF / leak regression test.
+// Exercises: flattening co_spawn + inner await_transform co_spawns sharing
+// the cancellation slot. Under the old code the slot handlers collide;
+// under the fix each co_spawn gets its own cancellation_signal via shared_ptr.
+BOOST_AUTO_TEST_CASE(test_chunked_response_flatten_async_inner_with_cancellation_slot)
+{
+    boost::asio::io_context ioc;
+    boost::asio::cancellation_signal signal;
+    bool completed = false;
+
+    boost::asio::co_spawn(ioc,
+        [&]() -> awaitable<void>
+        {
+            auto gen = outer_flattening_async_inners();
+            gen.set_executor(ioc.get_executor());
+            gen.set_cancellation_slot(signal.slot());
+
+            std::vector<std::string> values;
+            while (true)
+            {
+                auto [ec, value] = co_await gen.next();
+                if (!value)
+                    break;
+                values.push_back(*value);
+            }
+
+            BOOST_TEST(values.size() == 7u);
+            BOOST_TEST(values[0] == "outer_start");
+            BOOST_TEST(values[1] == "inner_a");
+            BOOST_TEST(values[2] == "inner_b");
+            BOOST_TEST(values[3] == "outer_middle");
+            BOOST_TEST(values[4] == "inner_a");
+            BOOST_TEST(values[5] == "inner_b");
+            BOOST_TEST(values[6] == "outer_end");
+            completed = true;
+        },
+        [](std::exception_ptr ep)
+        {
+            if (ep) std::rethrow_exception(ep);
+        });
+
+    ioc.run();
+    BOOST_TEST(completed);
+}
+
+// Inner generator that performs an async op then checks cancellation state.
+chunked_response<std::string> inner_async_then_cancel_check()
+{
+    namespace net = boost::asio;
+    net::steady_timer timer{co_await net::this_coro::executor};
+
+    // Async op exercises the co_spawn slot collision path during flattening.
+    timer.expires_after(std::chrono::milliseconds{1});
+    co_await timer.async_wait();
+
+    co_yield std::string{"inner_after_timer"};
+
+    // Cooperatively check for cancellation.
+    auto cs = co_await net::this_coro::cancellation_state;
+    if (cs.cancelled() != net::cancellation_type::none)
+        co_return;
+
+    co_yield std::string{"inner_not_cancelled"};
+}
+
+chunked_response<std::string> outer_cancel_flatten_async()
+{
+    co_yield std::string{"outer_start"};
+    co_yield inner_async_then_cancel_check();
+    co_yield std::string{"outer_end"};
+}
+
+// Cancellation during flattening with an async inner generator.
+// Verifies the per-operation signal chain correctly propagates cancellation
+// from the external slot through flattening_cancel_signal_ to the inner
+// generator's cancellation_state_.
+BOOST_AUTO_TEST_CASE(test_chunked_response_cancel_flatten_with_async_inner)
+{
+    boost::asio::io_context ioc;
+    boost::asio::cancellation_signal signal;
+    bool completed = false;
+
+    boost::asio::co_spawn(ioc,
+        [&]() -> awaitable<void>
+        {
+            auto gen = outer_cancel_flatten_async();
+            gen.set_executor(ioc.get_executor());
+            gen.set_cancellation_slot(signal.slot());
+
+            auto [ec1, v1] = co_await gen.next();
+            BOOST_TEST(v1.has_value());
+            BOOST_TEST(*v1 == "outer_start");
+
+            // Inner's timer completes — this exercises the co_spawn collision path
+            auto [ec2, v2] = co_await gen.next();
+            BOOST_TEST(v2.has_value());
+            BOOST_TEST(*v2 == "inner_after_timer");
+
+            // Emit cancellation — propagates through flattening_cancel_signal_
+            // to the inner's cancellation_state_.
+            signal.emit(boost::asio::cancellation_type::terminal);
+
+            // Inner sees cancellation and co_returns.
+            // Flattening completes, outer resumes and yields "outer_end".
+            auto [ec3, v3] = co_await gen.next();
+            BOOST_TEST(v3.has_value());
+            BOOST_TEST(*v3 == "outer_end");
+
+            auto [ec4, v4] = co_await gen.next();
+            BOOST_TEST(!v4.has_value());
+
+            completed = true;
+        },
+        [](std::exception_ptr ep)
+        {
+            if (ep) std::rethrow_exception(ep);
+        });
+
+    ioc.run();
+    BOOST_TEST(completed);
+}
+
+// Generator with multiple sequential co_await timer operations.
+// Each co_await triggers await_transform which creates a co_spawn with a
+// cancellation signal. Under the old code each co_spawn replaced the previous
+// handler on the shared slot.
+chunked_response<std::string> chunked_multiple_sequential_async_ops()
+{
+    namespace net = boost::asio;
+    net::steady_timer timer{co_await net::this_coro::executor};
+
+    co_yield std::string{"before_first"};
+
+    timer.expires_after(std::chrono::milliseconds{1});
+    co_await timer.async_wait();
+    co_yield std::string{"after_first"};
+
+    timer.expires_after(std::chrono::milliseconds{1});
+    co_await timer.async_wait();
+    co_yield std::string{"after_second"};
+
+    timer.expires_after(std::chrono::milliseconds{1});
+    co_await timer.async_wait();
+    co_yield std::string{"after_third"};
+}
+
+// Multiple sequential co_awaits with a cancellation slot set.
+// Regression test for the secondary issue where each await_transform co_spawn
+// replaced the previous one's handler on the shared slot.
+BOOST_AUTO_TEST_CASE(test_chunked_response_multiple_co_awaits_with_cancellation_slot)
+{
+    boost::asio::io_context ioc;
+    boost::asio::cancellation_signal signal;
+    bool completed = false;
+
+    boost::asio::co_spawn(ioc,
+        [&]() -> awaitable<void>
+        {
+            auto gen = chunked_multiple_sequential_async_ops();
+            gen.set_executor(ioc.get_executor());
+            gen.set_cancellation_slot(signal.slot());
+
+            std::vector<std::string> values;
+            while (true)
+            {
+                auto [ec, value] = co_await gen.next();
+                if (!value)
+                    break;
+                values.push_back(*value);
+            }
+
+            BOOST_TEST(values.size() == 4u);
+            BOOST_TEST(values[0] == "before_first");
+            BOOST_TEST(values[1] == "after_first");
+            BOOST_TEST(values[2] == "after_second");
+            BOOST_TEST(values[3] == "after_third");
+            completed = true;
+        },
+        [](std::exception_ptr ep)
+        {
+            if (ep) std::rethrow_exception(ep);
+        });
+
+    ioc.run();
+    BOOST_TEST(completed);
+}
+
 } // namespace
