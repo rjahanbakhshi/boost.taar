@@ -71,7 +71,7 @@ template <
 inline auto rest_for_callable(
     CallableType callable,
     std::index_sequence<Indexes...>,
-    ArgProvidersType&&... arg_providers)
+    ArgProvidersType... arg_providers)
 {
     using noref_fn_type = std::remove_reference_t<CallableType>;
 
@@ -84,38 +84,28 @@ inline auto rest_for_callable(
     //    (detail::is_rest_arg_provider<std::remove_cvref_t<ArgProvidersType>> && ...),
     //    "Invalid REST arg provider!");
 
-    using request_type = detail::common_requests_type_t<
-        std::remove_reference_t<ArgProvidersType>...>;
+    using request_type = detail::common_requests_type_t<ArgProvidersType...>;
 
     return
     [
         callable = std::forward<CallableType>(callable),
-        ...arg_providers = std::forward<ArgProvidersType>(arg_providers)
+        ...arg_providers = std::move(arg_providers)
     ](request_type const& request, matcher::context const& context) mutable ->
         decltype(response_from_invoke(
             callable,
             rest_arg<
                 type_traits::callable_arg<noref_fn_type, Indexes>,
-                std::remove_reference_t<ArgProvidersType>
-            > {arg_providers}(Indexes, request, context)...
+                ArgProvidersType
+            > {std::move(arg_providers)}(Indexes, request, context)...
         ))
     {
-        // Extract and store arguments in this coroutine's frame to ensure
-        // they outlive the generator. This prevents dangling references
-        // when response_from_invoke's frame is destroyed.
-        auto args = std::make_tuple(
+        co_return co_await response_from_invoke(
+            callable,
             rest_arg<
                 type_traits::callable_arg<noref_fn_type, Indexes>,
-                std::remove_reference_t<ArgProvidersType>
-            > {arg_providers}(Indexes, request, context)...
+                ArgProvidersType
+            > {std::move(arg_providers)}(Indexes, request, context)...
         );
-        co_return co_await std::apply(
-            [&callable](auto&&... a) {
-                return response_from_invoke(
-                    callable,
-                    std::forward<decltype(a)>(a)...);
-            },
-            std::move(args));
     };
 }
 
@@ -128,7 +118,7 @@ inline auto rest_for_memfn(
     MemFnType memfn,
     ObjectType&& object,
     std::index_sequence<Indexes...>,
-    ArgProvidersType&&... arg_providers)
+    ArgProvidersType... arg_providers)
 {
     using noref_fn_type = std::remove_reference_t<MemFnType>;
 
@@ -138,44 +128,34 @@ inline auto rest_for_memfn(
         "callable arguments.");
 
     static_assert(
-        (detail::is_rest_arg_provider<std::remove_cvref_t<ArgProvidersType>> && ...),
+        (detail::is_rest_arg_provider<ArgProvidersType> && ...),
         "Invalid REST arg provider!");
 
-    using request_type = detail::common_requests_type_t<
-        std::remove_reference_t<ArgProvidersType>...>;
+    using request_type = detail::common_requests_type_t<ArgProvidersType...>;
 
     return
     [
         memfn,
         object = std::forward<ObjectType>(object),
-        ...arg_providers = std::forward<ArgProvidersType>(arg_providers)
+        ...arg_providers = std::move(arg_providers)
     ](request_type const& request, matcher::context const& context) mutable ->
         decltype(response_from_invoke(
             memfn,
             std::forward<ObjectType>(object),
             rest_arg<
                 type_traits::callable_arg<noref_fn_type, Indexes>,
-                std::remove_reference_t<ArgProvidersType>
-            > {arg_providers}(Indexes, request, context)...
+                ArgProvidersType
+            > {std::move(arg_providers)}(Indexes, request, context)...
         ))
     {
-        // Extract and store arguments in this coroutine's frame to ensure
-        // they outlive the generator. This prevents dangling references
-        // when response_from_invoke's frame is destroyed.
-        auto args = std::make_tuple(
+        co_return co_await response_from_invoke(
+            memfn,
+            std::forward<ObjectType>(object),
             rest_arg<
                 type_traits::callable_arg<noref_fn_type, Indexes>,
-                std::remove_reference_t<ArgProvidersType>
-            > {arg_providers}(Indexes, request, context)...
+                ArgProvidersType
+            > {std::move(arg_providers)}(Indexes, request, context)...
         );
-        co_return co_await std::apply(
-            [&memfn, &object](auto&&... a) {
-                return response_from_invoke(
-                    memfn,
-                    std::forward<ObjectType>(object),
-                    std::forward<decltype(a)>(a)...);
-            },
-            std::move(args));
     };
 }
 
@@ -185,12 +165,12 @@ template <typename CallableType, typename... ArgProvidersType>
 requires (!std::is_member_function_pointer_v<std::remove_cvref_t<CallableType>>)
 inline decltype(auto) rest(
     CallableType&& callable,
-    ArgProvidersType&&... arg_providers)
+    ArgProvidersType... arg_providers)
 {
     return detail::rest_for_callable(
         std::forward<CallableType>(callable),
         std::index_sequence_for<ArgProvidersType...>{},
-        std::forward<ArgProvidersType>(arg_providers)...);
+        std::move(arg_providers)...);
 }
 
 template <typename MemFnType, typename ObjectType, typename... ArgProvidersType>
@@ -198,13 +178,13 @@ requires (member_function_of<MemFnType, std::remove_cvref_t<ObjectType>>)
 inline decltype(auto) rest(
     MemFnType memfn,
     ObjectType&& object,
-    ArgProvidersType&&... arg_providers)
+    ArgProvidersType... arg_providers)
 {
     return detail::rest_for_memfn(
         memfn,
         std::forward<ObjectType>(object),
         std::index_sequence_for<ArgProvidersType...>{},
-        std::forward<ArgProvidersType>(arg_providers)...);
+        std::move(arg_providers)...);
 }
 
 } // namespace boost::taar::handler
