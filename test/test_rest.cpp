@@ -531,4 +531,76 @@ BOOST_AUTO_TEST_CASE(test_rest_awaitable_async_generator)
     static_assert(is_async_generator<typename decltype(rh(req, ctx))::value_type>, "Failed!");
 }
 
+BOOST_AUTO_TEST_CASE(test_rest_async_generator_with_args_reuse)
+{
+    namespace http = boost::beast::http;
+    namespace taar = boost::taar;
+    using taar::matcher::context;
+    using taar::handler::path_arg;
+    using taar::async_generator;
+    using taar::awaitable;
+
+    auto gen_with_arg = [](int count) -> async_generator<std::string> {
+        for (int i = 0; i < count; ++i) co_yield std::to_string(i);
+    };
+
+    auto rh = taar::handler::rest(gen_with_arg, path_arg("count"));
+
+    // First invocation: count=3, expect "0","1","2"
+    {
+        http::request<http::empty_body> req;
+        context ctx;
+        ctx.path_args = {{"count", "3"}};
+
+        boost::asio::io_context io_context;
+        std::vector<std::string> results;
+        auto fut = boost::asio::co_spawn(io_context,
+            [&]() -> awaitable<void> {
+                auto gen = co_await rh(req, ctx);
+                for (;;)
+                {
+                    auto [ec, val] = co_await gen.next();
+                    if (!val) break;
+                    results.push_back(std::move(*val));
+                }
+            },
+            boost::asio::use_future);
+        io_context.run();
+        fut.get();
+
+        BOOST_TEST(results.size() == 3u);
+        BOOST_TEST(results[0] == "0");
+        BOOST_TEST(results[1] == "1");
+        BOOST_TEST(results[2] == "2");
+    }
+
+    // Second invocation: count=2, expect "0","1"
+    // This would fail before the fix because path_arg("count") was moved-from
+    {
+        http::request<http::empty_body> req;
+        context ctx;
+        ctx.path_args = {{"count", "2"}};
+
+        boost::asio::io_context io_context;
+        std::vector<std::string> results;
+        auto fut = boost::asio::co_spawn(io_context,
+            [&]() -> awaitable<void> {
+                auto gen = co_await rh(req, ctx);
+                for (;;)
+                {
+                    auto [ec, val] = co_await gen.next();
+                    if (!val) break;
+                    results.push_back(std::move(*val));
+                }
+            },
+            boost::asio::use_future);
+        io_context.run();
+        fut.get();
+
+        BOOST_TEST(results.size() == 2u);
+        BOOST_TEST(results[0] == "0");
+        BOOST_TEST(results[1] == "1");
+    }
+}
+
 } // namespace

@@ -96,7 +96,7 @@ inline auto rest_for_callable(
             rest_arg<
                 type_traits::callable_arg<noref_fn_type, Indexes>,
                 ArgProvidersType
-            > {std::move(arg_providers)}(Indexes, request, context)...
+            > {arg_providers}(Indexes, request, context)...
         ))
     {
         co_return co_await response_from_invoke(
@@ -104,7 +104,7 @@ inline auto rest_for_callable(
             rest_arg<
                 type_traits::callable_arg<noref_fn_type, Indexes>,
                 ArgProvidersType
-            > {std::move(arg_providers)}(Indexes, request, context)...
+            > {arg_providers}(Indexes, request, context)...
         );
     };
 }
@@ -145,7 +145,7 @@ inline auto rest_for_memfn(
             rest_arg<
                 type_traits::callable_arg<noref_fn_type, Indexes>,
                 ArgProvidersType
-            > {std::move(arg_providers)}(Indexes, request, context)...
+            > {arg_providers}(Indexes, request, context)...
         ))
     {
         co_return co_await response_from_invoke(
@@ -154,7 +154,7 @@ inline auto rest_for_memfn(
             rest_arg<
                 type_traits::callable_arg<noref_fn_type, Indexes>,
                 ArgProvidersType
-            > {std::move(arg_providers)}(Indexes, request, context)...
+            > {arg_providers}(Indexes, request, context)...
         );
     };
 }
