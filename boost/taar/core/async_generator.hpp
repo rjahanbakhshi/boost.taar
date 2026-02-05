@@ -523,6 +523,13 @@ private:
     template <typename Handler>
     void next_impl(Handler handler)
     {
+        // Auto-capture executor from caller's ASIO context if not explicitly set.
+        // The handler from use_awaitable_t carries the caller's executor.
+        if (handle_ && !handle_.promise().executor_)
+        {
+            handle_.promise().executor_ = boost::asio::get_associated_executor(handler);
+        }
+
         // Check if there's a pending exception from a previous resume
         // before checking done() — the coroutine may be at final_suspend
         // with a stored exception that must be propagated.

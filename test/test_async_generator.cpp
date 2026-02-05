@@ -727,4 +727,114 @@ BOOST_AUTO_TEST_CASE(test_async_generator_no_cancellation_slot)
     BOOST_TEST(completed);
 }
 
+// Auto-capture executor tests (no set_executor() needed)
+
+BOOST_AUTO_TEST_CASE(test_async_generator_auto_executor)
+{
+    boost::asio::io_context ioc;
+    bool completed = false;
+
+    boost::asio::co_spawn(ioc,
+        [&]() -> awaitable<void>
+        {
+            auto gen = three_values();
+            // No set_executor() call — executor should be auto-captured from caller
+
+            std::vector<int> values;
+
+            while (true)
+            {
+                auto [ec, value] = co_await gen.next();
+                if (!value)
+                    break;
+                values.push_back(*value);
+            }
+
+            BOOST_TEST(values.size() == 3u);
+            BOOST_TEST(values[0] == 1);
+            BOOST_TEST(values[1] == 2);
+            BOOST_TEST(values[2] == 3);
+            completed = true;
+        },
+        [](std::exception_ptr ep)
+        {
+            if (ep) std::rethrow_exception(ep);
+        });
+
+    ioc.run();
+    BOOST_TEST(completed);
+}
+
+BOOST_AUTO_TEST_CASE(test_async_generator_auto_executor_with_co_await)
+{
+    boost::asio::io_context ioc;
+    bool completed = false;
+
+    boost::asio::co_spawn(ioc,
+        [&]() -> awaitable<void>
+        {
+            auto gen = generator_with_timer();
+            // No set_executor() call — executor should be auto-captured from caller
+
+            std::vector<int> values;
+
+            while (true)
+            {
+                auto [ec, value] = co_await gen.next();
+                if (!value)
+                    break;
+                values.push_back(*value);
+            }
+
+            BOOST_TEST(values.size() == 2u);
+            BOOST_TEST(values[0] == 1);
+            BOOST_TEST(values[1] == 2);
+            completed = true;
+        },
+        [](std::exception_ptr ep)
+        {
+            if (ep) std::rethrow_exception(ep);
+        });
+
+    ioc.run();
+    BOOST_TEST(completed);
+}
+
+BOOST_AUTO_TEST_CASE(test_async_generator_auto_executor_with_chaining)
+{
+    boost::asio::io_context ioc;
+    bool completed = false;
+
+    boost::asio::co_spawn(ioc,
+        [&]() -> awaitable<void>
+        {
+            auto gen = outer_with_inner();
+            // No set_executor() call — executor should be auto-captured from caller
+
+            std::vector<int> values;
+
+            while (true)
+            {
+                auto [ec, value] = co_await gen.next();
+                if (!value)
+                    break;
+                values.push_back(*value);
+            }
+
+            BOOST_TEST(values.size() == 4u);
+            BOOST_TEST(values[0] == 1);
+            BOOST_TEST(values[1] == 10);
+            BOOST_TEST(values[2] == 20);
+            BOOST_TEST(values[3] == 100);
+            completed = true;
+        },
+        [](std::exception_ptr ep)
+        {
+            if (ep) std::rethrow_exception(ep);
+        });
+
+    ioc.run();
+    BOOST_TEST(completed);
+}
+
 } // namespace

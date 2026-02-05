@@ -568,6 +568,13 @@ private:
     {
         using boost::taar::awaitable;
 
+        // Auto-capture executor from caller's ASIO context if not explicitly set.
+        // The handler from use_awaitable_t carries the caller's executor.
+        if (handle_ && !handle_.promise().executor_)
+        {
+            handle_.promise().executor_ = boost::asio::get_associated_executor(handler);
+        }
+
         if (handle_ && handle_.promise().exception_)
         {
             auto& promise = handle_.promise();
