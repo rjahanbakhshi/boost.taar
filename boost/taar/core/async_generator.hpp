@@ -161,8 +161,11 @@ public:
                         co_return std::optional<U>{co_await std::move(aw)};
                     };
 
-                    auto completion_handler = [h, this](std::exception_ptr ep, std::optional<U> val) mutable
+                    auto alive = p.alive_;
+                    auto completion_handler = [h, this, alive](std::exception_ptr ep, std::optional<U> val) mutable
                     {
+                        if (!*alive)
+                            return;
                         if (ep)
                             eptr = ep;
                         else if (val)
@@ -172,12 +175,21 @@ public:
 
                     if (p.cancellation_slot_ && p.cancellation_slot_->is_connected())
                     {
+                        auto op_signal = std::make_shared<boost::asio::cancellation_signal>();
+                        p.active_co_spawn_signal_ = op_signal;
+
+                        auto guarded_handler = [op_signal, h = std::move(completion_handler)](
+                            std::exception_ptr ep, std::optional<U> val) mutable
+                        {
+                            h(ep, std::move(val));
+                        };
+
                         boost::asio::co_spawn(
                             *p.executor_,
                             wrapper(),
                             boost::asio::bind_cancellation_slot(
-                                *p.cancellation_slot_,
-                                std::move(completion_handler)));
+                                op_signal->slot(),
+                                std::move(guarded_handler)));
                     }
                     else
                     {
@@ -222,8 +234,11 @@ public:
                         return;
                     }
 
-                    auto completion_handler = [h, this](std::exception_ptr ep) mutable
+                    auto alive = p.alive_;
+                    auto completion_handler = [h, this, alive](std::exception_ptr ep) mutable
                     {
+                        if (!*alive)
+                            return;
                         if (ep)
                             eptr = ep;
                         h.resume();
@@ -231,12 +246,21 @@ public:
 
                     if (p.cancellation_slot_ && p.cancellation_slot_->is_connected())
                     {
+                        auto op_signal = std::make_shared<boost::asio::cancellation_signal>();
+                        p.active_co_spawn_signal_ = op_signal;
+
+                        auto guarded_handler = [op_signal, h = std::move(completion_handler)](
+                            std::exception_ptr ep) mutable
+                        {
+                            h(ep);
+                        };
+
                         boost::asio::co_spawn(
                             *p.executor_,
                             std::move(inner),
                             boost::asio::bind_cancellation_slot(
-                                *p.cancellation_slot_,
-                                std::move(completion_handler)));
+                                op_signal->slot(),
+                                std::move(guarded_handler)));
                     }
                     else
                     {
@@ -309,9 +333,12 @@ public:
                 // Set inner's executor from outer
                 if (promise.executor_)
                     promise.flattening_inner_->set_executor(*promise.executor_);
-                // Propagate cancellation slot to inner
+                // Propagate cancellation to inner via dedicated signal
                 if (promise.cancellation_slot_ && promise.cancellation_slot_->is_connected())
-                    promise.flattening_inner_->set_cancellation_slot(*promise.cancellation_slot_);
+                {
+                    promise.flattening_cancel_signal_ = std::make_shared<boost::asio::cancellation_signal>();
+                    promise.flattening_inner_->set_cancellation_slot(promise.flattening_cancel_signal_->slot());
+                }
 
                 // Now drive the inner generator to get its first value.
                 // The completion_handler_ is still set from the outer's next() call.
@@ -321,16 +348,21 @@ public:
                     auto* inner_ptr = promise.flattening_inner_;
                     auto exec = *promise.executor_;
 
-                    auto completion_handler = [&promise, h, handler = std::move(handler)](
+                    auto alive = promise.alive_;
+                    auto completion_handler = [&promise, h, handler = std::move(handler), alive](
                         std::exception_ptr ep,
                         std::tuple<boost::system::error_code, std::optional<T>> result) mutable
                     {
+                        if (!*alive)
+                            return;
+
                         if (ep)
                         {
                             promise.exception_ = ep;
                             promise.flattening_inner_ = nullptr;
                             promise.flattening_inner_storage_.reset();
                             promise.flattening_outer_handle_ = nullptr;
+                            promise.flattening_cancel_signal_.reset();
                             handler(std::nullopt);
                             return;
                         }
@@ -354,6 +386,7 @@ public:
                                 promise.flattening_inner_ = nullptr;
                                 promise.flattening_inner_storage_.reset();
                                 promise.flattening_outer_handle_ = nullptr;
+                                promise.flattening_cancel_signal_.reset();
                                 handler(std::nullopt);
                                 return;
                             }
@@ -362,6 +395,7 @@ public:
                             promise.flattening_inner_ = nullptr;
                             promise.flattening_inner_storage_.reset();
                             promise.flattening_outer_handle_ = nullptr;
+                            promise.flattening_cancel_signal_.reset();
 
                             promise.completion_handler_ = std::move(handler);
                             h.resume();
@@ -370,14 +404,24 @@ public:
 
                     if (promise.cancellation_slot_ && promise.cancellation_slot_->is_connected())
                     {
+                        auto op_signal = std::make_shared<boost::asio::cancellation_signal>();
+                        promise.active_co_spawn_signal_ = op_signal;
+
+                        auto guarded_handler = [op_signal, h = std::move(completion_handler)](
+                            std::exception_ptr ep,
+                            std::tuple<boost::system::error_code, std::optional<T>> result) mutable
+                        {
+                            h(ep, std::move(result));
+                        };
+
                         boost::asio::co_spawn(exec,
                             [inner_ptr]() -> boost::taar::awaitable<std::tuple<boost::system::error_code, std::optional<T>>>
                             {
                                 co_return co_await inner_ptr->next();
                             },
                             boost::asio::bind_cancellation_slot(
-                                *promise.cancellation_slot_,
-                                std::move(completion_handler)));
+                                op_signal->slot(),
+                                std::move(guarded_handler)));
                     }
                     else
                     {
@@ -432,7 +476,15 @@ public:
         boost::asio::cancellation_signal internal_signal_;
         std::optional<boost::asio::cancellation_state> cancellation_state_;
 
+        // Alive flag — shared with co_spawn completion handlers so they can
+        // detect that the coroutine frame has been destroyed.
+        std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
+
+        // Per-operation cancellation signal (each co_spawn gets its own)
+        std::shared_ptr<boost::asio::cancellation_signal> active_co_spawn_signal_;
+
         // Flattening state
+        std::shared_ptr<boost::asio::cancellation_signal> flattening_cancel_signal_;
         std::optional<async_generator<T>> flattening_inner_storage_;
         async_generator<T>* flattening_inner_ = nullptr;
         handle_type flattening_outer_handle_ = nullptr;
@@ -452,8 +504,7 @@ public:
     {
         if (this != &other)
         {
-            if (handle_)
-                handle_.destroy();
+            destroy_handle();
             handle_ = std::exchange(other.handle_, nullptr);
         }
         return *this;
@@ -464,8 +515,7 @@ public:
 
     ~async_generator()
     {
-        if (handle_)
-            handle_.destroy();
+        destroy_handle();
     }
 
     void set_executor(executor_type executor)
@@ -487,9 +537,14 @@ public:
                 boost::asio::enable_total_cancellation{});
 
             // Forward cancellation from external slot to our internal signal
-            slot.assign([&sig = promise.internal_signal_](boost::asio::cancellation_type_t type)
+            // and to any active per-operation signals
+            slot.assign([&promise](boost::asio::cancellation_type_t type)
             {
-                sig.emit(type);
+                promise.internal_signal_.emit(type);
+                if (promise.active_co_spawn_signal_)
+                    promise.active_co_spawn_signal_->emit(type);
+                if (promise.flattening_cancel_signal_)
+                    promise.flattening_cancel_signal_->emit(type);
             });
         }
     }
@@ -560,16 +615,39 @@ private:
 
         auto& promise = handle_.promise();
 
+        // Re-install the cancellation forwarder on the external slot.
+        // ASIO's awaitable machinery calls clear_cancellation_slot() when the
+        // awaitable_handler fires (i.e., when the previous next() completed),
+        // which removes our forwarder.  Re-installing it here ensures
+        // cancellation can reach the generator's co_spawn for this call.
+        if (promise.cancellation_slot_ &&
+            promise.cancellation_slot_->is_connected())
+        {
+            promise.cancellation_slot_->assign(
+                [&promise](boost::asio::cancellation_type_t type)
+                {
+                    promise.internal_signal_.emit(type);
+                    if (promise.active_co_spawn_signal_)
+                        promise.active_co_spawn_signal_->emit(type);
+                    if (promise.flattening_cancel_signal_)
+                        promise.flattening_cancel_signal_->emit(type);
+                });
+        }
+
         // Check if we're in the middle of flattening an inner generator
         if (promise.flattening_inner_)
         {
             auto* inner = promise.flattening_inner_;
             auto exec = boost::asio::get_associated_executor(handler);
 
-            auto completion_handler = [this, handler = std::move(handler)](
+            auto alive = promise.alive_;
+            auto completion_handler = [this, handler = std::move(handler), alive](
                 std::exception_ptr ep,
                 std::tuple<boost::system::error_code, std::optional<T>> result) mutable
             {
+                if (!*alive)
+                    return;
+
                 auto& promise = handle_.promise();
 
                 if (ep)
@@ -579,6 +657,7 @@ private:
                     promise.flattening_inner_ = nullptr;
                     promise.flattening_inner_storage_.reset();
                     promise.flattening_outer_handle_ = nullptr;
+                    promise.flattening_cancel_signal_.reset();
                     handler(boost::system::error_code{}, std::nullopt);
                     return;
                 }
@@ -603,6 +682,7 @@ private:
                         promise.flattening_inner_ = nullptr;
                         promise.flattening_inner_storage_.reset();
                         promise.flattening_outer_handle_ = nullptr;
+                        promise.flattening_cancel_signal_.reset();
                         handler(boost::system::error_code{}, std::nullopt);
                         return;
                     }
@@ -612,6 +692,7 @@ private:
                     promise.flattening_inner_storage_.reset();
                     auto outer_handle = promise.flattening_outer_handle_;
                     promise.flattening_outer_handle_ = nullptr;
+                    promise.flattening_cancel_signal_.reset();
 
                     // Resume outer coroutine to get next value
                     promise.completion_handler_ =
@@ -626,14 +707,24 @@ private:
             // Use co_spawn to drive the inner generator's next()
             if (promise.cancellation_slot_ && promise.cancellation_slot_->is_connected())
             {
+                auto op_signal = std::make_shared<boost::asio::cancellation_signal>();
+                promise.active_co_spawn_signal_ = op_signal;
+
+                auto guarded_handler = [op_signal, h = std::move(completion_handler)](
+                    std::exception_ptr ep,
+                    std::tuple<boost::system::error_code, std::optional<T>> result) mutable
+                {
+                    h(ep, std::move(result));
+                };
+
                 boost::asio::co_spawn(exec,
                     [inner]() -> awaitable<std::tuple<boost::system::error_code, std::optional<T>>>
                     {
                         co_return co_await inner->next();
                     },
                     boost::asio::bind_cancellation_slot(
-                        *promise.cancellation_slot_,
-                        std::move(completion_handler)));
+                        op_signal->slot(),
+                        std::move(guarded_handler)));
             }
             else
             {
@@ -655,6 +746,32 @@ private:
             };
 
         handle_.resume();
+    }
+
+    void destroy_handle() noexcept
+    {
+        if (handle_)
+        {
+            auto& promise = handle_.promise();
+            // Signal to any in-flight co_spawn completion handlers that the
+            // coroutine frame is gone — they must not access it.
+            *promise.alive_ = false;
+            // Cancel pending co_spawns so their wrapper frames are freed.
+            if (promise.active_co_spawn_signal_)
+                promise.active_co_spawn_signal_->emit(
+                    boost::asio::cancellation_type::all);
+            if (promise.flattening_cancel_signal_)
+                promise.flattening_cancel_signal_->emit(
+                    boost::asio::cancellation_type::all);
+            // Remove the forwarder lambda from the external cancellation slot
+            // to prevent it from firing with a dangling &promise after the
+            // coroutine frame is destroyed.
+            if (promise.cancellation_slot_ &&
+                promise.cancellation_slot_->is_connected())
+                promise.cancellation_slot_->clear();
+            handle_.destroy();
+            handle_ = nullptr;
+        }
     }
 
     handle_type handle_ = nullptr;
