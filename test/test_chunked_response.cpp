@@ -1124,4 +1124,306 @@ BOOST_AUTO_TEST_CASE(test_chunked_response_multiple_co_awaits_with_cancellation_
     BOOST_TEST(completed);
 }
 
+// ============================================================================
+// Frame leak regression tests
+//
+// These tests exercise the scenario where a chunked_response is destroyed
+// while a co_spawn from await_transform is still in flight. Without the
+// alive flag + destructor cancellation, the co_spawn's wrapper frame leaks.
+//
+// Run under valgrind to verify no leaked blocks:
+//   valgrind --leak-check=full build/test/boost-taar-test \
+//       --run_test=test_chunked_response_destroy_with_pending_co_spawn
+// ============================================================================
+
+// Generator that blocks on a long timer — simulates a pending async operation
+// (e.g., reading from a K8s log stream) that outlives the generator.
+chunked_response<std::string> chunked_with_long_blocking_op()
+{
+    namespace net = boost::asio;
+    net::steady_timer timer{co_await net::this_coro::executor};
+
+    co_yield std::string{"ready"};
+
+    // Long wait — will be cancelled when the generator is destroyed.
+    timer.expires_after(std::chrono::hours{1});
+    co_await timer.async_wait();
+
+    co_yield std::string{"unreachable"};
+}
+
+// Primary frame-leak regression test.
+// The generator is destroyed while its await_transform co_spawn is pending.
+// The destructor must cancel the co_spawn (via active_co_spawn_signal_) and
+// the alive flag must prevent the completion handler from accessing the freed
+// coroutine frame.
+BOOST_AUTO_TEST_CASE(test_chunked_response_destroy_with_pending_co_spawn)
+{
+    boost::asio::io_context ioc;
+    boost::asio::cancellation_signal signal;
+    bool completed = false;
+
+    boost::asio::co_spawn(ioc,
+        [&]() -> awaitable<void>
+        {
+            {
+                auto gen = chunked_with_long_blocking_op();
+                gen.set_executor(ioc.get_executor());
+                gen.set_cancellation_slot(signal.slot());
+
+                auto [ec1, v1] = co_await gen.next();
+                BOOST_TEST(v1.has_value());
+                BOOST_TEST(*v1 == "ready");
+
+                // Start second next() — this triggers the long timer via
+                // await_transform, posting a co_spawn.
+                // Then post gen destruction from inside the coroutine.
+                // We use a helper awaitable to start next() and then
+                // cancel it by destroying the generator.
+            }
+            // gen is destroyed here while the second next() was never started.
+            // This is the simple case — no pending co_spawn.
+            completed = true;
+        },
+        [](std::exception_ptr ep)
+        {
+            if (ep) std::rethrow_exception(ep);
+        });
+
+    ioc.run();
+    BOOST_TEST(completed);
+
+    // Now test the hard case: gen is destroyed while a co_spawn IS pending.
+    // We drive gen.next() manually using async_initiate outside of co_await.
+    completed = false;
+    ioc.restart();
+
+    auto gen = std::make_unique<chunked_response<std::string>>(
+        chunked_with_long_blocking_op());
+    gen->set_executor(ioc.get_executor());
+    gen->set_cancellation_slot(signal.slot());
+
+    boost::asio::co_spawn(ioc,
+        [&]() -> awaitable<void>
+        {
+            // Get first value normally.
+            auto [ec1, v1] = co_await gen->next();
+            BOOST_TEST(v1.has_value());
+            BOOST_TEST(*v1 == "ready");
+
+            // Post generator destruction — this will fire after we suspend
+            // on the second gen->next().
+            boost::asio::post(ioc, [&]()
+            {
+                gen.reset(); // Destroys gen while timer co_spawn is pending
+            });
+
+            // Second next() — resumes the generator, which hits co_await
+            // timer.async_wait(). This triggers await_transform and creates
+            // a co_spawn with a 1-hour timer. The generator is then
+            // suspended, and the posted gen.reset() fires next.
+            auto [ec2, v2] = co_await gen->next();
+            // We should NOT get here because gen was destroyed.
+            // The co_await should remain unresolved; the coroutine
+            // just won't be resumed.
+        },
+        [&](std::exception_ptr)
+        {
+            // The co_spawn's coroutine is abandoned because gen was destroyed
+            // and the handler was never called. This is expected.
+            completed = true;
+        });
+
+    // Run until all work is done. The posted gen.reset() fires,
+    // destroying gen. The destructor cancels the timer co_spawn.
+    // The timer co_spawn completes, its handler checks alive_ == false
+    // and does nothing. The wrapper frame is freed.
+    ioc.run();
+
+    // completed may or may not be true depending on ASIO's handling
+    // of the abandoned awaitable. The key assertion is: no leaked frames
+    // under valgrind.
+}
+
+// Same scenario but for flattening: destroy an outer generator while an
+// inner generator's co_spawn is pending during flatten iteration.
+chunked_response<std::string> inner_long_blocking()
+{
+    namespace net = boost::asio;
+    net::steady_timer timer{co_await net::this_coro::executor};
+
+    co_yield std::string{"inner_ready"};
+
+    timer.expires_after(std::chrono::hours{1});
+    co_await timer.async_wait();
+
+    co_yield std::string{"inner_unreachable"};
+}
+
+chunked_response<std::string> outer_flattening_long_blocking_inner()
+{
+    co_yield std::string{"outer_start"};
+    co_yield inner_long_blocking();
+    co_yield std::string{"outer_unreachable"};
+}
+
+BOOST_AUTO_TEST_CASE(test_chunked_response_destroy_with_pending_flatten_co_spawn)
+{
+    boost::asio::io_context ioc;
+    boost::asio::cancellation_signal signal;
+
+    auto gen = std::make_unique<chunked_response<std::string>>(
+        outer_flattening_long_blocking_inner());
+    gen->set_executor(ioc.get_executor());
+    gen->set_cancellation_slot(signal.slot());
+
+    boost::asio::co_spawn(ioc,
+        [&]() -> awaitable<void>
+        {
+            auto [ec1, v1] = co_await gen->next();
+            BOOST_TEST(v1.has_value());
+            BOOST_TEST(*v1 == "outer_start");
+
+            auto [ec2, v2] = co_await gen->next();
+            BOOST_TEST(v2.has_value());
+            BOOST_TEST(*v2 == "inner_ready");
+
+            // Post destruction while inner's timer co_spawn is pending
+            boost::asio::post(ioc, [&]()
+            {
+                gen.reset();
+            });
+
+            // This next() drives the inner generator, which hits the
+            // long timer. The posted gen.reset() fires and destroys
+            // everything.
+            auto [ec3, v3] = co_await gen->next();
+        },
+        [](std::exception_ptr) {});
+
+    ioc.run();
+    // Key assertion: no leaks under valgrind.
+}
+
+// Regression test: destroying a chunked_response must clear its forwarder from
+// the external cancellation slot.  Without the fix, emitting cancellation after
+// destruction fires a lambda that captures &promise — a dangling reference.
+// Under valgrind this manifests as a use-after-free and a leaked session frame.
+BOOST_AUTO_TEST_CASE(test_chunked_response_destroy_clears_external_slot)
+{
+    boost::asio::io_context ioc;
+
+    // This signal plays the role of the session's internal cancellation state
+    // signal (the one whose slot() is passed to set_cancellation_slot).
+    boost::asio::cancellation_signal session_signal;
+
+    auto make_gen = [&]() -> chunked_response<std::string>
+    {
+        boost::asio::steady_timer timer{ioc};
+        timer.expires_after(std::chrono::hours(1));
+        co_await timer.async_wait();
+        co_yield std::string{"never"};
+    };
+
+    auto gen = std::make_optional(make_gen());
+    gen->set_cancellation_slot(session_signal.slot());
+
+    boost::asio::co_spawn(ioc,
+        [&]() -> awaitable<void>
+        {
+            // Start the generator — it suspends on the 1-hour timer
+            auto [ec, v] = co_await gen->next();
+            // After destroy_handle fires (posted below), next() returns error
+        },
+        [](std::exception_ptr) {});
+
+    // Let the co_spawn start and hit the timer
+    ioc.run_one();
+
+    // Destroy the generator while the timer co_spawn is in flight.
+    // This must clear the forwarder from session_signal's slot.
+    gen.reset();
+
+    // Now emit cancellation on the session signal — mimics server shutdown.
+    // Without the fix, this fires the dangling forwarder → UAF.
+    session_signal.emit(boost::asio::cancellation_type::all);
+
+    // Drain remaining work
+    ioc.run();
+    // Key assertion: no UAF under valgrind, no leaks.
+}
+
+// Regression test: cancellation must propagate to the generator's co_spawn even
+// after earlier next() calls have completed.  ASIO's awaitable machinery calls
+// clear_cancellation_slot() on the cancellation_state's output slot whenever an
+// awaitable_handler fires, which removes our forwarder.  The fix re-installs
+// the forwarder at the start of each next_impl() call.
+//
+// Scenario:
+//   1. Generator yields "first" synchronously
+//   2. Session calls next() again — generator co_awaits a long timer
+//   3. Cancellation fires (server shutdown)
+//   4. Without the fix, the forwarder was cleared in step 1 and the timer
+//      co_spawn is never cancelled → session hangs → frame leaks.
+BOOST_AUTO_TEST_CASE(test_chunked_response_cancel_after_first_next_completes)
+{
+    boost::asio::io_context ioc;
+
+    // Mimics the session's cancellation_state output signal.
+    boost::asio::cancellation_signal session_signal;
+
+    auto make_gen = [&]() -> chunked_response<std::string>
+    {
+        // First value — yields synchronously (no co_await)
+        co_yield std::string{"first"};
+
+        // Second value — waits on a long timer (simulates streaming log data)
+        boost::asio::steady_timer timer{ioc};
+        timer.expires_after(std::chrono::hours(1));
+        co_await timer.async_wait();
+        co_yield std::string{"never"};
+    };
+
+    auto gen = make_gen();
+    gen.set_cancellation_slot(session_signal.slot());
+
+    bool got_first = false;
+    bool second_completed = false;
+
+    boost::asio::co_spawn(ioc,
+        [&]() -> awaitable<void>
+        {
+            // First next() — yields "first" synchronously.
+            // When the awaitable_handler fires, ASIO clears session_signal's
+            // slot, removing our forwarder.
+            auto [ec1, v1] = co_await gen.next();
+            BOOST_TEST(!ec1);
+            BOOST_TEST(v1.has_value());
+            BOOST_TEST(*v1 == "first");
+            got_first = true;
+
+            // Second next() — generator co_awaits the 1-hour timer.
+            // next_impl must re-install the forwarder so cancellation reaches
+            // the timer's co_spawn.
+            auto [ec2, v2] = co_await gen.next();
+            // After cancellation, we should get end-of-stream (nullopt).
+            second_completed = true;
+        },
+        [](std::exception_ptr) {});
+
+    // Run until the generator is suspended on the timer
+    ioc.run_for(std::chrono::milliseconds(50));
+    BOOST_TEST(got_first);
+    BOOST_TEST(!second_completed);
+
+    // Emit cancellation — mimics server shutdown.
+    // This must propagate through the re-installed forwarder to cancel the
+    // generator's timer co_spawn.
+    session_signal.emit(boost::asio::cancellation_type::all);
+
+    // Drain remaining work — the second next() should complete.
+    ioc.run_for(std::chrono::milliseconds(100));
+    BOOST_TEST(second_completed);
+}
+
 } // namespace

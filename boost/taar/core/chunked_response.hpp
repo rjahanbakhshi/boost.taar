@@ -177,10 +177,14 @@ public:
                     auto* inner_ptr = promise.flattening_inner_;
                     auto exec = *promise.executor_;
 
-                    auto completion_handler = [&promise, h, handler = std::move(handler)](
+                    auto alive = promise.alive_;
+                    auto completion_handler = [&promise, h, handler = std::move(handler), alive](
                         std::exception_ptr ep,
                         std::tuple<boost::system::error_code, std::optional<T>> result) mutable
                     {
+                        if (!*alive)
+                            return;
+
                         if (ep)
                         {
                             promise.exception_ = ep;
@@ -312,8 +316,11 @@ public:
                         co_return std::optional<U>{co_await std::move(aw)};
                     };
 
-                    auto completion_handler = [h, this](std::exception_ptr ep, std::optional<U> val) mutable
+                    auto alive = p.alive_;
+                    auto completion_handler = [h, this, alive](std::exception_ptr ep, std::optional<U> val) mutable
                     {
+                        if (!*alive)
+                            return;
                         if (ep)
                             eptr = ep;
                         else if (val)
@@ -382,8 +389,11 @@ public:
                         return;
                     }
 
-                    auto completion_handler = [h, this](std::exception_ptr ep) mutable
+                    auto alive = p.alive_;
+                    auto completion_handler = [h, this, alive](std::exception_ptr ep) mutable
                     {
+                        if (!*alive)
+                            return;
                         if (ep)
                             eptr = ep;
                         h.resume();
@@ -494,6 +504,10 @@ public:
         std::vector<chunked_set_header> headers_;
         bool data_yielded_ = false;
 
+        // Alive flag — shared with co_spawn completion handlers so they can
+        // detect that the coroutine frame has been destroyed.
+        std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
+
         // Per-operation cancellation signals (each co_spawn gets its own)
         std::shared_ptr<boost::asio::cancellation_signal> active_co_spawn_signal_;
         std::shared_ptr<boost::asio::cancellation_signal> flattening_cancel_signal_;
@@ -518,8 +532,7 @@ public:
     {
         if (this != &other)
         {
-            if (handle_)
-                handle_.destroy();
+            destroy_handle();
             handle_ = std::exchange(other.handle_, nullptr);
         }
         return *this;
@@ -530,8 +543,7 @@ public:
 
     ~chunked_response()
     {
-        if (handle_)
-            handle_.destroy();
+        destroy_handle();
     }
 
     void set_executor(executor_type executor)
@@ -645,16 +657,39 @@ private:
 
         auto& promise = handle_.promise();
 
+        // Re-install the cancellation forwarder on the external slot.
+        // ASIO's awaitable machinery calls clear_cancellation_slot() when the
+        // awaitable_handler fires (i.e., when the previous next() completed),
+        // which removes our forwarder.  Re-installing it here ensures
+        // cancellation can reach the generator's co_spawn for this call.
+        if (promise.cancellation_slot_ &&
+            promise.cancellation_slot_->is_connected())
+        {
+            promise.cancellation_slot_->assign(
+                [&promise](boost::asio::cancellation_type_t type)
+                {
+                    promise.internal_signal_.emit(type);
+                    if (promise.active_co_spawn_signal_)
+                        promise.active_co_spawn_signal_->emit(type);
+                    if (promise.flattening_cancel_signal_)
+                        promise.flattening_cancel_signal_->emit(type);
+                });
+        }
+
         // Check if we're in the middle of flattening an inner generator
         if (promise.flattening_inner_)
         {
             auto* inner = promise.flattening_inner_;
             auto exec = boost::asio::get_associated_executor(handler);
 
-            auto completion_handler = [this, handler = std::move(handler)](
+            auto alive = promise.alive_;
+            auto completion_handler = [this, handler = std::move(handler), alive](
                 std::exception_ptr ep,
                 std::tuple<boost::system::error_code, std::optional<T>> result) mutable
             {
+                if (!*alive)
+                    return;
+
                 auto& promise = handle_.promise();
 
                 if (ep)
@@ -753,6 +788,32 @@ private:
             };
 
         handle_.resume();
+    }
+
+    void destroy_handle() noexcept
+    {
+        if (handle_)
+        {
+            auto& promise = handle_.promise();
+            // Signal to any in-flight co_spawn completion handlers that the
+            // coroutine frame is gone — they must not access it.
+            *promise.alive_ = false;
+            // Cancel pending co_spawns so their wrapper frames are freed.
+            if (promise.active_co_spawn_signal_)
+                promise.active_co_spawn_signal_->emit(
+                    boost::asio::cancellation_type::all);
+            if (promise.flattening_cancel_signal_)
+                promise.flattening_cancel_signal_->emit(
+                    boost::asio::cancellation_type::all);
+            // Remove the forwarder lambda from the external cancellation slot
+            // to prevent it from firing with a dangling &promise after the
+            // coroutine frame is destroyed.
+            if (promise.cancellation_slot_ &&
+                promise.cancellation_slot_->is_connected())
+                promise.cancellation_slot_->clear();
+            handle_.destroy();
+            handle_ = nullptr;
+        }
     }
 
     handle_type handle_ = nullptr;
