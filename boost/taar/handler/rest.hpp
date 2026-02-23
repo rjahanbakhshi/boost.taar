@@ -24,7 +24,6 @@
 #include <boost/beast/http/field.hpp>
 #include <boost/beast/http/string_body.hpp>
 #include <boost/beast/http/message.hpp>
-#include <tuple>
 #include <utility>
 #include <type_traits>
 
@@ -93,7 +92,7 @@ inline auto rest_for_callable(
     ](request_type const& request, matcher::context const& context) mutable ->
         decltype(response_from_invoke(
             callable,
-            rest_arg<
+            wrapped_rest_arg<
                 type_traits::callable_arg<noref_fn_type, Indexes>,
                 ArgProvidersType
             > {arg_providers}(Indexes, request, context)...
@@ -101,7 +100,7 @@ inline auto rest_for_callable(
     {
         co_return co_await response_from_invoke(
             callable,
-            rest_arg<
+            wrapped_rest_arg<
                 type_traits::callable_arg<noref_fn_type, Indexes>,
                 ArgProvidersType
             > {arg_providers}(Indexes, request, context)...
@@ -142,7 +141,7 @@ inline auto rest_for_memfn(
         decltype(response_from_invoke(
             memfn,
             std::forward<ObjectType>(object),
-            rest_arg<
+            wrapped_rest_arg<
                 type_traits::callable_arg<noref_fn_type, Indexes>,
                 ArgProvidersType
             > {arg_providers}(Indexes, request, context)...
@@ -151,7 +150,7 @@ inline auto rest_for_memfn(
         co_return co_await response_from_invoke(
             memfn,
             std::forward<ObjectType>(object),
-            rest_arg<
+            wrapped_rest_arg<
                 type_traits::callable_arg<noref_fn_type, Indexes>,
                 ArgProvidersType
             > {arg_providers}(Indexes, request, context)...

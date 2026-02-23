@@ -152,14 +152,14 @@ with_default(T, U) -> with_default<std::remove_cvref_t<T>, std::remove_cvref_t<U
 
 // Generic rest_arg
 template <typename ArgType, typename ArgProviderType>
-struct rest_arg
+struct wrapped_rest_arg
 {
     using arg_type = std::remove_cvref_t<ArgType>;
     using arg_provider_type = std::remove_cvref_t<ArgProviderType>;
     using arg_provider_request_type = detail::arg_provider_request_t<arg_provider_type>;
     using arg_provider_result_type = detail::arg_provider_result_t<arg_provider_type>;
 
-    rest_arg(arg_provider_type arg_provider)
+    wrapped_rest_arg(arg_provider_type arg_provider)
         : arg_provider_ {std::move(arg_provider)}
     {}
 
@@ -582,6 +582,28 @@ struct url_encoded_form_data_arg
     }
 
     std::unordered_set<std::string> content_types_;
+};
+
+// REST arg provider returning the full target of the request. It can be used to
+// implement custom path or query param parsing logic that is not covered by
+// path_arg or query_arg. Note that the target includes both the path and the
+// query string (if any), but not the scheme or the authority.
+struct target_arg
+{
+    target_arg()
+    {}
+
+    std::string name() const
+    {
+        return "target";
+    }
+
+    boost::system::result<std::string> operator()(
+        boost::beast::http::request_header<> const& request,
+        matcher::context const&) const
+    {
+        return std::string{request.target()};
+    }
 };
 
 } // boost::taar::handler
