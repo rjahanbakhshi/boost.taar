@@ -110,6 +110,25 @@ BOOST_AUTO_TEST_CASE(test_rest_void)
     BOOST_TEST(resp2.count(http::field::content_type) == 0);
 }
 
+BOOST_AUTO_TEST_CASE(test_rest_fixed_value)
+{
+    namespace http = boost::beast::http;
+    namespace taar = boost::taar;
+    using taar::matcher::context;
+    using taar::handler::path_arg;
+
+    http::request<http::empty_body> req;
+    context ctx;
+    ctx.path_args = {{"a", "13"}};
+
+    auto rh1 = taar::handler::rest(
+        &voidfn,
+        path_arg("a"),
+        42);
+    auto resp1 = to_response(rh1(req, ctx));
+    BOOST_TEST(resp1.count(http::field::content_type) == 0);
+}
+
 struct const_obj_handler
 {
     std::string operator()() const { return "blah1"; }
@@ -161,6 +180,28 @@ BOOST_AUTO_TEST_CASE(test_rest_sum_target)
     auto resp_sum = to_response<http::string_body>(rh_sum(req, ctx));
     BOOST_TEST(resp_sum.body() == "55");
     BOOST_TEST(resp_sum[http::field::content_type] == "text/plain");
+}
+
+BOOST_AUTO_TEST_CASE(test_rest_reference_wrapper)
+{
+    namespace http = boost::beast::http;
+    namespace taar = boost::taar;
+    using taar::matcher::context;
+    using taar::handler::path_arg;
+
+    http::request<http::empty_body> req;
+    context ctx;
+    ctx.path_args = {{"a", "13"}};
+
+    int fixed = 42;
+    auto rh = taar::handler::rest(sum, path_arg("a"), std::ref(fixed));
+
+    auto resp1 = to_response<http::string_body>(rh(req, ctx));
+    BOOST_TEST(resp1.body() == "55");  // 13 + 42
+
+    fixed = 7;
+    auto resp2 = to_response<http::string_body>(rh(req, ctx));
+    BOOST_TEST(resp2.body() == "20");  // 13 + 7
 }
 
 BOOST_AUTO_TEST_CASE(test_rest_sum_query)

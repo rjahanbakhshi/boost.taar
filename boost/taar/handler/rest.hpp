@@ -63,12 +63,25 @@ struct common_requests_type<>
 template <typename... T>
 using common_requests_type_t = typename common_requests_type<T...>::type;
 
+template <typename T>
+struct safe_arg_type
+{
+    using nocvref_t = std::remove_cvref_t<T>;
+    using type = std::conditional_t<
+        std::is_same_v<nocvref_t, std::string_view>,
+        std::string,
+        nocvref_t>;
+};
+
+template <typename T>
+using safe_arg_type_t = typename safe_arg_type<T>::type;
+
 template <
     typename CallableType,
     std::size_t... Indexes,
     typename... ArgProvidersType>
 inline auto rest_for_callable(
-    CallableType callable,
+    CallableType&& callable,
     std::index_sequence<Indexes...>,
     ArgProvidersType... arg_providers)
 {
@@ -79,10 +92,6 @@ inline auto rest_for_callable(
         "The number of REST arguments providers must be equal to number of "
         "callable arguments.");
 
-    //static_assert(
-    //    (detail::is_rest_arg_provider<std::remove_cvref_t<ArgProvidersType>> && ...),
-    //    "Invalid REST arg provider!");
-
     using request_type = detail::common_requests_type_t<ArgProvidersType...>;
 
     return
@@ -92,18 +101,18 @@ inline auto rest_for_callable(
     ](request_type const& request, matcher::context const& context) mutable ->
         decltype(response_from_invoke(
             callable,
-            wrapped_rest_arg<
-                type_traits::callable_arg<noref_fn_type, Indexes>,
+            get_rest_arg<
+                safe_arg_type_t<type_traits::callable_arg<noref_fn_type, Indexes>>,
                 ArgProvidersType
-            > {arg_providers}(Indexes, request, context)...
+            > (arg_providers, Indexes, request, context)...
         ))
     {
         co_return co_await response_from_invoke(
             callable,
-            wrapped_rest_arg<
-                type_traits::callable_arg<noref_fn_type, Indexes>,
+            get_rest_arg<
+                safe_arg_type_t<type_traits::callable_arg<noref_fn_type, Indexes>>,
                 ArgProvidersType
-            > {arg_providers}(Indexes, request, context)...
+            > (arg_providers, Indexes, request, context)...
         );
     };
 }
@@ -126,10 +135,6 @@ inline auto rest_for_memfn(
         "The number of REST arguments providers must be equal to number of "
         "callable arguments.");
 
-    static_assert(
-        (detail::is_rest_arg_provider<ArgProvidersType> && ...),
-        "Invalid REST arg provider!");
-
     using request_type = detail::common_requests_type_t<ArgProvidersType...>;
 
     return
@@ -141,19 +146,19 @@ inline auto rest_for_memfn(
         decltype(response_from_invoke(
             memfn,
             std::forward<ObjectType>(object),
-            wrapped_rest_arg<
-                type_traits::callable_arg<noref_fn_type, Indexes>,
+            get_rest_arg<
+                safe_arg_type_t<type_traits::callable_arg<noref_fn_type, Indexes>>,
                 ArgProvidersType
-            > {arg_providers}(Indexes, request, context)...
+            > (arg_providers, Indexes, request, context)...
         ))
     {
         co_return co_await response_from_invoke(
             memfn,
             std::forward<ObjectType>(object),
-            wrapped_rest_arg<
-                type_traits::callable_arg<noref_fn_type, Indexes>,
+            get_rest_arg<
+                safe_arg_type_t<type_traits::callable_arg<noref_fn_type, Indexes>>,
                 ArgProvidersType
-            > {arg_providers}(Indexes, request, context)...
+            > (arg_providers, Indexes, request, context)...
         );
     };
 }

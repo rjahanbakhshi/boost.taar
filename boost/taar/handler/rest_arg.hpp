@@ -31,7 +31,7 @@
 #include <boost/json/value_to.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/system/result.hpp>
-#include <exception>
+#include <functional>
 #include <system_error>
 #include <unordered_set>
 #include <variant>
@@ -41,6 +41,7 @@
 #include <algorithm>
 #include <utility>
 #include <type_traits>
+#include <exception>
 
 namespace boost::taar::handler {
 namespace detail {
@@ -150,112 +151,99 @@ struct with_default
 template <typename T, typename U>
 with_default(T, U) -> with_default<std::remove_cvref_t<T>, std::remove_cvref_t<U>>;
 
-// Generic rest_arg
-template <typename ArgType, typename ArgProviderType>
-struct wrapped_rest_arg
+// Direct or lazy retrieval of REST arg value from the arg provider.
+template <typename ResultType, typename ArgProviderType, typename RequestType>
+ResultType get_rest_arg(
+    const ArgProviderType& arg_provider,
+    std::size_t index,
+    RequestType const& request,
+    matcher::context const& context)
 {
-    using arg_type = std::remove_cvref_t<ArgType>;
-    using arg_provider_type = std::remove_cvref_t<ArgProviderType>;
-    using arg_provider_request_type = detail::arg_provider_request_t<arg_provider_type>;
-    using arg_provider_result_type = detail::arg_provider_result_t<arg_provider_type>;
-
-    wrapped_rest_arg(arg_provider_type arg_provider)
-        : arg_provider_ {std::move(arg_provider)}
-    {}
-
-    arg_type operator()(
-        std::size_t index,
-        arg_provider_request_type const& request,
-        matcher::context const& context) &&
+    try
     {
-        try
+        if constexpr (detail::is_rest_arg_provider<ArgProviderType>)
         {
-            if constexpr (detail::is_rest_arg_provider<arg_provider_type>)
-            {
-                if constexpr (
-                    type_traits::specialization_of<with_default, arg_provider_type> &&
-                    rest_arg_castable<typename arg_provider_result_type::value_type, arg_type>)
-                {
-                    static_assert(
-                        rest_arg_castable<typename arg_provider_type::value_type, arg_type>,
-                        "Incompatible rest arg default value!");
+            using arg_provider_result_type = detail::arg_provider_result_t<ArgProviderType>;
 
-                    // It's necessary to store the retrieved value to make sure it outlives
-                    // the call operator. Case in point, std::string -> std::string_view
-                    provider_result_ = arg_provider_(request, context);
-                    if (provider_result_.has_error() &&
-                        provider_result_.error() == error::argument_not_found)
-                    {
-                        return rest_arg_cast<arg_type>(arg_provider_.default_value());
-                    }
-
-                    return rest_arg_cast<arg_type>(std::move(provider_result_.value()));
-                }
-                else if constexpr (type_traits::specialization_of<std::optional, arg_type>)
-                {
-                    if constexpr (rest_arg_castable<typename arg_provider_result_type::value_type, typename arg_type::value_type>)
-                    {
-                        // It's necessary to store the retrieved value to make sure it outlives
-                        // the call operator. Case in point, std::string -> std::string_view
-                        provider_result_ = arg_provider_(request, context);
-                        if (provider_result_.has_error() &&
-                            provider_result_.error() == error::argument_not_found)
-                        {
-                            return std::nullopt;
-                        }
-
-                        return rest_arg_cast<typename arg_type::value_type>(std::move(provider_result_.value()));
-                    }
-                    else
-                    {
-                        static_assert(
-                            type_traits::always_false<arg_provider_type, typename arg_type::value_type>,
-                            "Incompatible optional rest arg provider!");
-                    }
-                }
-                else if constexpr (rest_arg_castable<typename arg_provider_result_type::value_type, arg_type>)
-                {
-                    // It's necessary to store the retrieved value to make sure it outlives
-                    // the call operator. Case in point, std::string -> std::string_view
-                    provider_result_ = arg_provider_(request, context);
-                    return rest_arg_cast<arg_type>(std::move(provider_result_.value()));
-                }
-            }
-            else if constexpr (rest_arg_castable<arg_provider_type, arg_type>)
-            {
-                return rest_arg_cast<arg_type>(std::move(arg_provider_));
-            }
-            else
+            if constexpr (
+                type_traits::specialization_of<with_default, ArgProviderType> &&
+                rest_arg_castable<typename arg_provider_result_type::value_type, ResultType>)
             {
                 static_assert(
-                    type_traits::always_false<arg_provider_type, arg_type>,
-                    "Incompatible rest arg provider!");
+                    rest_arg_castable<typename ArgProviderType::value_type, ResultType>,
+                    "Incompatible rest arg default value!");
+
+                auto result = arg_provider(request, context);
+                if (result.has_error() &&
+                    result.error() == error::argument_not_found)
+                {
+                    return rest_arg_cast<ResultType>(arg_provider.default_value());
+                }
+
+                return rest_arg_cast<ResultType>(std::move(result.value()));
+            }
+            else if constexpr (type_traits::specialization_of<std::optional, ResultType>)
+            {
+                if constexpr (rest_arg_castable<typename arg_provider_result_type::value_type, typename ResultType::value_type>)
+                {
+                    auto result = arg_provider(request, context);
+                    if (result.has_error() &&
+                        result.error() == error::argument_not_found)
+                    {
+                        return std::nullopt;
+                    }
+
+                    return rest_arg_cast<typename ResultType::value_type>(std::move(result.value()));
+                }
+                else
+                {
+                    static_assert(
+                        type_traits::always_false<ArgProviderType, typename ResultType::value_type>,
+                        "Incompatible optional rest arg provider!");
+                }
+            }
+            else if constexpr (rest_arg_castable<typename arg_provider_result_type::value_type, ResultType>)
+            {
+                return rest_arg_cast<ResultType>(arg_provider(request, context).value());
             }
         }
-        catch(std::exception const& e)
+        else if constexpr (type_traits::specialization_of<
+            std::reference_wrapper,
+            std::remove_cvref_t<ArgProviderType>>)
         {
-            throw boost::system::system_error{
-                error::invalid_argument_format,
-                std::format(
-                    "{} - REST arg({}:{})",
-                    e.what(),
-                    index + 1,
-                    detail::arg_provider_name(arg_provider_))};
+            return rest_arg_cast<ResultType>(arg_provider.get());
         }
-        catch(...)
+        else if constexpr (rest_arg_castable<ArgProviderType, ResultType>)
         {
-            throw boost::system::system_error{
-                error::invalid_argument_format,
-                std::format(
-                    "REST arg({}:{})",
-                    index + 1,
-                    detail::arg_provider_name(arg_provider_))};
+            return rest_arg_cast<ResultType>(std::move(arg_provider));
+        }
+        else
+        {
+            static_assert(
+                type_traits::always_false<ArgProviderType, ResultType>,
+                "Incompatible rest arg provider!");
         }
     }
-
-    arg_provider_type arg_provider_;
-    arg_provider_result_type provider_result_;
-};
+    catch(std::exception const& e)
+    {
+        throw boost::system::system_error{
+            error::invalid_argument_format,
+            std::format(
+                "{} - REST arg({}:{})",
+                e.what(),
+                index + 1,
+                detail::arg_provider_name(arg_provider))};
+    }
+    catch(...)
+    {
+        throw boost::system::system_error{
+            error::invalid_argument_format,
+            std::format(
+                "REST arg({}:{})",
+                index + 1,
+                detail::arg_provider_name(arg_provider))};
+    }
+}
 
 // REST arg provider from the request path
 struct path_arg

@@ -39,6 +39,7 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_provider)
     static_assert(is_rest_arg_provider<cookie_arg>, "Failed!");
     static_assert(is_rest_arg_provider<string_body_arg>, "Failed!");
     static_assert(is_rest_arg_provider<json_body_arg>, "Failed!");
+    static_assert(!is_rest_arg_provider<std::reference_wrapper<int>>, "Failed!");
 }
 
 BOOST_AUTO_TEST_CASE(test_rest_arg)
@@ -46,7 +47,7 @@ BOOST_AUTO_TEST_CASE(test_rest_arg)
     namespace http = boost::beast::http;
     namespace taar = boost::taar;
     using taar::matcher::context;
-    using taar::handler::wrapped_rest_arg;
+    using taar::handler::get_rest_arg;
     using taar::handler::query_arg;
     using taar::handler::path_arg;
     using taar::handler::header_arg;
@@ -63,24 +64,24 @@ BOOST_AUTO_TEST_CASE(test_rest_arg)
     context ctx;
     ctx.path_args = {{"a", "13"}, {"b", "42"}};
 
-    BOOST_TEST((wrapped_rest_arg<int, query_arg>{query_arg("a")}(0, req, ctx) == 13));
-    BOOST_TEST((wrapped_rest_arg<std::string, query_arg>{query_arg("a")}(0, req, ctx) == "13"));
-    BOOST_TEST((wrapped_rest_arg<std::string_view, query_arg>{query_arg("a")}(0, req, ctx) == "13"));
+    BOOST_TEST((get_rest_arg<int, query_arg>(query_arg("a"), 0, req, ctx) == 13));
+    BOOST_TEST((get_rest_arg<std::string, query_arg>(query_arg("a"), 0, req, ctx) == "13"));
+    BOOST_TEST((get_rest_arg<std::string_view, query_arg>(query_arg("a"), 0, req, ctx) == "13"));
 
-    BOOST_TEST((wrapped_rest_arg<int, path_arg>{path_arg("a")}(0, req, ctx) == 13));
-    BOOST_TEST((wrapped_rest_arg<int, path_arg>{path_arg("b")}(0, req, ctx) == 42));
-    BOOST_TEST((wrapped_rest_arg<std::string, path_arg>{path_arg("b")}(0, req, ctx) == "42"));
+    BOOST_TEST((get_rest_arg<int, path_arg>(path_arg("a"), 0, req, ctx) == 13));
+    BOOST_TEST((get_rest_arg<int, path_arg>(path_arg("b"), 0, req, ctx) == 42));
+    BOOST_TEST((get_rest_arg<std::string, path_arg>(path_arg("b"), 0, req, ctx) == "42"));
 
-    BOOST_TEST((wrapped_rest_arg<std::string, header_arg>{header_arg("header1")}(0, req, ctx) == "value1"));
-    BOOST_TEST((wrapped_rest_arg<std::string_view, header_arg>{header_arg("header2")}(0, req, ctx) == "value2"));
-    BOOST_TEST((wrapped_rest_arg<std::string_view, header_arg>{header_arg("pi")}(0, req, ctx) == "3.14"));
-    BOOST_TEST((wrapped_rest_arg<float, header_arg>{header_arg("pi")}(0, req, ctx) == 3.14f));
-    BOOST_TEST((wrapped_rest_arg<double, header_arg>{header_arg("pi")}(0, req, ctx) == 3.14));
-    BOOST_TEST((wrapped_rest_arg<std::string, header_arg>{header_arg(http::field::host)}(0, req, ctx) == "boost.org"));
+    BOOST_TEST((get_rest_arg<std::string, header_arg>(header_arg("header1"), 0, req, ctx) == "value1"));
+    BOOST_TEST((get_rest_arg<std::string_view, header_arg>(header_arg("header2"), 0, req, ctx) == "value2"));
+    BOOST_TEST((get_rest_arg<std::string_view, header_arg>(header_arg("pi"), 0, req, ctx) == "3.14"));
+    BOOST_TEST((get_rest_arg<float, header_arg>(header_arg("pi"), 0, req, ctx) == 3.14f));
+    BOOST_TEST((get_rest_arg<double, header_arg>(header_arg("pi"), 0, req, ctx) == 3.14));
+    BOOST_TEST((get_rest_arg<std::string, header_arg>(header_arg(http::field::host), 0, req, ctx) == "boost.org"));
 
-    BOOST_TEST((wrapped_rest_arg<int, float>{3.14f}(0, req, ctx) == 3));
-    BOOST_TEST((wrapped_rest_arg<float, float>{3.14f}(0, req, ctx) == 3.14f));
-    BOOST_TEST((wrapped_rest_arg<std::string, char const*>{"Hi"}(0, req, ctx) == "Hi"));
+    BOOST_TEST((get_rest_arg<int, float>(3.14f, 0, req, ctx) == 3));
+    BOOST_TEST((get_rest_arg<float, float>(3.14f, 0, req, ctx) == 3.14f));
+    BOOST_TEST((get_rest_arg<std::string, char const*>("Hi", 0, req, ctx) == "Hi"));
 }
 
 BOOST_AUTO_TEST_CASE(test_rest_arg_optional)
@@ -88,7 +89,7 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_optional)
     namespace http = boost::beast::http;
     namespace taar = boost::taar;
     using taar::matcher::context;
-    using taar::handler::wrapped_rest_arg;
+    using taar::handler::get_rest_arg;
     using taar::handler::query_arg;
     using taar::handler::path_arg;
     using taar::handler::header_arg;
@@ -102,20 +103,20 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_optional)
     context ctx;
     ctx.path_args = {{"a", "13"}, {"b", "42"}};
 
-    BOOST_TEST((wrapped_rest_arg<std::optional<int>, query_arg>{query_arg("a")}(0, req, ctx) == 13));
-    BOOST_TEST((wrapped_rest_arg<std::optional<int>, query_arg>{query_arg("b")}(0, req, ctx) == std::nullopt));
-    BOOST_TEST((wrapped_rest_arg<std::optional<std::string>, query_arg>{query_arg("a")}(0, req, ctx) == "13"));
-    BOOST_TEST((wrapped_rest_arg<std::optional<std::string_view>, query_arg>{query_arg("b")}(0, req, ctx) == std::nullopt));
+    BOOST_TEST((get_rest_arg<std::optional<int>, query_arg>(query_arg("a"), 0, req, ctx) == 13));
+    BOOST_TEST((get_rest_arg<std::optional<int>, query_arg>(query_arg("b"), 0, req, ctx) == std::nullopt));
+    BOOST_TEST((get_rest_arg<std::optional<std::string>, query_arg>(query_arg("a"), 0, req, ctx) == "13"));
+    BOOST_TEST((get_rest_arg<std::optional<std::string_view>, query_arg>(query_arg("b"), 0, req, ctx) == std::nullopt));
 
-    BOOST_TEST((wrapped_rest_arg<std::optional<int>, path_arg>{path_arg("a")}(0, req, ctx) == 13));
-    BOOST_TEST((wrapped_rest_arg<std::optional<int>, path_arg>{path_arg("d")}(0, req, ctx) == std::nullopt));
-    BOOST_TEST((wrapped_rest_arg<std::optional<std::string>, path_arg>{path_arg("b")}(0, req, ctx) == "42"));
-    BOOST_TEST((wrapped_rest_arg<std::optional<std::string>, path_arg>{path_arg("c")}(0, req, ctx) == std::nullopt));
+    BOOST_TEST((get_rest_arg<std::optional<int>, path_arg>(path_arg("a"), 0, req, ctx) == 13));
+    BOOST_TEST((get_rest_arg<std::optional<int>, path_arg>(path_arg("d"), 0, req, ctx) == std::nullopt));
+    BOOST_TEST((get_rest_arg<std::optional<std::string>, path_arg>(path_arg("b"), 0, req, ctx) == "42"));
+    BOOST_TEST((get_rest_arg<std::optional<std::string>, path_arg>(path_arg("c"), 0, req, ctx) == std::nullopt));
 
-    BOOST_TEST((wrapped_rest_arg<std::optional<std::string>, header_arg>{header_arg("header1")}(0, req, ctx) == "value1"));
-    BOOST_TEST((wrapped_rest_arg<std::optional<std::string>, header_arg>{header_arg("header2")}(0, req, ctx) == std::nullopt));
-    BOOST_TEST((wrapped_rest_arg<std::optional<float>, header_arg>{header_arg("pi")}(0, req, ctx) == 3.14f));
-    BOOST_TEST((wrapped_rest_arg<std::optional<float>, header_arg>{header_arg("di")}(0, req, ctx) == std::nullopt));
+    BOOST_TEST((get_rest_arg<std::optional<std::string>, header_arg>(header_arg("header1"), 0, req, ctx) == "value1"));
+    BOOST_TEST((get_rest_arg<std::optional<std::string>, header_arg>(header_arg("header2"), 0, req, ctx) == std::nullopt));
+    BOOST_TEST((get_rest_arg<std::optional<float>, header_arg>(header_arg("pi"), 0, req, ctx) == 3.14f));
+    BOOST_TEST((get_rest_arg<std::optional<float>, header_arg>(header_arg("di"), 0, req, ctx) == std::nullopt));
 }
 
 BOOST_AUTO_TEST_CASE(test_rest_arg_multiple_headers)
@@ -123,7 +124,7 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_multiple_headers)
     namespace http = boost::beast::http;
     namespace taar = boost::taar;
     using taar::matcher::context;
-    using taar::handler::wrapped_rest_arg;
+    using taar::handler::get_rest_arg;
     using taar::handler::header_arg;
     using taar::error;
 
@@ -132,12 +133,12 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_multiple_headers)
     http::request<http::string_body> req1{http::verb::get, "", 10};
     req1.insert(http::field::host, "host1");
     req1.insert(http::field::host, "host1");
-    BOOST_TEST((wrapped_rest_arg<std::string, header_arg>{header_arg(http::field::host)}(0, req1, ctx) == "host1"));
+    BOOST_TEST((get_rest_arg<std::string, header_arg>(header_arg(http::field::host), 0, req1, ctx) == "host1"));
 
     http::request<http::string_body> req2{http::verb::get, "", 10};
     req2.insert(http::field::host, "host1");
     req2.insert(http::field::host, "host2");
-    BOOST_REQUIRE_THROW((wrapped_rest_arg<std::string, header_arg>{header_arg(http::field::host)}(0, req2, ctx)), boost::system::system_error);
+    BOOST_REQUIRE_THROW((get_rest_arg<std::string, header_arg>(header_arg(http::field::host), 0, req2, ctx)), boost::system::system_error);
 }
 
 BOOST_AUTO_TEST_CASE(test_rest_arg_cookie)
@@ -145,7 +146,7 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_cookie)
     namespace http = boost::beast::http;
     namespace taar = boost::taar;
     using taar::matcher::context;
-    using taar::handler::wrapped_rest_arg;
+    using taar::handler::get_rest_arg;
     using taar::handler::cookie_arg;
     using taar::error;
 
@@ -153,24 +154,24 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_cookie)
     req.set(http::field::cookie, "cookie1=value1; cookie2=value2;cookie3=value3");
     context ctx;
 
-    BOOST_TEST((wrapped_rest_arg<std::string, cookie_arg>{cookie_arg("cookie1")}(0, req, ctx) == "value1"));
-    BOOST_TEST((wrapped_rest_arg<std::string, cookie_arg>{cookie_arg("cookie2")}(0, req, ctx) == "value2"));
-    BOOST_TEST((wrapped_rest_arg<std::string, cookie_arg>{cookie_arg("cookie3")}(0, req, ctx) == "value3"));
+    BOOST_TEST((get_rest_arg<std::string, cookie_arg>(cookie_arg("cookie1"), 0, req, ctx) == "value1"));
+    BOOST_TEST((get_rest_arg<std::string, cookie_arg>(cookie_arg("cookie2"), 0, req, ctx) == "value2"));
+    BOOST_TEST((get_rest_arg<std::string, cookie_arg>(cookie_arg("cookie3"), 0, req, ctx) == "value3"));
 
     req.set(http::field::cookie, "cookie1=");
-    BOOST_TEST((wrapped_rest_arg<std::string, cookie_arg>{cookie_arg("cookie1")}(0, req, ctx) == ""));
+    BOOST_TEST((get_rest_arg<std::string, cookie_arg>(cookie_arg("cookie1"), 0, req, ctx) == ""));
 
     req.set(http::field::cookie, "");
-    BOOST_REQUIRE_THROW((wrapped_rest_arg<std::string, cookie_arg>{cookie_arg("cookie1")}(0, req, ctx)), boost::system::system_error);
+    BOOST_REQUIRE_THROW((get_rest_arg<std::string, cookie_arg>(cookie_arg("cookie1"), 0, req, ctx)), boost::system::system_error);
 
     req.set(http::field::cookie, "cookie1");
-    BOOST_REQUIRE_THROW((wrapped_rest_arg<std::string, cookie_arg>{cookie_arg("cookie1")}(0, req, ctx)), boost::system::system_error);
+    BOOST_REQUIRE_THROW((get_rest_arg<std::string, cookie_arg>(cookie_arg("cookie1"), 0, req, ctx)), boost::system::system_error);
 
     req.set(http::field::cookie, "cookie1;");
-    BOOST_REQUIRE_THROW((wrapped_rest_arg<std::string, cookie_arg>{cookie_arg("cookie1")}(0, req, ctx)), boost::system::system_error);
+    BOOST_REQUIRE_THROW((get_rest_arg<std::string, cookie_arg>(cookie_arg("cookie1"), 0, req, ctx)), boost::system::system_error);
 
     req.set(http::field::cookie, ";");
-    BOOST_REQUIRE_THROW((wrapped_rest_arg<std::string, cookie_arg>{cookie_arg("cookie1")}(0, req, ctx)), boost::system::system_error);
+    BOOST_REQUIRE_THROW((get_rest_arg<std::string, cookie_arg>(cookie_arg("cookie1"), 0, req, ctx)), boost::system::system_error);
 }
 
 BOOST_AUTO_TEST_CASE(test_rest_arg_string_body)
@@ -178,7 +179,7 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_string_body)
     namespace http = boost::beast::http;
     namespace taar = boost::taar;
     using taar::matcher::context;
-    using taar::handler::wrapped_rest_arg;
+    using taar::handler::get_rest_arg;
     using taar::handler::string_body_arg;
     using taar::handler::all_content_types;
 
@@ -189,27 +190,23 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_string_body)
     context ctx;
 
     BOOST_TEST((
-        wrapped_rest_arg<std::string, string_body_arg>{string_body_arg()}(0, req, ctx) ==
+        get_rest_arg<std::string, string_body_arg>(string_body_arg(), 0, req, ctx) ==
         "Hello world!"));
 
     BOOST_TEST((
-        wrapped_rest_arg<std::string_view, string_body_arg>{string_body_arg()}(0, req, ctx) ==
+        get_rest_arg<std::string, string_body_arg>(string_body_arg("text/plain"), 0, req, ctx) ==
         "Hello world!"));
 
     BOOST_TEST((
-        wrapped_rest_arg<std::string, string_body_arg>{string_body_arg("text/plain")}(0, req, ctx) ==
+        get_rest_arg<std::string, string_body_arg>(string_body_arg("text/plain", "application/json"), 0, req, ctx) ==
         "Hello world!"));
 
     BOOST_TEST((
-        wrapped_rest_arg<std::string, string_body_arg>{string_body_arg("text/plain", "application/json")}(0, req, ctx) ==
-        "Hello world!"));
-
-    BOOST_TEST((
-        wrapped_rest_arg<std::string, string_body_arg>{string_body_arg(all_content_types)}(0, req, ctx) ==
+        get_rest_arg<std::string, string_body_arg>(string_body_arg(all_content_types), 0, req, ctx) ==
         "Hello world!"));
 
     BOOST_CHECK_THROW(
-        (wrapped_rest_arg<std::string, string_body_arg>{string_body_arg("image/png")}(0, req, ctx)),
+        (get_rest_arg<std::string, string_body_arg>(string_body_arg("image/png"), 0, req, ctx)),
         boost::system::system_error);
 }
 
@@ -218,7 +215,7 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_json_body)
     namespace http = boost::beast::http;
     namespace taar = boost::taar;
     using taar::matcher::context;
-    using taar::handler::wrapped_rest_arg;
+    using taar::handler::get_rest_arg;
     using taar::handler::json_body_arg;
     using taar::handler::all_content_types;
 
@@ -229,23 +226,23 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_json_body)
     context ctx;
 
     BOOST_TEST((
-      wrapped_rest_arg<boost::json::value, json_body_arg>{json_body_arg()}(0, req, ctx) ==
+      get_rest_arg<boost::json::value, json_body_arg>(json_body_arg(), 0, req, ctx) ==
       boost::json::value{{"everything", 42}}));
 
     BOOST_TEST((
-      wrapped_rest_arg<boost::json::value, json_body_arg>{json_body_arg("application/json")}(0, req, ctx) ==
+      get_rest_arg<boost::json::value, json_body_arg>(json_body_arg("application/json"), 0, req, ctx) ==
       boost::json::value{{"everything", 42}}));
 
     BOOST_TEST((
-      wrapped_rest_arg<boost::json::value, json_body_arg>{json_body_arg(all_content_types)}(0, req, ctx) ==
+      get_rest_arg<boost::json::value, json_body_arg>(json_body_arg(all_content_types), 0, req, ctx) ==
       boost::json::value{{"everything", 42}}));
 
     BOOST_TEST((
-      wrapped_rest_arg<boost::json::value, json_body_arg>{json_body_arg("application/json", "text/plain")}(0, req, ctx) ==
+      get_rest_arg<boost::json::value, json_body_arg>(json_body_arg("application/json", "text/plain"), 0, req, ctx) ==
       boost::json::value{{"everything", 42}}));
 
     BOOST_CHECK_THROW(
-        (wrapped_rest_arg<boost::json::value, json_body_arg>{json_body_arg("text/plain")}(0, req, ctx)),
+        (get_rest_arg<boost::json::value, json_body_arg>(json_body_arg("text/plain"), 0, req, ctx)),
         boost::system::system_error);
 }
 
@@ -254,7 +251,7 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_url_encoded_form_data)
     namespace http = boost::beast::http;
     namespace taar = boost::taar;
     using taar::matcher::context;
-    using taar::handler::wrapped_rest_arg;
+    using taar::handler::get_rest_arg;
     using taar::handler::url_encoded_form_data_arg;
     using taar::handler::all_content_types;
     using taar::form_kvp;
@@ -271,24 +268,41 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_url_encoded_form_data)
         {"hello world", "13 42"}};
 
     BOOST_TEST((
-      wrapped_rest_arg<form_kvp, url_encoded_form_data_arg>{url_encoded_form_data_arg()}(0, req, ctx) ==
+      get_rest_arg<form_kvp, url_encoded_form_data_arg>(url_encoded_form_data_arg(), 0, req, ctx) ==
       expected_result));
 
     BOOST_TEST((
-      wrapped_rest_arg<form_kvp, url_encoded_form_data_arg>{url_encoded_form_data_arg("application/x-www-form-urlencoded")}(0, req, ctx) ==
+      get_rest_arg<form_kvp, url_encoded_form_data_arg>(url_encoded_form_data_arg("application/x-www-form-urlencoded"), 0, req, ctx) ==
       expected_result));
 
     BOOST_TEST((
-      wrapped_rest_arg<form_kvp, url_encoded_form_data_arg>{url_encoded_form_data_arg(all_content_types)}(0, req, ctx) ==
+      get_rest_arg<form_kvp, url_encoded_form_data_arg>(url_encoded_form_data_arg(all_content_types), 0, req, ctx) ==
       expected_result));
 
     BOOST_TEST((
-      wrapped_rest_arg<form_kvp, url_encoded_form_data_arg>{url_encoded_form_data_arg("application/x-www-form-urlencoded", "text/plain")}(0, req, ctx) ==
+      get_rest_arg<form_kvp, url_encoded_form_data_arg>(url_encoded_form_data_arg("application/x-www-form-urlencoded", "text/plain"), 0, req, ctx) ==
       expected_result));
 
     BOOST_CHECK_THROW(
-        (wrapped_rest_arg<form_kvp, url_encoded_form_data_arg>{url_encoded_form_data_arg("text/plain")}(0, req, ctx)),
+        (get_rest_arg<form_kvp, url_encoded_form_data_arg>(url_encoded_form_data_arg("text/plain"), 0, req, ctx)),
         boost::system::system_error);
+}
+
+BOOST_AUTO_TEST_CASE(test_rest_arg_reference_wrapper)
+{
+    namespace http = boost::beast::http;
+    namespace taar = boost::taar;
+    using taar::matcher::context;
+    using taar::handler::get_rest_arg;
+
+    http::request<http::string_body> req{http::verb::get, "/", 10};
+    context ctx;
+
+    int value = 42;
+    BOOST_TEST((get_rest_arg<int>(std::ref(value), 0, req, ctx) == 42));
+
+    value = 100;
+    BOOST_TEST((get_rest_arg<int>(std::ref(value), 0, req, ctx) == 100));
 }
 
 BOOST_AUTO_TEST_CASE(test_rest_arg_target)
@@ -296,13 +310,13 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_target)
     namespace http = boost::beast::http;
     namespace taar = boost::taar;
     using taar::matcher::context;
-    using taar::handler::wrapped_rest_arg;
+    using taar::handler::get_rest_arg;
     using taar::handler::target_arg;
 
     http::request<http::string_body> req{http::verb::get, "/hello/world?a=13", 10};
     context ctx;
 
-    BOOST_TEST((wrapped_rest_arg<std::string, target_arg>{target_arg()}(0, req, ctx) == "/hello/world?a=13"));
+    BOOST_TEST((get_rest_arg<std::string, target_arg>(target_arg(), 0, req, ctx) == "/hello/world?a=13"));
 }
 
 BOOST_AUTO_TEST_CASE(test_rest_arg_with_default)
@@ -310,7 +324,7 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_with_default)
     namespace http = boost::beast::http;
     namespace taar = boost::taar;
     using taar::matcher::context;
-    using taar::handler::wrapped_rest_arg;
+    using taar::handler::get_rest_arg;
     using taar::handler::query_arg;
     using taar::handler::header_arg;
     using taar::handler::with_default;
@@ -332,14 +346,14 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_with_default)
         with_default(query_arg("qval3"), false).name() ==
         header_arg("qval3").name());
 
-    BOOST_TEST((wrapped_rest_arg<int, with_default<query_arg, int>>{with_default(query_arg("qval1"), 42)}(0, req, ctx) == 13));
-    BOOST_TEST((wrapped_rest_arg<int, with_default<query_arg, int>>{with_default(query_arg("qval2"), 42)}(0, req, ctx) == 42));
-    BOOST_TEST((wrapped_rest_arg<std::string, with_default<header_arg, char const*>>{with_default(header_arg("hval1"), "world")}(0, req, ctx) == "Hello"));
-    BOOST_TEST((wrapped_rest_arg<std::string_view, with_default<header_arg, char const*>>{with_default(header_arg("hval2"), "world")}(0, req, ctx) == "world"));
-    BOOST_TEST((wrapped_rest_arg<int, with_default<query_arg, bool>>{with_default(query_arg("qval3"), false)}(0, req, ctx) == false));
+    BOOST_TEST((get_rest_arg<int, with_default<query_arg, int>>(with_default(query_arg("qval1"), 42), 0, req, ctx) == 13));
+    BOOST_TEST((get_rest_arg<int, with_default<query_arg, int>>(with_default(query_arg("qval2"), 42), 0, req, ctx) == 42));
+    BOOST_TEST((get_rest_arg<std::string, with_default<header_arg, char const*>>(with_default(header_arg("hval1"), "world"), 0, req, ctx) == "Hello"));
+    BOOST_TEST((get_rest_arg<std::string_view, with_default<header_arg, char const*>>(with_default(header_arg("hval2"), "world"), 0, req, ctx) == "world"));
+    BOOST_TEST((get_rest_arg<int, with_default<query_arg, bool>>(with_default(query_arg("qval3"), false), 0, req, ctx) == false));
 
     //BOOST_TEST((
-    //  rest_arg<int, with_default<query_arg, int>>{with_default(query_arg("qval1"), 42)}(0, req, ctx) == 13));
+    //  rest_arg<int, with_default<query_arg, int>>{with_default(query_arg("qval1"), 42), 0, req, ctx) == 13));
 }
 
 } // namespace
