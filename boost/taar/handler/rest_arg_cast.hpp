@@ -13,6 +13,8 @@
 #include <boost/taar/handler/rest_arg_cast_tag.hpp>
 #include <boost/taar/core/error.hpp>
 #include <boost/taar/type_traits/numeric_type.hpp>
+#include <boost/taar/type_traits/container_like.hpp>
+#include <boost/taar/type_traits/string_like.hpp>
 #include <boost/taar/type_traits/always_false.hpp>
 #include <boost/json/value.hpp>
 #include <boost/json/value_to.hpp>
@@ -24,6 +26,11 @@
 #include <type_traits>
 
 namespace boost::taar::handler {
+
+// Forward declaration — defined after the detail namespace.
+template <typename ToType, typename FromType>
+inline constexpr decltype(auto) rest_arg_cast(FromType const& from);
+
 namespace detail {
 
 template <typename ToType>
@@ -164,6 +171,12 @@ inline ToType tag_invoke(rest_arg_cast_built_in_tag<ToType>, FromType const& jv)
     return boost::json::value_to<ToType>(jv);
 }
 
+// From a string-like type to std::string.
+inline std::string tag_invoke(rest_arg_cast_built_in_tag<std::string>, std::string_view from)
+{
+    return std::string(from);
+}
+
 // Safe-form casts: these overloads return std::string (an owning type)
 // rather than the requested non-owning view type, preventing dangling
 // references. The safe_arg_type_t mechanism in rest.hpp detects these
@@ -176,6 +189,62 @@ inline std::string tag_invoke(rest_arg_cast_built_in_tag<std::string_view>, std:
 inline std::string tag_invoke(rest_arg_cast_built_in_tag<char const*>, std::string from)
 {
     return from;
+}
+
+// From a string-like type to a container of elements that can be rest_arg_cast
+// from string-like types. The string is parsed as a comma-separated list of
+// elements, which are trimmed and cast to the value type of the target container,
+// and then pushed into the container. This allows convenient parsing of simple
+// lists like "1,2,3" into std::vector<int>.
+template <typename FromType, typename ToType> requires (
+    type_traits::string_like<FromType> &&
+    !std::same_as<ToType, std::string> &&
+    !std::same_as<ToType, std::wstring> &&
+    !std::same_as<ToType, std::u8string> &&
+    !std::same_as<ToType, std::u16string> &&
+    !std::same_as<ToType, std::u32string> &&
+    !std::same_as<ToType, std::string_view> &&
+    !std::same_as<ToType, std::wstring_view> &&
+    !std::same_as<ToType, std::u8string_view> &&
+    !std::same_as<ToType, std::u16string_view> &&
+    !std::same_as<ToType, std::u32string_view> &&
+    type_traits::container_like<ToType> && (
+        type_traits::push_backable_container<ToType, typename ToType::value_type> ||
+        type_traits::insertable_container<ToType, typename ToType::value_type>))
+inline ToType tag_invoke(rest_arg_cast_built_in_tag<ToType>, FromType const& from)
+{
+    using value_type = typename ToType::value_type;
+
+    ToType result;
+    auto const sv = std::string_view(from);
+
+    // Parse from as csv, cast each element to the value type of the target type,
+    // and push them into the result container.
+    std::size_t start = 0;
+    while (start < sv.size())
+    {
+        auto end = sv.find(',', start);
+        if (end == std::string_view::npos)
+        {
+            end = sv.size();
+        }
+
+        auto trim = [](std::string_view s) noexcept -> std::string_view {
+            auto const s_start = s.find_first_not_of(" \t\r\n");
+            if (s_start == std::string_view::npos) return {};
+            auto const s_end = s.find_last_not_of(" \t\r\n");
+            return s.substr(s_start, s_end - s_start + 1);
+        };
+        auto element_str = trim(std::string_view(sv.data() + start, end - start));
+        if constexpr (type_traits::push_backable_container<ToType, value_type>)
+            result.push_back(rest_arg_cast<value_type>(element_str));
+        else
+            result.insert(rest_arg_cast<value_type>(element_str));
+
+        start = end + 1;
+    }
+
+    return result;
 }
 
 // Check if there is a user-defined rest_arg_cast from FromType to ToType.

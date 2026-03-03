@@ -9,13 +9,18 @@
 
 #include <boost/system/system_error.hpp>
 #include <boost/taar/handler/rest_arg_cast.hpp>
+#include <boost/taar/type_traits/container_like.hpp>
 #include <boost/json/value_from.hpp>
 #include <boost/test/unit_test.hpp>
+#include <list>
+#include <set>
+#include <vector>
 
 namespace {
 
 using boost::taar::handler::rest_arg_castable;
 using boost::taar::handler::rest_arg_cast;
+namespace type_traits = boost::taar::type_traits;
 
 struct jsonable
 {
@@ -81,6 +86,24 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_cast_builtin_traits)
     static_assert(rest_arg_castable<boost::json::value, jsonable>, "Failed!");
     static_assert(rest_arg_castable<std::string&, char const*>, "Failed!");
     static_assert(rest_arg_castable<bool, bool>, "Failed!");
+
+    // container_like concepts
+    static_assert(type_traits::container_like<std::vector<int>>, "Failed!");
+    static_assert(type_traits::container_like<std::list<std::string>>, "Failed!");
+    static_assert(type_traits::container_like<std::set<int>>, "Failed!");
+    static_assert(!type_traits::container_like<int>, "Failed!");
+    static_assert(!type_traits::container_like<bool>, "Failed!");
+
+    static_assert(type_traits::push_backable_container<std::vector<int>, int>, "Failed!");
+    static_assert(!type_traits::push_backable_container<std::set<int>, int>, "Failed!");
+    static_assert(type_traits::insertable_container<std::set<int>, int>, "Failed!");
+    static_assert(!type_traits::insertable_container<std::vector<int>, int>, "Failed!");
+
+    // CSV castability
+    static_assert(rest_arg_castable<std::string, std::vector<int>>, "Failed!");
+    static_assert(rest_arg_castable<std::string, std::vector<std::string>>, "Failed!");
+    static_assert(rest_arg_castable<std::string_view, std::vector<float>>, "Failed!");
+    static_assert(rest_arg_castable<std::string, std::string>, "Failed!");  // identity, not CSV
 }
 
 BOOST_AUTO_TEST_CASE(test_rest_arg_cast_builtin)
@@ -107,6 +130,33 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_cast_builtin)
     BOOST_TEST(rest_arg_cast<std::string_view>(false) == "0");
     BOOST_TEST(rest_arg_cast<char const*>(true) == std::string_view("1"));
     BOOST_TEST((rest_arg_cast<jsonable>(boost::json::value({{"i", 13}, {"s", "Hello"}})) == jsonable{13, "Hello"}));
+}
+
+BOOST_AUTO_TEST_CASE(test_rest_arg_cast_csv)
+{
+    // Basic numeric
+    BOOST_TEST((rest_arg_cast<std::vector<int>>("1,2,3") == std::vector<int>{1, 2, 3}));
+    // Single element
+    BOOST_TEST((rest_arg_cast<std::vector<int>>("42") == std::vector<int>{42}));
+    // Empty input → empty container
+    BOOST_TEST((rest_arg_cast<std::vector<int>>("") == std::vector<int>{}));
+    // String elements
+    BOOST_TEST((rest_arg_cast<std::vector<std::string>>("a,b,c") == std::vector<std::string>{"a", "b", "c"}));
+    // Float elements
+    auto floats = rest_arg_cast<std::vector<float>>("1.0,2.5");
+    BOOST_TEST(floats.size() == 2u);
+    BOOST_TEST(floats[0] == 1.0f);
+    BOOST_TEST(floats[1] == 2.5f);
+    // Whitespace is trimmed from each element
+    BOOST_TEST((rest_arg_cast<std::vector<int>>("1, 2, 3") == std::vector<int>{1, 2, 3}));
+    BOOST_TEST((rest_arg_cast<std::vector<int>>(" 1 , 2 , 3 ") == std::vector<int>{1, 2, 3}));
+    BOOST_TEST((rest_arg_cast<std::vector<std::string>>("a , b , c") == std::vector<std::string>{"a", "b", "c"}));
+    // Empty element (after trim) throws
+    BOOST_REQUIRE_THROW((rest_arg_cast<std::vector<int>>("1,,3")), boost::system::system_error);
+    // All-whitespace element (trimmed to empty) throws
+    BOOST_REQUIRE_THROW((rest_arg_cast<std::vector<int>>("1,  ,3")), boost::system::system_error);
+    // insertable_container path (std::set)
+    BOOST_TEST((rest_arg_cast<std::set<int>>("3,1,2") == std::set<int>{1, 2, 3}));
 }
 
 } // namespace

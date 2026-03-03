@@ -62,6 +62,7 @@ target_sources(
         boost/taar/session/http.hpp
         boost/taar/type_traits/always_false.hpp
         boost/taar/type_traits/callable.hpp
+        boost/taar/type_traits/container_like.hpp
         boost/taar/type_traits/has_call_operator.hpp
         boost/taar/type_traits/numeric_type.hpp
         boost/taar/type_traits/specialization_of.hpp
