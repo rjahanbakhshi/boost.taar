@@ -63,19 +63,6 @@ struct common_requests_type<>
 template <typename... T>
 using common_requests_type_t = typename common_requests_type<T...>::type;
 
-template <typename T>
-struct safe_arg_type
-{
-    using nocvref_t = std::remove_cvref_t<T>;
-    using type = std::conditional_t<
-        std::is_same_v<nocvref_t, std::string_view>,
-        std::string,
-        nocvref_t>;
-};
-
-template <typename T>
-using safe_arg_type_t = typename safe_arg_type<T>::type;
-
 template <
     typename CallableType,
     std::size_t... Indexes,
@@ -102,7 +89,7 @@ inline auto rest_for_callable(
         decltype(response_from_invoke(
             callable,
             get_rest_arg<
-                safe_arg_type_t<type_traits::callable_arg<noref_fn_type, Indexes>>,
+                type_traits::callable_arg<noref_fn_type, Indexes>,
                 ArgProvidersType
             > (arg_providers, Indexes, request, context)...
         ))
@@ -110,7 +97,7 @@ inline auto rest_for_callable(
         co_return co_await response_from_invoke(
             callable,
             get_rest_arg<
-                safe_arg_type_t<type_traits::callable_arg<noref_fn_type, Indexes>>,
+                type_traits::callable_arg<noref_fn_type, Indexes>,
                 ArgProvidersType
             > (arg_providers, Indexes, request, context)...
         );
@@ -147,7 +134,7 @@ inline auto rest_for_memfn(
             memfn,
             std::forward<ObjectType>(object),
             get_rest_arg<
-                safe_arg_type_t<type_traits::callable_arg<noref_fn_type, Indexes>>,
+                type_traits::callable_arg<noref_fn_type, Indexes>,
                 ArgProvidersType
             > (arg_providers, Indexes, request, context)...
         ))
@@ -156,7 +143,7 @@ inline auto rest_for_memfn(
             memfn,
             std::forward<ObjectType>(object),
             get_rest_arg<
-                safe_arg_type_t<type_traits::callable_arg<noref_fn_type, Indexes>>,
+                type_traits::callable_arg<noref_fn_type, Indexes>,
                 ArgProvidersType
             > (arg_providers, Indexes, request, context)...
         );

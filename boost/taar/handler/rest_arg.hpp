@@ -152,13 +152,14 @@ template <typename T, typename U>
 with_default(T, U) -> with_default<std::remove_cvref_t<T>, std::remove_cvref_t<U>>;
 
 // Direct or lazy retrieval of REST arg value from the arg provider.
-template <typename ResultType, typename ArgProviderType, typename RequestType>
-ResultType get_rest_arg(
-    const ArgProviderType& arg_provider,
+template <typename HandlerArgType, typename ArgProviderType, typename RequestType>
+auto get_rest_arg(
+    ArgProviderType const& arg_provider,
     std::size_t index,
     RequestType const& request,
     matcher::context const& context)
 {
+    using handler_arg_no_cv_type = std::remove_cvref_t<HandlerArgType>;
     try
     {
         if constexpr (detail::is_rest_arg_provider<ArgProviderType>)
@@ -167,60 +168,66 @@ ResultType get_rest_arg(
 
             if constexpr (
                 type_traits::specialization_of<with_default, ArgProviderType> &&
-                rest_arg_castable<typename arg_provider_result_type::value_type, ResultType>)
+                rest_arg_castable<typename arg_provider_result_type::value_type, handler_arg_no_cv_type>)
             {
                 static_assert(
-                    rest_arg_castable<typename ArgProviderType::value_type, ResultType>,
+                    rest_arg_castable<typename ArgProviderType::value_type, handler_arg_no_cv_type>,
                     "Incompatible rest arg default value!");
 
                 auto result = arg_provider(request, context);
                 if (result.has_error() &&
                     result.error() == error::argument_not_found)
                 {
-                    return rest_arg_cast<ResultType>(arg_provider.default_value());
+                    return rest_arg_cast<handler_arg_no_cv_type>(arg_provider.default_value());
                 }
 
-                return rest_arg_cast<ResultType>(std::move(result.value()));
+                return rest_arg_cast<handler_arg_no_cv_type>(std::move(result.value()));
             }
-            else if constexpr (type_traits::specialization_of<std::optional, ResultType>)
+            else if constexpr (type_traits::specialization_of<std::optional, handler_arg_no_cv_type>)
             {
-                if constexpr (rest_arg_castable<typename arg_provider_result_type::value_type, typename ResultType::value_type>)
+                if constexpr (rest_arg_castable<
+                    typename arg_provider_result_type::value_type,
+                    typename handler_arg_no_cv_type::value_type>)
                 {
                     auto result = arg_provider(request, context);
                     if (result.has_error() &&
                         result.error() == error::argument_not_found)
                     {
-                        return std::nullopt;
+                        return std::optional<rest_arg_cast_result_t<
+                            typename handler_arg_no_cv_type::value_type,
+                            typename arg_provider_result_type::value_type>>{std::nullopt};
                     }
 
-                    return rest_arg_cast<typename ResultType::value_type>(std::move(result.value()));
+                    return std::make_optional(
+                        rest_arg_cast<typename handler_arg_no_cv_type::value_type>(
+                            std::move(result.value())));
                 }
                 else
                 {
                     static_assert(
-                        type_traits::always_false<ArgProviderType, typename ResultType::value_type>,
+                        type_traits::always_false<ArgProviderType, typename handler_arg_no_cv_type::value_type>,
                         "Incompatible optional rest arg provider!");
                 }
             }
-            else if constexpr (rest_arg_castable<typename arg_provider_result_type::value_type, ResultType>)
+            else if constexpr (rest_arg_castable<typename arg_provider_result_type::value_type, handler_arg_no_cv_type>)
             {
-                return rest_arg_cast<ResultType>(arg_provider(request, context).value());
+                return rest_arg_cast<handler_arg_no_cv_type>(arg_provider(request, context).value());
             }
         }
         else if constexpr (type_traits::specialization_of<
             std::reference_wrapper,
             std::remove_cvref_t<ArgProviderType>>)
         {
-            return rest_arg_cast<ResultType>(arg_provider.get());
+            return rest_arg_cast<handler_arg_no_cv_type>(arg_provider.get());
         }
-        else if constexpr (rest_arg_castable<ArgProviderType, ResultType>)
+        else if constexpr (rest_arg_castable<ArgProviderType, handler_arg_no_cv_type>)
         {
-            return rest_arg_cast<ResultType>(std::move(arg_provider));
+            return rest_arg_cast<handler_arg_no_cv_type>(arg_provider);
         }
         else
         {
             static_assert(
-                type_traits::always_false<ArgProviderType, ResultType>,
+                type_traits::always_false<ArgProviderType, handler_arg_no_cv_type>,
                 "Incompatible rest arg provider!");
         }
     }

@@ -64,6 +64,26 @@ BOOST_AUTO_TEST_CASE(test_rest_arg)
     context ctx;
     ctx.path_args = {{"a", "13"}, {"b", "42"}};
 
+    static_assert(std::is_same_v<
+        decltype(get_rest_arg<char const*>(std::declval<std::string>(), 0, req, ctx)),
+        std::string>);
+
+    static_assert(std::is_same_v<
+        decltype(get_rest_arg<std::string_view>(std::declval<std::string>(), 0, req, ctx)),
+        std::string>);
+
+    static_assert(std::is_same_v<
+        decltype(get_rest_arg<char const*>(std::declval<char const*>(), 0, req, ctx)),
+        std::string>);
+
+    static_assert(std::is_same_v<
+        decltype(get_rest_arg<std::string_view>(std::declval<char const*>(), 0, req, ctx)),
+        std::string>);
+
+    static_assert(std::is_same_v<
+        decltype(get_rest_arg<bool>(std::declval<bool>(), 0, req, ctx)),
+        bool>);
+
     BOOST_TEST((get_rest_arg<int, query_arg>(query_arg("a"), 0, req, ctx) == 13));
     BOOST_TEST((get_rest_arg<std::string, query_arg>(query_arg("a"), 0, req, ctx) == "13"));
     BOOST_TEST((get_rest_arg<std::string_view, query_arg>(query_arg("a"), 0, req, ctx) == "13"));

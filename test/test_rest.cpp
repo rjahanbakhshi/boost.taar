@@ -644,4 +644,21 @@ BOOST_AUTO_TEST_CASE(test_rest_async_generator_with_args_reuse)
     }
 }
 
+BOOST_AUTO_TEST_CASE(test_rest_stringview_handler)
+{
+    namespace http = boost::beast::http;
+    namespace taar = boost::taar;
+    using taar::matcher::context;
+    using taar::handler::path_arg;
+
+    auto fn = [](std::string_view s) { return std::string{s}; };
+    http::request<http::empty_body> req;
+    context ctx;
+    ctx.path_args = {{"x", "hello"}};
+    auto rh = taar::handler::rest(fn, path_arg("x"));
+    auto resp = to_response<http::string_body>(rh(req, ctx));
+    BOOST_TEST(resp.body() == "hello");
+}
+
+
 } // namespace

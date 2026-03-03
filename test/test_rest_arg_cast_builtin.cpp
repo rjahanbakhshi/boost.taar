@@ -80,6 +80,7 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_cast_builtin_traits)
     static_assert(rest_arg_castable<bool, char const*>, "Failed!");
     static_assert(rest_arg_castable<boost::json::value, jsonable>, "Failed!");
     static_assert(rest_arg_castable<std::string&, char const*>, "Failed!");
+    static_assert(rest_arg_castable<bool, bool>, "Failed!");
 }
 
 BOOST_AUTO_TEST_CASE(test_rest_arg_cast_builtin)
