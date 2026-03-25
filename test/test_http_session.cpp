@@ -8,6 +8,8 @@
 //
 
 #include <boost/beast/http/empty_body.hpp>
+#include <boost/beast/http/string_body.hpp>
+#include <boost/beast/core/flat_buffer.hpp>
 #include <boost/taar/session/http.hpp>
 #include <boost/taar/handler/rest.hpp>
 #include <boost/taar/matcher/method.hpp>
@@ -15,6 +17,11 @@
 #include <boost/taar/core/response_builder.hpp>
 #include <boost/taar/core/async_generator.hpp>
 #include <boost/taar/core/awaitable.hpp>
+#include <boost/taar/core/cancellation_signals.hpp>
+#include <boost/taar/core/rebind_executor.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
+#include <boost/asio/this_coro.hpp>
 #include <boost/test/unit_test.hpp>
 #include <string>
 
@@ -276,6 +283,198 @@ BOOST_AUTO_TEST_CASE(test_http_session_chunked_handler)
     http_session.register_request_handler(
         method == http::verb::get && target == "/api/stream3",
         &async_chunked_handler);
+}
+
+BOOST_AUTO_TEST_CASE(test_http_session_request_header_limit)
+{
+    namespace net = boost::asio;
+    namespace http = boost::beast::http;
+    namespace taar = boost::taar;
+    using net::ip::tcp;
+
+    net::io_context io;
+    taar::session::http http_session;
+    http_session.set_request_header_limit(128);
+
+    bool hard_error_called = false;
+    http_session.set_hard_error_handler([&](std::exception_ptr) {
+        hard_error_called = true;
+    });
+
+    // Register a handler so the request would otherwise match
+    http_session.register_request_handler(
+        method == http::verb::get,
+        [](http::request<http::empty_body> const&, taar::matcher::context const&)
+        { return std::string{"ok"}; });
+
+    http::status client_response_status{};
+
+    net::co_spawn(io, [&]() -> taar::awaitable<void> {
+        auto executor = co_await net::this_coro::executor;
+
+        taar::rebind_executor<tcp::acceptor> acceptor{executor};
+        acceptor.open(tcp::v4());
+        acceptor.set_option(net::socket_base::reuse_address(true));
+        acceptor.bind({tcp::v4(), 0});
+        acceptor.listen();
+        auto const server_port = acceptor.local_endpoint().port();
+
+        net::co_spawn(executor, [&, server_port]() -> taar::awaitable<void> {
+            taar::rebind_executor<tcp::socket> client{co_await net::this_coro::executor};
+            co_await client.async_connect({net::ip::address_v4::loopback(), server_port});
+
+            // Send a request with a header far exceeding the 128-byte limit
+            http::request<http::empty_body> req{http::verb::get, "/", 11};
+            req.set(http::field::host, "localhost");
+            req.set("X-Big-Header", std::string(300, 'A'));
+            co_await http::async_write(client, req);
+
+            boost::beast::flat_buffer buf;
+            http::response<http::empty_body> response;
+            auto [rec, rsz] = co_await http::async_read(client, buf, response);
+            if (!rec)
+                client_response_status = response.result();
+        }, net::detached);
+
+        auto [accept_ec, server_socket] = co_await acceptor.async_accept();
+        if (!accept_ec)
+        {
+            taar::cancellation_signals signals;
+            co_await http_session(std::move(server_socket), signals);
+        }
+    }, net::detached);
+
+    io.run();
+
+    BOOST_TEST(client_response_status == http::status::request_header_fields_too_large);
+    BOOST_TEST(hard_error_called);
+}
+
+BOOST_AUTO_TEST_CASE(test_http_session_request_body_limit_no_match)
+{
+    namespace net = boost::asio;
+    namespace http = boost::beast::http;
+    namespace taar = boost::taar;
+    using net::ip::tcp;
+
+    net::io_context io;
+    taar::session::http http_session;
+    http_session.set_request_body_limit(16);
+    // No handlers registered → no-match path
+
+    bool hard_error_called = false;
+    http_session.set_hard_error_handler([&](std::exception_ptr) {
+        hard_error_called = true;
+    });
+
+    http::status client_response_status{};
+
+    net::co_spawn(io, [&]() -> taar::awaitable<void> {
+        auto executor = co_await net::this_coro::executor;
+
+        taar::rebind_executor<tcp::acceptor> acceptor{executor};
+        acceptor.open(tcp::v4());
+        acceptor.set_option(net::socket_base::reuse_address(true));
+        acceptor.bind({tcp::v4(), 0});
+        acceptor.listen();
+        auto const server_port = acceptor.local_endpoint().port();
+
+        net::co_spawn(executor, [&, server_port]() -> taar::awaitable<void> {
+            taar::rebind_executor<tcp::socket> client{co_await net::this_coro::executor};
+            co_await client.async_connect({net::ip::address_v4::loopback(), server_port});
+
+            // POST with a body exceeding the 16-byte limit
+            http::request<http::string_body> req{http::verb::post, "/unmatched", 11};
+            req.set(http::field::host, "localhost");
+            req.body() = std::string(100, 'X');
+            req.prepare_payload();
+            co_await http::async_write(client, req);
+
+            boost::beast::flat_buffer buf;
+            http::response<http::empty_body> response;
+            auto [rec, rsz] = co_await http::async_read(client, buf, response);
+            if (!rec)
+                client_response_status = response.result();
+        }, net::detached);
+
+        auto [accept_ec, server_socket] = co_await acceptor.async_accept();
+        if (!accept_ec)
+        {
+            taar::cancellation_signals signals;
+            co_await http_session(std::move(server_socket), signals);
+        }
+    }, net::detached);
+
+    io.run();
+
+    BOOST_TEST(client_response_status == http::status::payload_too_large);
+    BOOST_TEST(hard_error_called);
+}
+
+BOOST_AUTO_TEST_CASE(test_http_session_request_body_limit_matched)
+{
+    namespace net = boost::asio;
+    namespace http = boost::beast::http;
+    namespace taar = boost::taar;
+    using net::ip::tcp;
+
+    net::io_context io;
+    taar::session::http http_session;
+    http_session.set_request_body_limit(16);
+
+    bool hard_error_called = false;
+    http_session.set_hard_error_handler([&](std::exception_ptr) {
+        hard_error_called = true;
+    });
+
+    // Register a POST handler that accepts a string body
+    http_session.register_request_handler(
+        method == http::verb::post,
+        [](http::request<http::string_body> const&, taar::matcher::context const&)
+        { return std::string{"ok"}; });
+
+    http::status client_response_status{};
+
+    net::co_spawn(io, [&]() -> taar::awaitable<void> {
+        auto executor = co_await net::this_coro::executor;
+
+        taar::rebind_executor<tcp::acceptor> acceptor{executor};
+        acceptor.open(tcp::v4());
+        acceptor.set_option(net::socket_base::reuse_address(true));
+        acceptor.bind({tcp::v4(), 0});
+        acceptor.listen();
+        auto const server_port = acceptor.local_endpoint().port();
+
+        net::co_spawn(executor, [&, server_port]() -> taar::awaitable<void> {
+            taar::rebind_executor<tcp::socket> client{co_await net::this_coro::executor};
+            co_await client.async_connect({net::ip::address_v4::loopback(), server_port});
+
+            // POST with a body exceeding the 16-byte limit
+            http::request<http::string_body> req{http::verb::post, "/", 11};
+            req.set(http::field::host, "localhost");
+            req.body() = std::string(100, 'Y');
+            req.prepare_payload();
+            co_await http::async_write(client, req);
+
+            boost::beast::flat_buffer buf;
+            http::response<http::empty_body> response;
+            auto [rec, rsz] = co_await http::async_read(client, buf, response);
+            if (!rec)
+                client_response_status = response.result();
+        }, net::detached);
+
+        auto [accept_ec, server_socket] = co_await acceptor.async_accept();
+        if (!accept_ec)
+        {
+            taar::cancellation_signals signals;
+            co_await http_session(std::move(server_socket), signals);
+        }
+    }, net::detached);
+
+    io.run();
+
+    BOOST_TEST(client_response_status == http::status::payload_too_large);
+    BOOST_TEST(hard_error_called);
 }
 
 } // namespace

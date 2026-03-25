@@ -14,6 +14,9 @@
 #include <boost/test/unit_test.hpp>
 #include <boost/json/value_from.hpp>
 #include <boost/system/system_error.hpp>
+#include <list>
+#include <set>
+#include <vector>
 
 namespace {
 
@@ -39,6 +42,7 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_provider)
     static_assert(is_rest_arg_provider<cookie_arg>, "Failed!");
     static_assert(is_rest_arg_provider<string_body_arg>, "Failed!");
     static_assert(is_rest_arg_provider<json_body_arg>, "Failed!");
+    static_assert(is_rest_arg_provider<body_size_arg>, "Failed!");
     static_assert(!is_rest_arg_provider<std::reference_wrapper<int>>, "Failed!");
 }
 
@@ -337,6 +341,72 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_target)
     context ctx;
 
     BOOST_TEST((get_rest_arg<std::string, target_arg>(target_arg(), 0, req, ctx) == "/hello/world?a=13"));
+}
+
+BOOST_AUTO_TEST_CASE(test_rest_arg_csv)
+{
+    namespace http = boost::beast::http;
+    namespace taar = boost::taar;
+    using taar::matcher::context;
+    using taar::handler::get_rest_arg;
+    using taar::handler::query_arg;
+    using taar::handler::path_arg;
+    using taar::handler::header_arg;
+
+    http::request<http::string_body> req{http::verb::get, "/?ids=1,2,3&tags=a,b", 10};
+    req.insert("x-nums", "10,20,30");
+    context ctx;
+    ctx.path_args = {{"csv", "7,8,9"}};
+
+    // query_arg → vector<int>
+    BOOST_TEST((get_rest_arg<std::vector<int>, query_arg>(query_arg("ids"), 0, req, ctx)
+        == std::vector<int>{1, 2, 3}));
+
+    // query_arg → vector<string>
+    BOOST_TEST((get_rest_arg<std::vector<std::string>, query_arg>(query_arg("tags"), 0, req, ctx)
+        == std::vector<std::string>{"a", "b"}));
+
+    // header_arg → vector<int>
+    BOOST_TEST((get_rest_arg<std::vector<int>, header_arg>(header_arg("x-nums"), 0, req, ctx)
+        == std::vector<int>{10, 20, 30}));
+
+    // path_arg → vector<int>
+    BOOST_TEST((get_rest_arg<std::vector<int>, path_arg>(path_arg("csv"), 0, req, ctx)
+        == std::vector<int>{7, 8, 9}));
+
+    // query_arg → set<int>
+    BOOST_TEST((get_rest_arg<std::set<int>, query_arg>(query_arg("ids"), 0, req, ctx)
+        == std::set<int>{1, 2, 3}));
+
+    // query_arg → list<int>
+    BOOST_TEST((get_rest_arg<std::list<int>, query_arg>(query_arg("ids"), 0, req, ctx)
+        == std::list<int>{1, 2, 3}));
+}
+
+BOOST_AUTO_TEST_CASE(test_rest_arg_body_size)
+{
+    namespace http = boost::beast::http;
+    namespace taar = boost::taar;
+    using taar::matcher::context;
+    using taar::handler::get_rest_arg;
+    using taar::handler::body_size_arg;
+
+    context ctx;
+
+    // Non-empty body
+    http::request<http::string_body> req{http::verb::post, "/", 10};
+    req.body() = "Hello world!";
+    req.prepare_payload();
+    BOOST_TEST((get_rest_arg<std::size_t, body_size_arg>(body_size_arg(), 0, req, ctx) == 12u));
+
+    // Empty body
+    http::request<http::string_body> req2{http::verb::post, "/", 10};
+    req2.body() = "";
+    req2.prepare_payload();
+    BOOST_TEST((get_rest_arg<std::size_t, body_size_arg>(body_size_arg(), 0, req2, ctx) == 0u));
+
+    // Cast to int
+    BOOST_TEST((get_rest_arg<int, body_size_arg>(body_size_arg(), 0, req, ctx) == 12));
 }
 
 BOOST_AUTO_TEST_CASE(test_rest_arg_with_default)

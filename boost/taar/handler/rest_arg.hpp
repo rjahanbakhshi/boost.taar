@@ -29,7 +29,6 @@
 #include <boost/json/parse.hpp>
 #include <boost/json/value.hpp>
 #include <boost/json/value_to.hpp>
-#include <boost/lexical_cast.hpp>
 #include <boost/system/result.hpp>
 #include <functional>
 #include <system_error>
@@ -598,6 +597,22 @@ struct target_arg
         matcher::context const&) const
     {
         return std::string{request.target()};
+    }
+};
+
+// REST arg provider returning the byte size of the request body.
+struct body_size_arg
+{
+    std::string name() const
+    {
+        return "body_size";
+    }
+
+    boost::system::result<std::size_t> operator()(
+        boost::beast::http::request<boost::beast::http::string_body> const& request,
+        matcher::context const&) const
+    {
+        return request.body().size();
     }
 };
 

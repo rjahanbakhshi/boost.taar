@@ -30,6 +30,7 @@
 #include <boost/taar/core/is_awaitable.hpp>
 #include <boost/taar/core/error.hpp>
 #include <boost/taar/type_traits/callable.hpp>
+#include <boost/beast/http/error.hpp>
 #include <boost/beast/http/read.hpp>
 #include <boost/beast/http/write.hpp>
 #include <boost/beast/http/chunk_encode.hpp>
@@ -43,13 +44,16 @@
 #include <boost/beast/http/status.hpp>
 #include <boost/beast/core/tcp_stream.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
+#include <boost/asio/error.hpp>
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/system/system_error.hpp>
 #include <boost/url/url_view.hpp>
 #include <functional>
 #include <type_traits>
 #include <vector>
 #include <utility>
 #include <exception>
+#include <cstdint>
 
 namespace boost::taar::session {
 namespace detail {
@@ -105,6 +109,26 @@ auto async_write(
     return ::boost::beast::http::async_write(
         stream,
         message);
+}
+
+inline bool is_transport_error(boost::system::error_code const& ec)
+{
+    namespace asio_err = boost::asio::error;
+    namespace http_err = boost::beast::http;
+    return ec == asio_err::eof ||
+           ec == asio_err::connection_reset ||
+           ec == asio_err::operation_aborted ||
+           ec == http_err::error::end_of_stream;
+}
+
+inline boost::beast::http::status select_error_status(boost::system::error_code const& ec)
+{
+    namespace http_err = boost::beast::http;
+    if (ec == http_err::error::header_limit)
+        return http_err::status::request_header_fields_too_large;
+    if (ec == http_err::error::body_limit)
+        return http_err::status::payload_too_large;
+    return http_err::status::bad_request;
 }
 
 template <typename T>
@@ -308,6 +332,18 @@ public:
         }
     {}
 
+    // Set the request header limit. Default is 8192 bytes.
+    void set_request_header_limit(std::uint32_t limit)
+    {
+        request_header_limit_ = limit;
+    }
+
+    // Setting body limit to `boost::none` means no limit. The default body limit is 1 MiB.
+    void set_request_body_limit(boost::optional<std::uint64_t> limit)
+    {
+        request_body_limit_ = limit;
+    }
+
     http(http const&) = delete;
     http(http&&) = default;
     http& operator=(http const&) = delete;
@@ -335,6 +371,8 @@ public:
                 // Read and parse the header and use the target to find the handler.
                 flat_buffer buffer;
                 http::request_parser<http::buffer_body> header_parser;
+                header_parser.header_limit(request_header_limit_);
+                header_parser.body_limit(request_body_limit_);
 
                 auto [header_ec, header_sz] = co_await http::async_read_header(
                     stream,
@@ -343,8 +381,19 @@ public:
 
                 if (header_ec)
                 {
-                    // Error reading the http header. Session will be closed.
-                    break;
+                    if (!detail::is_transport_error(header_ec))
+                    {
+                        // Protocol error. Send an appropriate error response.
+                        http::response<http::empty_body> err_response{
+                            detail::select_error_status(header_ec), 11};
+                        err_response.keep_alive(false);
+                        err_response.prepare_payload();
+                        auto [wec, wsz] = co_await http::async_write(stream, err_response);
+                        (void)wec;
+                        (void)wsz;
+                    }
+                    // Invoke the hard error handler for server-side visibility.
+                    throw boost::system::system_error{header_ec};
                 }
 
                 auto& req_header = header_parser.get();
@@ -399,10 +448,10 @@ public:
                 // the full buffer.
                 auto keep_alive = req_header.keep_alive();
                 auto version = req_header.version();
-                if (req_header.payload_size().has_value() &&
-                    req_header.payload_size().value() > 0)
+                if (req_header.has_content_length() || req_header.chunked())
                 {
                     http::request_parser<http::string_body> body_parser {std::move(header_parser)};
+                    body_parser.body_limit(request_body_limit_);
                     auto [req_ec, req_sz] = co_await async_read(
                         stream,
                         buffer,
@@ -410,8 +459,19 @@ public:
 
                     if (req_ec)
                     {
-                        // Error reading the full request. The session will be closed.
-                        break;
+                        if (!detail::is_transport_error(req_ec))
+                        {
+                            // Protocol error. Send an appropriate error response.
+                            http::response<http::empty_body> err_response{
+                                detail::select_error_status(req_ec), version};
+                            err_response.keep_alive(false);
+                            err_response.prepare_payload();
+                            auto [wec, wsz] = co_await http::async_write(stream, err_response);
+                            (void)wec;
+                            (void)wsz;
+                        }
+                        // Invoke the hard error handler for server-side visibility.
+                        throw boost::system::system_error{req_ec};
                     }
                     auto const& request = body_parser.get();
                 }
@@ -426,8 +486,8 @@ public:
 
                 if (resp_ec)
                 {
-                    // Error in writing the response. The session will be closed.
-                    break;
+                    // Invoke the hard error handler for server-side visibility.
+                    throw boost::system::system_error{resp_ec};
                 }
 
                 if (!keep_alive)
@@ -497,10 +557,28 @@ public:
                 using result_type = type_traits::callable_result<RequestHandler>;
 
                 http::request_parser<body_type> body_parser {std::move(header_parser)};
+                body_parser.body_limit(request_body_limit_);
                 auto [req_ec, req_sz] = co_await async_read(stream, buffer, body_parser);
 
                 auto version = body_parser.get().version();
                 auto keep_alive = body_parser.get().keep_alive();
+
+                if (req_ec)
+                {
+                    if (!detail::is_transport_error(req_ec))
+                    {
+                        // Protocol error. Send an appropriate error response.
+                        http::response<http::empty_body> err_response{
+                            detail::select_error_status(req_ec), version};
+                        err_response.keep_alive(false);
+                        err_response.prepare_payload();
+                        auto [wec, wsz] = co_await http::async_write(stream, err_response);
+                        (void)wec;
+                        (void)wsz;
+                    }
+                    // Invoke the hard error handler for server-side visibility.
+                    throw boost::system::system_error{req_ec};
+                }
 
                 // Get cancellation slot from current coroutine for request-scoped cancellation
                 auto cs = co_await boost::asio::this_coro::cancellation_state;
@@ -650,6 +728,8 @@ private:
     std::vector<matcher_handler_type> matcher_handlers_;
     soft_error_handler_wrapper_type wrapped_soft_error_handler_;
     hard_error_handler_type hard_error_handler_ = [](std::exception_ptr){};
+    std::uint32_t request_header_limit_ = 8192;
+    boost::optional<std::uint64_t> request_body_limit_ = 1 * 1024 * 1024;
     bool needs_parsed_target_ = false;
     bool needs_parsed_cookies_ = false;
 };
