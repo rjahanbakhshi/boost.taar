@@ -80,26 +80,27 @@ inline auto rest_for_callable(
         "callable arguments.");
 
     using request_type = detail::common_requests_type_t<ArgProvidersType...>;
+    using arg_providers_tuple_t = std::tuple<ArgProvidersType...>;
 
     return
     [
         callable = std::forward<CallableType>(callable),
-        ...arg_providers = std::move(arg_providers)
+        arg_providers = arg_providers_tuple_t{std::move(arg_providers)...}
     ](request_type const& request, matcher::context const& context) mutable ->
         decltype(response_from_invoke(
             callable,
             get_rest_arg<
                 type_traits::callable_arg<noref_fn_type, Indexes>,
-                ArgProvidersType
-            > (arg_providers, Indexes, request, context)...
+                std::tuple_element_t<Indexes, arg_providers_tuple_t>
+            >(std::get<Indexes>(arg_providers), Indexes, request, context)...
         ))
     {
         co_return co_await response_from_invoke(
             callable,
             get_rest_arg<
                 type_traits::callable_arg<noref_fn_type, Indexes>,
-                ArgProvidersType
-            > (arg_providers, Indexes, request, context)...
+                std::tuple_element_t<Indexes, arg_providers_tuple_t>
+            >(std::get<Indexes>(arg_providers), Indexes, request, context)...
         );
     };
 }
@@ -123,20 +124,21 @@ inline auto rest_for_memfn(
         "callable arguments.");
 
     using request_type = detail::common_requests_type_t<ArgProvidersType...>;
+    using arg_providers_tuple_t = std::tuple<ArgProvidersType...>;
 
     return
     [
         memfn,
         object = std::forward<ObjectType>(object),
-        ...arg_providers = std::move(arg_providers)
+        arg_providers = arg_providers_tuple_t{std::move(arg_providers)...}
     ](request_type const& request, matcher::context const& context) mutable ->
         decltype(response_from_invoke(
             memfn,
             std::forward<ObjectType>(object),
             get_rest_arg<
                 type_traits::callable_arg<noref_fn_type, Indexes>,
-                ArgProvidersType
-            > (arg_providers, Indexes, request, context)...
+                std::tuple_element_t<Indexes, arg_providers_tuple_t>
+            >(std::get<Indexes>(arg_providers), Indexes, request, context)...
         ))
     {
         co_return co_await response_from_invoke(
@@ -144,8 +146,8 @@ inline auto rest_for_memfn(
             std::forward<ObjectType>(object),
             get_rest_arg<
                 type_traits::callable_arg<noref_fn_type, Indexes>,
-                ArgProvidersType
-            > (arg_providers, Indexes, request, context)...
+                std::tuple_element_t<Indexes, arg_providers_tuple_t>
+            >(std::get<Indexes>(arg_providers), Indexes, request, context)...
         );
     };
 }
