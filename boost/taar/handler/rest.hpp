@@ -85,14 +85,18 @@ inline auto rest_for_callable(
     return
     [
         callable = std::forward<CallableType>(callable),
-        arg_providers = arg_providers_tuple_t{std::move(arg_providers)...}
+        arg_providers_tuple = arg_providers_tuple_t{std::move(arg_providers)...}
     ](request_type const& request, matcher::context const& context) mutable ->
         decltype(response_from_invoke(
-            callable,
+            std::declval<noref_fn_type&>(),
             get_rest_arg<
                 type_traits::callable_arg<noref_fn_type, Indexes>,
                 std::tuple_element_t<Indexes, arg_providers_tuple_t>
-            >(std::get<Indexes>(arg_providers), Indexes, request, context)...
+            >(
+                std::declval<std::tuple_element_t<Indexes, arg_providers_tuple_t>&>(),
+                Indexes,
+                request,
+                context)...
         ))
     {
         co_return co_await response_from_invoke(
@@ -100,7 +104,7 @@ inline auto rest_for_callable(
             get_rest_arg<
                 type_traits::callable_arg<noref_fn_type, Indexes>,
                 std::tuple_element_t<Indexes, arg_providers_tuple_t>
-            >(std::get<Indexes>(arg_providers), Indexes, request, context)...
+            >(std::get<Indexes>(arg_providers_tuple), Indexes, request, context)...
         );
     };
 }
@@ -130,15 +134,19 @@ inline auto rest_for_memfn(
     [
         memfn,
         object = std::forward<ObjectType>(object),
-        arg_providers = arg_providers_tuple_t{std::move(arg_providers)...}
+        arg_providers_tuple = arg_providers_tuple_t{std::move(arg_providers)...}
     ](request_type const& request, matcher::context const& context) mutable ->
         decltype(response_from_invoke(
-            memfn,
-            std::forward<ObjectType>(object),
+            std::declval<MemFnType&>(),
+            std::declval<ObjectType>(),
             get_rest_arg<
                 type_traits::callable_arg<noref_fn_type, Indexes>,
                 std::tuple_element_t<Indexes, arg_providers_tuple_t>
-            >(std::get<Indexes>(arg_providers), Indexes, request, context)...
+            >(
+                std::declval<std::tuple_element_t<Indexes, arg_providers_tuple_t>&>(),
+                Indexes,
+                request,
+                context)...
         ))
     {
         co_return co_await response_from_invoke(
@@ -147,7 +155,7 @@ inline auto rest_for_memfn(
             get_rest_arg<
                 type_traits::callable_arg<noref_fn_type, Indexes>,
                 std::tuple_element_t<Indexes, arg_providers_tuple_t>
-            >(std::get<Indexes>(arg_providers), Indexes, request, context)...
+            >(std::get<Indexes>(arg_providers_tuple), Indexes, request, context)...
         );
     };
 }
