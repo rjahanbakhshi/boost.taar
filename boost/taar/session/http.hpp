@@ -700,6 +700,77 @@ public:
         );
     }
 
+    // Register a "raw" handler that takes ownership of the connection on
+    // match. Used for protocol upgrades (WebSocket and similar): the handler
+    // receives the parsed request header, the underlying tcp_stream, and the
+    // flat_buffer holding any bytes already read past the header. The session
+    // does not read the request body, write any response, or attempt further
+    // I/O on the stream after the handler is invoked — the handler is fully
+    // responsible for the rest of the connection's lifetime.
+    //
+    // After the handler returns, the session's per-connection coroutine ends
+    // (no keep-alive). The post-loop tcp shutdown is harmless on a moved-from
+    // stream — boost::beast::tcp_stream::socket() returns a default-
+    // constructed socket and shutdown's error_code is discarded.
+    //
+    // The handler signature must be compatible with:
+    //
+    //   awaitable<void>(
+    //       matcher::context const& context,
+    //       boost::beast::http::request<boost::beast::http::empty_body>&& request,
+    //       rebind_executor<boost::beast::tcp_stream>&& stream,
+    //       boost::beast::flat_buffer&& buffer,
+    //       cancellation_signals& signals)
+    template <typename MatcherType, typename RawHandler> requires(
+        matcher::is_matcher<std::decay_t<MatcherType>> &&
+        std::is_move_constructible_v<std::decay_t<RawHandler>>)
+    auto register_raw_handler(
+        MatcherType&& matcher,
+        RawHandler raw_handler)
+    {
+        namespace http = boost::beast::http;
+
+        matcher::operand operand {std::forward<MatcherType>(matcher)};
+        needs_parsed_target_ |= decltype(operand)::with_parsed_target;
+        needs_parsed_cookies_ |= decltype(operand)::with_parsed_cookies;
+
+        matcher_handlers_.emplace_back(
+            [this, operand = std::move(operand)](
+                http::request_header<> const& request,
+                matcher::context& context,
+                boost::urls::url_view const& parsed_target,
+                cookies const& parsed_cookies)
+            {
+                return operand(request, context, parsed_target, parsed_cookies);
+            },
+            [raw_handler = std::move(raw_handler)](
+                matcher::context const& context,
+                rebind_executor<boost::beast::tcp_stream>& stream,
+                boost::beast::flat_buffer& buffer,
+                boost::beast::http::request_parser<boost::beast::http::buffer_body>& header_parser,
+                cancellation_signals& signals) mutable
+            -> awaitable<bool>
+            {
+                // Move the parsed header into a request<empty_body>. The raw
+                // handler is taking over and owns the protocol state from
+                // here on (e.g. websocket::stream::async_accept will read
+                // and write its own framing).
+                http::request<http::empty_body> request {
+                    std::move(header_parser.get())};
+
+                co_await raw_handler(
+                    context,
+                    std::move(request),
+                    std::move(stream),
+                    std::move(buffer),
+                    signals);
+
+                // Always close the session — the handler now owns the socket,
+                // and the session's loop must not read or write again.
+                co_return false;
+            });
+    }
+
     template <detail::soft_error_handler HandlerType>
     void set_soft_error_handler(HandlerType handler)
     {
