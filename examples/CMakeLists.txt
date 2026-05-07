@@ -32,6 +32,12 @@ set_target_properties(response_stream PROPERTIES UNITY_BUILD ${ENABLE_UNITY_BUIL
 target_sources(response_stream PRIVATE response_stream.cpp)
 target_link_libraries(response_stream PRIVATE boost-taar)
 
+add_executable(websocket_server EXCLUDE_FROM_ALL)
+set_target_properties(websocket_server PROPERTIES CXX_STANDARD 23)
+set_target_properties(websocket_server PROPERTIES UNITY_BUILD ${ENABLE_UNITY_BUILD})
+target_sources(websocket_server PRIVATE websocket_server.cpp)
+target_link_libraries(websocket_server PRIVATE boost-taar)
+
 add_custom_target(
     examples DEPENDS
         htdocs_server
@@ -39,5 +45,6 @@ add_custom_target(
         awaitable_server
         chunked_server
         response_stream
+        websocket_server
 )
 
