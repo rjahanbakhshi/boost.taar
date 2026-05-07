@@ -7,6 +7,8 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
 
+#include <boost/asio/buffers_iterator.hpp>
+#include <boost/asio/read_until.hpp>
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/string_body.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
@@ -475,6 +477,100 @@ BOOST_AUTO_TEST_CASE(test_http_session_request_body_limit_matched)
 
     BOOST_TEST(client_response_status == http::status::payload_too_large);
     BOOST_TEST(hard_error_called);
+}
+
+// register_raw_handler hands the connection (parsed header + tcp_stream +
+// buffer) over to the registered handler, which is then responsible for the
+// rest of the wire protocol. The raw handler below echoes a single line of
+// text the client writes after the HTTP request — the simplest exercise of
+// ownership transfer that doesn't pull in the full WebSocket framing.
+BOOST_AUTO_TEST_CASE(test_http_session_raw_handler_takeover)
+{
+    namespace net = boost::asio;
+    namespace http = boost::beast::http;
+    namespace taar = boost::taar;
+    using net::ip::tcp;
+    using boost::beast::tcp_stream;
+    using boost::beast::flat_buffer;
+
+    net::io_context io;
+    taar::session::http http_session;
+
+    std::string server_seen_target;
+    std::string server_seen_post;
+
+    http_session.register_raw_handler(
+        method == http::verb::get && target == "/takeover",
+        [&server_seen_target, &server_seen_post](
+            taar::matcher::context const&,
+            http::request<http::empty_body>&& request,
+            taar::rebind_executor<tcp_stream>&& stream,
+            flat_buffer&& buffer,
+            taar::cancellation_signals&) -> taar::awaitable<void>
+        {
+            server_seen_target = std::string{request.target()};
+
+            // Read one line the client writes post-upgrade. flat_buffer may
+            // already hold pipelined bytes from the original read.
+            auto [rec, rsz] = co_await net::async_read_until(
+                stream, buffer, '\n');
+            if (rec) co_return;
+            auto bufs = buffer.data();
+            server_seen_post.assign(net::buffers_begin(bufs),
+                                    net::buffers_begin(bufs) + rsz);
+            buffer.consume(rsz);
+
+            // Echo back, terminating with a newline so the client's read_until
+            // completes deterministically.
+            std::string const echoed = "echo:" + server_seen_post;
+            co_await net::async_write(stream, net::buffer(echoed));
+            co_return;
+        }
+    );
+
+    std::string client_response;
+
+    net::co_spawn(io, [&]() -> taar::awaitable<void> {
+        auto executor = co_await net::this_coro::executor;
+
+        taar::rebind_executor<tcp::acceptor> acceptor{executor};
+        acceptor.open(tcp::v4());
+        acceptor.set_option(net::socket_base::reuse_address(true));
+        acceptor.bind({tcp::v4(), 0});
+        acceptor.listen();
+        auto const server_port = acceptor.local_endpoint().port();
+
+        net::co_spawn(executor, [&, server_port]() -> taar::awaitable<void> {
+            taar::rebind_executor<tcp::socket> client{co_await net::this_coro::executor};
+            co_await client.async_connect({net::ip::address_v4::loopback(), server_port});
+
+            http::request<http::empty_body> req{http::verb::get, "/takeover", 11};
+            req.set(http::field::host, "localhost");
+            co_await http::async_write(client, req);
+
+            // Past this point the protocol is whatever the raw handler wants.
+            std::string const line = "hello\n";
+            co_await net::async_write(client, net::buffer(line));
+
+            std::string buf;
+            buf.resize(64);
+            auto [rec, rsz] = co_await client.async_read_some(net::buffer(buf));
+            if (!rec) client_response.assign(buf.data(), rsz);
+        }, net::detached);
+
+        auto [accept_ec, server_socket] = co_await acceptor.async_accept();
+        if (!accept_ec)
+        {
+            taar::cancellation_signals signals;
+            co_await http_session(std::move(server_socket), signals);
+        }
+    }, net::detached);
+
+    io.run();
+
+    BOOST_TEST(server_seen_target == "/takeover");
+    BOOST_TEST(server_seen_post == "hello\n");
+    BOOST_TEST(client_response == "echo:hello\n");
 }
 
 } // namespace
