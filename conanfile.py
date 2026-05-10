@@ -1,4 +1,3 @@
-import os
 from conan import ConanFile
 from conan.tools.files import copy
 from conan.tools.cmake import cmake_layout, CMake
@@ -6,7 +5,7 @@ from conan.tools.build import check_min_cppstd
 
 class BoostTaarConan(ConanFile):
     name = "boost-taar"
-    version = "0.0.44"
+    version = "0.0.46"
     license = "Boost Software License 1.0"
     author = "Reza Jahanbakhshi <reza.jahanbakhshi@gmail.com>"
     url = "https://github.com/rjahanbakhshi/boost.taar"
@@ -37,8 +36,10 @@ class BoostTaarConan(ConanFile):
         cmake = CMake(self)
         cmake.configure()
         cmake.build()
-        if not self.conf.get("tools.build:skip_test", default=False):
-            self.run(os.path.join(self.cpp.build.bindir, "test/boost-taar-test"))
+        # ctest --build-config handles both single-config (Ninja) and
+        # multi-config (Visual Studio) generators, and respects
+        # tools.build:skip_test automatically.
+        cmake.test()
         cmake.install()
 
     def package(self):
