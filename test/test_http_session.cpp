@@ -510,15 +510,23 @@ BOOST_AUTO_TEST_CASE(test_http_session_raw_handler_takeover)
         {
             server_seen_target = std::string{request.target()};
 
-            // Read one line the client writes post-upgrade. flat_buffer may
-            // already hold pipelined bytes from the original read.
+            // Read one line the client writes post-upgrade. flat_buffer is
+            // value-semantic, so it cannot be used with asio::async_read_until
+            // directly (the op stores a copy and reads land in the copy).
+            // Drain any pipelined bytes from flat_buffer into a string and
+            // use asio::dynamic_buffer for the rest.
+            std::string line_buffer;
+            if (buffer.size() > 0)
+            {
+                auto bd = buffer.data();
+                line_buffer.assign(
+                    net::buffers_begin(bd), net::buffers_end(bd));
+                buffer.consume(buffer.size());
+            }
             auto [rec, rsz] = co_await net::async_read_until(
-                stream, buffer, '\n');
+                stream, net::dynamic_buffer(line_buffer), '\n');
             if (rec) co_return;
-            auto bufs = buffer.data();
-            server_seen_post.assign(net::buffers_begin(bufs),
-                                    net::buffers_begin(bufs) + rsz);
-            buffer.consume(rsz);
+            server_seen_post.assign(line_buffer.data(), rsz);
 
             // Echo back, terminating with a newline so the client's read_until
             // completes deterministically.

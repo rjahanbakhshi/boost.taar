@@ -91,10 +91,14 @@ endif()
 
 # MSVC needs the conforming preprocessor for boost.describe and other
 # variadic-macro-heavy boost code, plus accurate __cplusplus reporting.
+# /bigobj lifts the 65535-section COFF limit that heavy template
+# instantiation in consumer TUs (boost.beast, asio coroutines, etc.)
+# routinely exceeds, especially under Debug.
 if(MSVC)
     target_compile_options(
         ${PROJECT_NAME}
         INTERFACE
+            /bigobj
             /Zc:preprocessor
             /Zc:__cplusplus
     )
