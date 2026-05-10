@@ -708,6 +708,13 @@ public:
     // I/O on the stream after the handler is invoked — the handler is fully
     // responsible for the rest of the connection's lifetime.
     //
+    // Note: boost::beast::flat_buffer is value-semantic, so passing it
+    // directly to boost::asio::async_read_until / async_read will read into
+    // a copy of the buffer rather than the buffer itself. Pair the buffer
+    // with beast::websocket::stream::async_accept (the natural use case) or
+    // drain pipelined bytes into a std::string and use
+    // boost::asio::dynamic_buffer for further reads.
+    //
     // After the handler returns, the session's per-connection coroutine ends
     // (no keep-alive). The post-loop tcp shutdown is harmless on a moved-from
     // stream — boost::beast::tcp_stream::socket() returns a default-
