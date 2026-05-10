@@ -78,6 +78,28 @@ target_link_libraries(
         Boost::json
 )
 
+# Boost.Asio requires _WIN32_WINNT to be defined on Windows.
+if(WIN32)
+    target_compile_definitions(
+        ${PROJECT_NAME}
+        INTERFACE
+            _WIN32_WINNT=0x0A00
+            WIN32_LEAN_AND_MEAN
+            NOMINMAX
+    )
+endif()
+
+# MSVC needs the conforming preprocessor for boost.describe and other
+# variadic-macro-heavy boost code, plus accurate __cplusplus reporting.
+if(MSVC)
+    target_compile_options(
+        ${PROJECT_NAME}
+        INTERFACE
+            /Zc:preprocessor
+            /Zc:__cplusplus
+    )
+endif()
+
 install(TARGETS ${PROJECT_NAME} FILE_SET HEADERS)
 
 if(ENABLE_CLANG_TIDY)

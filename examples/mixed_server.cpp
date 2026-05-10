@@ -259,7 +259,9 @@ int main(int argc, char* argv[])
 
             http::file_body::value_type body;
             error_code ec;
-            body.open(path.c_str(), file_mode::scan, ec);
+            // fs::path::c_str() is wchar_t const* on Windows; beast wants char const*.
+            auto const path_str = path.string();
+            body.open(path_str.c_str(), file_mode::scan, ec);
             if (ec)
             {
                 throw std::runtime_error("Failed to open temp file: " + ec.message());

@@ -67,19 +67,26 @@ public:
                     "Illegal request-target");
             }
 
-            // Build the path to the requested file
+            // Build the path to the requested file. beast's target() returns
+            // boost::core::string_view, which std::filesystem::path's MSVC
+            // constructor does not accept. Use iterator-pair construction.
+            auto const target_view = request.target();
             auto doc_path =
                 fs::path{htdocs_root_} /
-                fs::path{request.target().substr(1)};
+                fs::path{target_view.begin() + 1, target_view.end()};
             if(request.target().back() == '/')
             {
                 doc_path /= default_doc_;
             }
 
+            // boost::beast::file_body::open() takes char const*, but
+            // fs::path::c_str() is wchar_t const* on Windows.
+            auto const doc_path_str = doc_path.string();
+
             // Attempt to open the file
             boost::system::error_code ec;
             http::file_body::value_type body;
-            body.open(doc_path.c_str(), boost::beast::file_mode::scan, ec);
+            body.open(doc_path_str.c_str(), boost::beast::file_mode::scan, ec);
 
             // Handle the case where the file doesn't exist
             if (ec == boost::beast::errc::no_such_file_or_directory)
@@ -109,7 +116,7 @@ public:
                     http::response<http::empty_body> response {
                         http::status::ok,
                         request.version()};
-                    response.set(http::field::content_type, mime_type(doc_path.c_str()));
+                    response.set(http::field::content_type, mime_type(doc_path_str));
                     response.content_length(content_length);
                     response.keep_alive(request.keep_alive());
                     return response;
@@ -120,7 +127,7 @@ public:
                     std::piecewise_construct,
                     std::make_tuple(std::move(body)),
                     std::make_tuple(http::status::ok, request.version())};
-            response.set(http::field::content_type, mime_type(doc_path.c_str()));
+            response.set(http::field::content_type, mime_type(doc_path_str));
             response.content_length(content_length);
             response.keep_alive(request.keep_alive());
             return response;

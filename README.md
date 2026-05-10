@@ -221,6 +221,42 @@ cmake \
     -DCMAKE_BUILD_TYPE=Debug
 ```
 
+### Windows (MSVC) with Conan 2
+
+Two project-local profiles are provided:
+
+- `profiles/windows-vs2022.profile` — Visual Studio 2022, MSVC v143
+  (`compiler.version=194`).
+- `profiles/windows-vs2026.profile` — Visual Studio 2026, MSVC v145
+  (`compiler.version=195`).
+
+Both target `compiler.cppstd=23` and force the Ninja generator for Conan
+dependency builds. From a Visual Studio Developer Command Prompt for the
+matching VS version:
+
+```cmd
+conan install . -of=build ^
+    -pr:h=profiles/windows-vs2022.profile ^
+    -pr:b=profiles/windows-vs2022.profile ^
+    --build=missing
+cmake --preset conan-release
+cmake --build --preset conan-release
+ctest --preset conan-release
+```
+
+Notes:
+- `conancenter` does not currently have prebuilt Boost binaries for
+  `compiler.cppstd=23` on these MSVC versions, so the first
+  `conan install` will build Boost from source. Subsequent runs reuse
+  the cached package.
+- The CMake on the system `PATH` must be at least 3.28 and recent enough
+  for the matching Visual Studio generator. The CMake bundled with
+  Visual Studio (under `Common7\IDE\CommonExtensions\Microsoft\CMake\`)
+  satisfies this: VS 2022 17.14 ships CMake 3.31, VS 2026 ships
+  CMake 4.2. If you launch from PowerShell, prepend that bundled
+  `CMake\bin` (and `Ninja`) directory to `PATH` and source `vcvars64.bat`
+  before running the commands above.
+
 ## To build the code after configuring
 
 Assuming it is invoked from the project's root directory.
@@ -262,6 +298,10 @@ conan upload "boost-taar/$version" --only-recipe --remote your_conan_remote
 - GCC 11.2.0 on Ubuntu 22.04
   - Note: The required CMake version is 3.28 which is newer than 3.22 shipped
 with Ubuntu 22.04
+- MSVC 19.44 (Visual Studio 2022 Professional 17.14, toolset v143) on Windows 10
+- MSVC 19.50 (Visual Studio 2026 Community, toolset v145) on Windows 10
+  - Use the CMake bundled with Visual Studio (3.31 in VS 2022, 4.2 in VS 2026);
+    system CMake 3.27 is too old.
 
 ## License
 

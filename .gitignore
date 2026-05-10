@@ -4,6 +4,9 @@ build
 CMakeLists.txt.user
 CMakeUserPresets.json
 
+# Claude Code workspace
+.claude/
+
 # Clang-Tidy
 .cache
 compile_commands.json
