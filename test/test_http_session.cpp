@@ -287,6 +287,82 @@ BOOST_AUTO_TEST_CASE(test_http_session_chunked_handler)
         &async_chunked_handler);
 }
 
+BOOST_AUTO_TEST_CASE(test_http_session_chunked_handler_mid_stream_throw)
+{
+    namespace net = boost::asio;
+    namespace http = boost::beast::http;
+    namespace taar = boost::taar;
+    using net::ip::tcp;
+
+    net::io_context io;
+    taar::session::http http_session;
+
+    http_session.register_request_handler(
+        method == http::verb::get && target == "/throw",
+        [](
+            http::request<http::empty_body> const&,
+            taar::matcher::context const&) -> taar::async_generator<std::string>
+        {
+            co_yield "first";
+            throw std::runtime_error{"mid-stream"};
+        });
+
+    std::string client_raw;
+    boost::system::error_code client_read_ec;
+
+    net::co_spawn(io, [&]() -> taar::awaitable<void> {
+        auto executor = co_await net::this_coro::executor;
+
+        taar::rebind_executor<tcp::acceptor> acceptor{executor};
+        acceptor.open(tcp::v4());
+        acceptor.set_option(net::socket_base::reuse_address(true));
+        acceptor.bind({tcp::v4(), 0});
+        acceptor.listen();
+        auto const server_port = acceptor.local_endpoint().port();
+
+        net::co_spawn(executor, [&, server_port]() -> taar::awaitable<void> {
+            taar::rebind_executor<tcp::socket> client{co_await net::this_coro::executor};
+            co_await client.async_connect({net::ip::address_v4::loopback(), server_port});
+
+            http::request<http::empty_body> req{http::verb::get, "/throw", 11};
+            req.set(http::field::host, "localhost");
+            co_await http::async_write(client, req);
+
+            // Read until the server closes the connection. A successful
+            // chunked response would terminate with "\r\n0\r\n\r\n" before
+            // the connection closes; a truncated one will not.
+            std::array<char, 256> buf{};
+            for (;;)
+            {
+                auto [rec, rsz] = co_await client.async_read_some(net::buffer(buf));
+                if (rec)
+                {
+                    client_read_ec = rec;
+                    break;
+                }
+                client_raw.append(buf.data(), rsz);
+            }
+        }, net::detached);
+
+        auto [accept_ec, server_socket] = co_await acceptor.async_accept();
+        if (!accept_ec)
+        {
+            taar::cancellation_signals signals;
+            co_await http_session(std::move(server_socket), signals);
+        }
+    }, net::detached);
+
+    io.run();
+
+    // Headers were sent (status line present) and the first chunk made it
+    // through. The terminating zero-chunk MUST NOT be present, otherwise we
+    // would be falsely reporting a clean response on a mid-stream throw.
+    BOOST_TEST(client_raw.find("HTTP/1.1 200") != std::string::npos);
+    BOOST_TEST(client_raw.find("Transfer-Encoding: chunked") != std::string::npos);
+    BOOST_TEST(client_raw.find("first") != std::string::npos);
+    BOOST_TEST(!client_raw.ends_with("\r\n0\r\n\r\n"));
+}
+
 BOOST_AUTO_TEST_CASE(test_http_session_request_header_limit)
 {
     namespace net = boost::asio;

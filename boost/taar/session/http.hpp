@@ -201,16 +201,17 @@ awaitable<bool> write_chunked_response(
     // Get first value BEFORE sending headers so exceptions propagate
     // to the soft error handler before any bytes are on the wire.
     auto [first_ec, first_value] = co_await generator.next();
+    (void)first_ec;
     generator.rethrow_if_exception();
 
-    // Send chunked response header
+    // Build chunked response header. User metadata is applied first so it
+    // can override the default content-type, then transfer-encoding is set
+    // last to enforce that this response is always chunked-encoded.
     http::response<http::empty_body> header_response {http::status::ok, version};
-    header_response.set(http::field::transfer_encoding, "chunked");
     header_response.set(http::field::content_type, default_chunk_content_type<T>());
     header_response.keep_alive(keep_alive);
-
-    // Apply metadata from chunked_response (no-op for async_generator)
     apply_chunked_metadata(generator, header_response);
+    header_response.set(http::field::transfer_encoding, "chunked");
 
     http::response_serializer<http::empty_body> serializer {header_response};
     auto [header_ec, header_sz] = co_await http::async_write_header(
@@ -233,6 +234,7 @@ awaitable<bool> write_chunked_response(
         while (true)
         {
             auto [ec, value] = co_await generator.next();
+            (void)ec;
             if (!value)
                 break;
 
@@ -244,6 +246,20 @@ awaitable<bool> write_chunked_response(
             if (chunk_ec)
                 co_return false;
         }
+    }
+
+    // If the generator stored an exception (i.e., it threw mid-stream after
+    // yielding values), do NOT send the terminating chunk. The chunked
+    // protocol has no way to signal failure once headers are on the wire,
+    // so we drop the connection — the client sees a truncated response
+    // rather than a falsely-successful one.
+    try
+    {
+        generator.rethrow_if_exception();
+    }
+    catch (...)
+    {
+        co_return false;
     }
 
     // Send last chunk (best effort, ignore errors)

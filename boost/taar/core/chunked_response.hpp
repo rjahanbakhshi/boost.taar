@@ -171,6 +171,23 @@ public:
 
                 // Now drive the inner generator to get its first value.
                 // The completion_handler_ is still set from the outer's next() call.
+                if (!promise.executor_ && promise.completion_handler_)
+                {
+                    // No executor — cannot drive the inner. Surface as an
+                    // exception via the outer's completion handler so the
+                    // consumer doesn't hang waiting for a value that will
+                    // never arrive.
+                    promise.exception_ = std::make_exception_ptr(
+                        std::runtime_error(
+                            "chunked_response: no executor for inner generator"));
+                    promise.flattening_inner_ = nullptr;
+                    promise.flattening_inner_storage_.reset();
+                    promise.flattening_outer_handle_ = nullptr;
+                    promise.flattening_cancel_signal_.reset();
+                    auto handler = std::move(promise.completion_handler_);
+                    handler(std::nullopt);
+                    return;
+                }
                 if (promise.completion_handler_ && promise.executor_)
                 {
                     auto handler = std::move(promise.completion_handler_);
