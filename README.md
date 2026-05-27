@@ -20,6 +20,7 @@ boost.json, etc.
   - [Configuring the build directory](#configuring-the-build-directory)
     - [No package manager](#no-package-manager)
     - [Using Conan 2 package manager](#using-conan-2-package-manager)
+    - [Windows (MSVC) with Conan 2](#windows-msvc-with-conan-2)
   - [To build the code after configuring](#to-build-the-code-after-configuring)
   - [To run the unit-tests after the build](#to-run-the-unit-tests-after-the-build)
   - [To build and run the examples](#to-build-and-run-the-examples)

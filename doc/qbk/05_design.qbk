@@ -10,6 +10,18 @@
 This chapter records the design decisions that are not obvious from the
 reference documentation alone.
 
+* [link boost_taar.design.why_header_only Why header-only?] — what would
+  be different if Taar were a compiled library.
+* [link boost_taar.design.tag_invoke Tag invoke as the extension story]
+  — why `tag_invoke` overloads instead of virtual functions or template
+  specialisations.
+* [link boost_taar.design.soft_vs_hard Soft errors vs hard errors] —
+  what gets turned into an HTTP response and what tears the connection
+  down.
+* [link boost_taar.design.matchers Matchers as expression templates] —
+  why operator overloading and how it interacts with route dispatch
+  cost.
+
 [section:why_header_only Why header-only?]
 
 Every public type in Taar is a template that instantiates differently for
