@@ -13,7 +13,7 @@ class BoostTaarConan(ConanFile):
     topics = ("boost", "asio", "beast", "http", "network", "web", "taar")
     settings = "os", "arch", "compiler", "build_type"
     exports_sources = [
-        "boost/*",
+        "include/*",
         "cmake/*",
         "examples/*",
         "test/*",
