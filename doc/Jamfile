@@ -1,0 +1,104 @@
+# Copyright (c) 2021, 2024 Reza Jahanbakhshi
+#
+# Distributed under the Boost Software License, Version 1.0.
+# (See accompanying file LICENSE_1_0.txt or copy at
+#  http://www.boost.org/LICENSE_1_0.txt)
+#
+# Official repository: https://github.com/rjahanbakhshi/boost.taar
+
+import boostbook ;
+import doxygen ;
+import os ;
+import path ;
+import project ;
+import quickbook ;
+
+project taar/doc ;
+
+path-constant INCLUDES : ../include ;
+path-constant IMAGES   : images ;
+
+local doxygen-inputs =
+    [ glob $(INCLUDES)/boost/taar/core/*.hpp ]
+    [ glob $(INCLUDES)/boost/taar/handler/*.hpp ]
+    [ glob $(INCLUDES)/boost/taar/matcher/*.hpp ]
+    [ glob $(INCLUDES)/boost/taar/server/*.hpp ]
+    [ glob $(INCLUDES)/boost/taar/session/*.hpp ]
+    [ glob $(INCLUDES)/boost/taar/type_traits/*.hpp ]
+    ;
+
+doxygen reference.xml
+    : $(doxygen-inputs)
+    : <doxygen:param>PROJECT_NAME="Boost.Taar"
+      <doxygen:param>PROJECT_BRIEF="HTTP server and client building blocks for C++23"
+      <doxygen:param>JAVADOC_AUTOBRIEF=YES
+      <doxygen:param>AUTOLINK_SUPPORT=YES
+      <doxygen:param>EXTRACT_ALL=NO
+      <doxygen:param>EXTRACT_PRIVATE=NO
+      <doxygen:param>EXTRACT_LOCAL_CLASSES=NO
+      <doxygen:param>HIDE_UNDOC_MEMBERS=YES
+      <doxygen:param>HIDE_UNDOC_CLASSES=YES
+      <doxygen:param>HIDE_FRIEND_COMPOUNDS=YES
+      <doxygen:param>HIDE_SCOPE_NAMES=NO
+      <doxygen:param>SHOW_INCLUDE_FILES=YES
+      <doxygen:param>INHERIT_DOCS=YES
+      <doxygen:param>QUIET=YES
+      <doxygen:param>WARN_IF_UNDOCUMENTED=NO
+      <doxygen:param>WARN_NO_PARAMDOC=NO
+      <doxygen:param>FILE_PATTERNS="*.hpp"
+      <doxygen:param>RECURSIVE=YES
+      <doxygen:param>EXCLUDE_SYMBOLS="*detail* *impl*"
+      <doxygen:param>ENABLE_PREPROCESSING=YES
+      <doxygen:param>MACRO_EXPANSION=YES
+      <doxygen:param>EXPAND_ONLY_PREDEF=YES
+      <doxygen:param>SEARCH_INCLUDES=NO
+      <doxygen:param>PREDEFINED="BOOST_TAAR_DOC \\
+                                 BOOST_SYMBOL_VISIBLE= \\
+                                 BOOST_FORCEINLINE=inline"
+      <doxygen:param>GENERATE_HTML=NO
+      <doxygen:param>GENERATE_LATEX=NO
+      <doxygen:param>GENERATE_XML=YES
+      <doxygen:param>XML_OUTPUT=reference-xml
+      <doxygen:param>XML_PROGRAMLISTING=YES
+      <doxygen:xml-imagedir>$(IMAGES)
+    ;
+
+xml taar
+    : main.qbk
+    : <include>.
+      <dependency>reference.xml
+    ;
+
+explicit taar ;
+
+boostbook standalone
+    : taar
+    : <xsl:param>boost.root=../../../..
+      <xsl:param>boost.image.src=images/boost.png
+      <xsl:param>boost.image.alt=\"Boost C++ Libraries\"
+      <xsl:param>boost.image.w=277
+      <xsl:param>boost.image.h=86
+      <xsl:param>nav.layout=none
+      <xsl:param>boost.libraries=../../../libraries.htm
+      <xsl:param>chapter.autolabel=1
+      <xsl:param>chunk.section.depth=8
+      <xsl:param>chunk.first.sections=1
+      <xsl:param>toc.section.depth=2
+      <xsl:param>toc.max.depth=2
+      <xsl:param>generate.section.toc.level=2
+      <xsl:param>generate.toc="chapter toc,title section nop reference nop"
+      <format>html:<xsl:param>admon.graphics.path=images/
+      <format>html:<xsl:param>img.src.path=images/
+    ;
+
+install images
+    : [ glob images/*.png ]
+    : <location>html/taar/images
+    ;
+
+explicit images ;
+
+###############################################################################
+# Build everything by default.
+alias docs : standalone images ;
+explicit docs ;

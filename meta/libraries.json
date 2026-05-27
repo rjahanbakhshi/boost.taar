@@ -1,0 +1,17 @@
+{
+    "key": "taar",
+    "name": "Taar",
+    "authors": [
+        "Reza Jahanbakhshi"
+    ],
+    "maintainers": [
+        "Reza Jahanbakhshi <reza.jahanbakhshi -at- gmail.com>"
+    ],
+    "description": "A C++23 header-only library that builds on Boost.Asio, Boost.Beast, Boost.URL, and Boost.JSON to make writing HTTP servers and clients ergonomic: composable request matchers, a tag_invoke-based REST handler with automatic argument extraction, static-document and chunked-response handlers, and a TCP acceptor that wires it all together.",
+    "category": [
+        "IO",
+        "Concurrent",
+        "String"
+    ],
+    "cxxstd": "23"
+}

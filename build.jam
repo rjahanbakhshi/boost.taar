@@ -1,0 +1,48 @@
+# Copyright (c) 2021, 2024 Reza Jahanbakhshi
+#
+# Distributed under the Boost Software License, Version 1.0.
+# (See accompanying file LICENSE_1_0.txt or copy at
+#  http://www.boost.org/LICENSE_1_0.txt)
+#
+# Official repository: https://github.com/rjahanbakhshi/boost.taar
+
+require-b2 5.2 ;
+
+constant boost_dependencies :
+    /boost/asio//boost_asio
+    /boost/beast//boost_beast
+    /boost/json//boost_json
+    /boost/system//boost_system
+    /boost/url//boost_url
+    ;
+
+project /boost/taar
+    : common-requirements
+        <include>include
+    ;
+
+explicit
+    [ alias boost_taar
+        : # sources
+        : # requirements
+        : # default-build
+        : # usage-requirements
+            <include>include
+            <library>/boost/asio//boost_asio
+            <library>/boost/beast//boost_beast
+            <library>/boost/json//boost_json
+            <library>/boost/system//boost_system
+            <library>/boost/url//boost_url
+            <cxxstd>23
+            <toolset>msvc:<define>_WIN32_WINNT=0x0A00
+            <toolset>msvc:<define>WIN32_LEAN_AND_MEAN
+            <toolset>msvc:<define>NOMINMAX
+            <toolset>msvc:<cxxflags>/bigobj
+            <toolset>msvc:<cxxflags>/Zc:preprocessor
+            <toolset>msvc:<cxxflags>/Zc:__cplusplus
+    ]
+    [ alias all : boost_taar test ]
+    ;
+
+call-if : boost-library taar
+    ;

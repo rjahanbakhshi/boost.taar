@@ -1,0 +1,75 @@
+[/
+ / Copyright (c) 2021, 2024 Reza Jahanbakhshi
+ /
+ / Distributed under the Boost Software License, Version 1.0. (See accompanying
+ / file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
+ /]
+
+[section:design Design Notes]
+
+This chapter records the design decisions that are not obvious from the
+reference documentation alone.
+
+[section:why_header_only Why header-only?]
+
+Every public type in Taar is a template that instantiates differently for
+each user-supplied handler signature, request body, response body, and
+executor. There is no implementation that would benefit from being
+precompiled into a library — separating declaration from definition would
+force users to instantiate every combination explicitly. A header-only
+distribution keeps the build simple and matches the rest of the
+matcher/handler ecosystem on top of Boost.Beast and Boost.Asio.
+
+[endsect]
+
+[section:tag_invoke Tag invoke as the extension story]
+
+The two main customisation points,
+[link taar.ref.boost__taar__core__response_from `response_from`] and
+[link taar.ref.boost__taar__handler__rest_arg_cast `rest_arg_cast`], are
+exposed as `tag_invoke` overloads rather than virtual functions or class
+template specialisations.
+
+`tag_invoke` is found by ordinary argument-dependent lookup, which means a
+user-defined return type or argument type can opt in to Taar by declaring a
+free function next to the type itself, without touching any namespace owned
+by the library. This is the same pattern used by `boost::json::value_from`
+and the C++26 sender/receiver proposal.
+
+[endsect]
+
+[section:soft_vs_hard Soft errors vs hard errors]
+
+A /soft error/ is something that an HTTP handler should be able to turn
+into a normal HTTP response: a missing query parameter, an unparseable
+path argument, a body that fails to deserialise. A /hard error/ is
+something that takes the connection down: a peer disconnect mid-read, a
+write that fails because the socket is closed.
+
+Both have pluggable handlers installed on a session via
+`set_soft_error_handler` and `set_hard_error_handler`. The defaults are
+chosen so that you can build a useful service without overriding either:
+soft errors become 400/404/415 responses with a short text body, and hard
+errors are logged via the session's error reporter.
+
+[endsect]
+
+[section:matchers Matchers as expression templates]
+
+A matcher composition like
+
+    method == http::verb::get && target == "/api/{id}" && version == 11
+
+is not evaluated eagerly. Each operator returns a small object that holds
+its operands by value and carries the combined matching logic. The result
+is one expression-template object per registered route, with no heap
+allocation and full inlining at the call site.
+
+This is the same technique that __Boost_Spirit__, __Boost_Hana__, and
+__Boost_Proto__ rely on. The cost is that diagnostics for an ill-formed
+matcher are longer than they would be with a runtime API; the benefit is
+that route dispatch is a flat sequence of `if`s with no virtual calls.
+
+[endsect]
+
+[endsect]

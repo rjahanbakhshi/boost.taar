@@ -1,0 +1,85 @@
+[/
+ / Copyright (c) 2021, 2024 Reza Jahanbakhshi
+ /
+ / Distributed under the Boost Software License, Version 1.0. (See accompanying
+ / file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
+ /]
+
+[section:intro Introduction]
+
+Boost.Taar is a portable, header-only C++23 library that provides building
+blocks for writing HTTP servers and clients on top of __Asio__, __Beast__,
+__Url__, and __Json__.
+
+The library is organised around four ideas:
+
+* A [link taar.intro.matchers /matcher DSL/] for selecting which handler
+  should serve a given HTTP request.
+* A [link taar.intro.handlers /handler/] family that adapts ordinary
+  callables into HTTP message generators, with automatic argument
+  extraction from path templates, query parameters, headers, cookies, and
+  message bodies.
+* An [link taar.intro.session HTTP session coroutine] that owns the
+  request/response lifecycle for one connection, dispatching to registered
+  matcher + handler pairs and reporting soft and hard errors through
+  pluggable handlers.
+* A [link taar.intro.server TCP server coroutine] that accepts connections
+  and spawns an HTTP session per connection, integrated with Asio's
+  cancellation machinery.
+
+The library is header-only and does not require linking against a Taar
+binary. It does depend on the compiled Boost libraries that __Asio__,
+__Beast__, __Url__, __Json__, and __System__ require.
+
+[heading:matchers Matchers]
+
+A matcher is a small object that inspects an HTTP request and answers the
+question /does this request belong to me?/. Matchers compose with the usual
+boolean operators (`&&`, `||`, `!`) and with relational operators
+(`==`, `!=`) where it makes sense:
+
+    method == http::verb::get && target == "/api/sum/{a}/{b}"
+
+[heading:handlers Handlers]
+
+A handler turns an HTTP request into an HTTP response. The library ships
+with two adapters:
+
+* [link taar.ref.boost__taar__handler__rest `rest`] wraps a plain callable.
+  Arguments declared on the callable are produced by
+  [link taar.ref.boost__taar__handler /argument providers/] such as
+  `path_arg`, `query_arg`, `header_arg`, `cookie_arg`, and `body_arg`. The
+  return value of the callable is converted into an HTTP response via the
+  `tag_invoke`-based [link taar.ref.boost__taar__core__response_from
+  `response_from`] extension point, so user-defined return types are
+  supported out of the box.
+* [link taar.ref.boost__taar__handler__htdocs `htdocs`] serves static
+  documents from a root directory, with content-type inferred from the
+  file extension.
+
+You can also supply a hand-written callable with the signature
+`(request, context) -> http::message_generator`.
+
+[heading:session Sessions]
+
+The [link taar.ref.boost__taar__session__http `session::http`] coroutine
+holds a list of /(matcher, handler)/ pairs registered through
+`register_request_handler`. For each incoming request the session walks the
+list, runs the first matching handler, writes the response, and continues
+to the next request on the same keep-alive connection.
+
+The session distinguishes /soft errors/ (recoverable, application-visible
+problems like a missing query parameter that can be turned into a 400
+response) from /hard errors/ (connection-level problems that take the
+connection down). Both have pluggable handlers, defaulting to sane
+behaviour.
+
+[heading:server Servers]
+
+The [link taar.ref.boost__taar__server__tcp `server::tcp`] coroutine binds,
+listens, and accepts connections, spawning one
+[link taar.intro.session HTTP session] per connection. It integrates with
+Asio cancellation signals so a single signal can shut down the whole
+server.
+
+[endsect]

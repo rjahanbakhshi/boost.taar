@@ -1,0 +1,54 @@
+# Copyright (c) 2021, 2024 Reza Jahanbakhshi
+#
+# Distributed under the Boost Software License, Version 1.0.
+# (See accompanying file LICENSE_1_0.txt or copy at
+#  http://www.boost.org/LICENSE_1_0.txt)
+#
+# Official repository: https://github.com/rjahanbakhshi/boost.taar
+
+import testing ;
+
+project /boost/taar/test
+    : requirements
+        <library>/boost/taar//boost_taar
+        <library>/boost/test//boost_unit_test_framework
+        <cxxstd>23
+        <toolset>msvc:<cxxflags>/bigobj
+        <toolset>msvc:<cxxflags>/Zc:preprocessor
+        <toolset>msvc:<cxxflags>/Zc:__cplusplus
+    ;
+
+run
+    test.cpp
+    test_async_generator.cpp
+    test_callable_with.cpp
+    test_chunk_body_from.cpp
+    test_chunked_response.cpp
+    test_constexpr_string.cpp
+    test_cookies.cpp
+    test_http_session.cpp
+    test_is_http_response.cpp
+    test_matcher_cookie.cpp
+    test_matcher_header.cpp
+    test_matcher_method.cpp
+    test_matcher_operand.cpp
+    test_matcher_target.cpp
+    test_matcher_version.cpp
+    test_member_function_of.cpp
+    test_response_builder.cpp
+    test_response_from.cpp
+    test_response_from_user.cpp
+    test_rest.cpp
+    test_rest_arg.cpp
+    test_rest_arg_cast_builtin.cpp
+    test_rest_arg_cast_user.cpp
+    test_tcp_server.cpp
+    test_template_parser.cpp
+    type_traits/test_callable.cpp
+    type_traits/test_specialization_of.cpp
+    type_traits/test_super_type.cpp
+    : # args
+    : # input-files
+    : # requirements
+    : boost_taar_test
+    ;

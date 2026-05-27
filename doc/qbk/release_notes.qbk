@@ -1,0 +1,33 @@
+[/
+ / Copyright (c) 2021, 2024 Reza Jahanbakhshi
+ /
+ / Distributed under the Boost Software License, Version 1.0. (See accompanying
+ / file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
+ /]
+
+[section:release_notes Release Notes]
+
+[heading Unreleased]
+
+* Initial release preparation. Headers relocated to
+  `include/boost/taar/` to match the Boost modular layout.
+* Added `build.jam`, `meta/libraries.json`, and a `doc/` directory built on
+  QuickBook + Doxygen for integration with the Boost documentation build.
+
+[heading 0.0.46]
+
+* `cmake.test()` is used in the Conan recipe instead of a hand-built test
+  executable path.
+
+[heading 0.0.44]
+
+* `session::http`: surface mid-stream chunked errors;
+  harden `flatten_awaiter`.
+* MSVC `/bigobj` for heavy templates and a raw-handler test fix on Windows.
+
+[heading 0.0.43]
+
+* `session::http`: add `register_raw_handler` for protocol upgrades such
+  as WebSocket.
+
+[endsect]

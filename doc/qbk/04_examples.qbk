@@ -1,0 +1,34 @@
+[/
+ / Copyright (c) 2021, 2024 Reza Jahanbakhshi
+ /
+ / Distributed under the Boost Software License, Version 1.0. (See accompanying
+ / file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
+ /]
+
+[section:examples Examples]
+
+The `examples/` directory contains complete, buildable programs that
+exercise the most common use cases. The CMake target name matches the file
+name minus the extension, e.g. `cmake --build build --target http_server`.
+
+[table Examples shipped with the library
+[[Example][What it shows]]
+[[`awaitable_server.cpp`][Plain HTTP server with a handful of REST
+ endpoints, demonstrating `path_arg`, `query_arg`, and a JSON-returning
+ handler.]]
+[[`chunked_server.cpp`][HTTP server that streams a chunked response from an
+ async generator, useful for progress reporting or server-sent events.]]
+[[`htdocs_server.cpp`][Serving a directory of static files with correct
+ content types via `taar::handler::htdocs`.]]
+[[`mixed_server.cpp`][Combination of REST handlers and a fallback
+ static-file handler on the same session.]]
+[[`response_stream.cpp`][Building a streaming response by hand, without the
+ REST adapter.]]
+[[`websocket_server.cpp`][Protocol upgrade to WebSocket via
+ `register_raw_handler`.]]
+]
+
+Each example is small enough to be read top-to-bottom in one sitting. They
+are the recommended starting point for a new application.
+
+[endsect]

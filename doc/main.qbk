@@ -1,0 +1,40 @@
+[/
+ / Copyright (c) 2021, 2024 Reza Jahanbakhshi
+ /
+ / Distributed under the Boost Software License, Version 1.0. (See accompanying
+ / file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
+ /
+ / Official repository: https://github.com/rjahanbakhshi/boost.taar
+ /]
+
+[library Boost.Taar
+    [quickbook 1.7]
+    [copyright 2021, 2024 Reza Jahanbakhshi]
+    [purpose HTTP server and client building blocks for C++23.]
+    [license
+        Distributed under the Boost Software License, Version 1.0.
+        (See accompanying file LICENSE_1_0.txt or copy at
+        [@http://www.boost.org/LICENSE_1_0.txt])
+    ]
+    [authors [Jahanbakhshi, Reza]]
+    [category template]
+    [category generic]
+]
+
+[template mdash[] '''&mdash; ''']
+[template indexterm1[term1] '''<indexterm><primary>'''[term1]'''</primary></indexterm>''']
+[template indexterm2[term1 term2] '''<indexterm><primary>'''[term1]'''</primary><secondary>'''[term2]'''</secondary></indexterm>''']
+
+[include qbk/01_intro.qbk]
+[include qbk/02_quickstart.qbk]
+[include qbk/03_concepts.qbk]
+[include qbk/04_examples.qbk]
+[include qbk/05_design.qbk]
+
+[section:ref Reference]
+[xinclude reference.xml]
+[endsect]
+
+[include qbk/release_notes.qbk]
+
+[xinclude index.xml]

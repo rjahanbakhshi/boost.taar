@@ -1,0 +1,124 @@
+[/
+ / Copyright (c) 2021, 2024 Reza Jahanbakhshi
+ /
+ / Distributed under the Boost Software License, Version 1.0. (See accompanying
+ / file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
+ /]
+
+[section:quickstart Quick Start]
+
+[section:requirements Requirements]
+
+* A C++23 conforming compiler. Boost.Taar is exercised on recent GCC, Clang
+  and MSVC toolchains.
+* Boost 1.84 or later, with the __Asio__, __Beast__, __Url__, __Json__, and
+  __System__ libraries available.
+* CMake 3.28 or later if you build against the bundled `CMakeLists.txt`.
+
+[endsect]
+
+[section:installation Installation]
+
+Taar is header-only. Drop the `include/` directory on your include path and
+link against the compiled Boost libraries that __Asio__, __Beast__,
+__Url__, __Json__, and __System__ already require for your application.
+
+Inside a Boost super-project the library participates in the modular build
+through `build.jam`; no extra configuration is required.
+
+[endsect]
+
+[section:hello A Hello World HTTP Server]
+
+The smallest useful program registers a single REST endpoint and runs an
+acceptor on port 8080:
+
+    #include <boost/taar/handler/rest.hpp>
+    #include <boost/taar/matcher/method.hpp>
+    #include <boost/taar/matcher/target.hpp>
+    #include <boost/taar/server/tcp.hpp>
+    #include <boost/taar/session/http.hpp>
+    #include <boost/asio/co_spawn.hpp>
+    #include <boost/asio/detached.hpp>
+    #include <boost/asio/io_context.hpp>
+    #include <boost/beast/http/verb.hpp>
+
+    int main()
+    {
+        namespace taar = boost::taar;
+        namespace http = boost::beast::http;
+        using taar::matcher::method;
+        using taar::matcher::target;
+
+        boost::asio::io_context io;
+
+        taar::session::http http_session;
+        http_session.register_request_handler(
+            method == http::verb::get && target == "/hello",
+            taar::handler::rest([]{ return "Hello, world!"; }));
+
+        taar::cancellation_signals signals;
+        boost::asio::co_spawn(
+            io,
+            taar::server::tcp("0.0.0.0", "8080", http_session, signals),
+            boost::asio::detached);
+
+        io.run();
+    }
+
+For a full version that includes signal handling and graceful shutdown,
+see the [link taar.examples examples chapter].
+
+[endsect]
+
+[section:tour A Whirlwind Tour]
+
+[heading Stock response]
+
+    taar::session::http http_session;
+    http_session.register_request_handler(
+        method == http::verb::get && target == "/api/version",
+        taar::handler::rest([]{ return "1.0"; }));
+
+[heading JSON response with path arguments]
+
+    http_session.register_request_handler(
+        method == http::verb::get && target == "/api/sum/{a}/{b}",
+        taar::handler::rest(
+            [](int a, int b)
+            {
+                return boost::json::value {
+                    {"a", a},
+                    {"b", b},
+                    {"result", a + b}
+                };
+            },
+            taar::handler::path_arg("a"),
+            taar::handler::path_arg("b")));
+
+[heading Serving static files]
+
+    http_session.register_request_handler(
+        method == http::verb::get && target == "/{*}",
+        taar::handler::htdocs {document_root});
+
+[heading Custom handler]
+
+    http_session.register_request_handler(
+        method == http::verb::put && target == "/special/{*}",
+        [](http::request<http::empty_body> const& request,
+           taar::matcher::context const& context)
+            -> http::message_generator
+        {
+            http::response<http::string_body> res {
+                http::status::ok, request.version()};
+            res.set(http::field::content_type, "text/plain");
+            res.keep_alive(request.keep_alive());
+            res.body() = "Special path is: " + context.path_args.at("*");
+            res.prepare_payload();
+            return res;
+        });
+
+[endsect]
+
+[endsect]
