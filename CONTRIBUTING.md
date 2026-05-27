@@ -67,6 +67,48 @@ By submitting a pull request you assert that you have the right to license
 your contribution under the Boost Software License, Version 1.0, and that
 you agree to do so.
 
+## Testing with b2
+
+The CMake build above is enough for day-to-day work. Patches that touch
+`build.jam`, `test/Jamfile`, `meta/libraries.json`, or `doc/` additionally
+need to be verified against the Boost B2 build, because that is the build
+that runs when taar is consumed as part of a Boost super-project.
+
+Set up a Boost super-project checkout once:
+
+```bash
+git clone --recursive https://github.com/boostorg/boost.git \
+    ~/src/boost-modular
+cd ~/src/boost-modular && ./bootstrap.sh
+```
+
+Then symlink (or `git submodule add`) your working copy of taar into
+`libs/`:
+
+```bash
+ln -s ~/proj/boost.taar ~/src/boost-modular/libs/taar
+```
+
+Run the tests with B2:
+
+```bash
+cd ~/src/boost-modular
+./b2 libs/taar/test cxxstd=23
+```
+
+Build the documentation. This requires `doxygen`, `xsltproc`, and the
+`docbook-xsl` stylesheets to be installed on your system; B2 compiles
+QuickBook itself the first time:
+
+```bash
+./b2 libs/taar/doc
+```
+
+Generated HTML lands in `libs/taar/doc/html/`. Open `index.html` in a
+browser to sanity-check that the narrative chapters in `doc/qbk/` render
+and that the reference section pulled from the Doxygen comments looks
+right.
+
 ## Coding conventions
 
 The conventions here exist so that any header reads the same way as any
