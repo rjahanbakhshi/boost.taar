@@ -7,6 +7,20 @@
 
 [section:quickstart Quick Start]
 
+This chapter walks through what you need to build against Boost.Taar,
+how to bring it into your own project, the smallest useful HTTP server
+you can write with it, and a tour of the four idioms you will see again
+and again:
+
+* [link boost_taar.quickstart.requirements Requirements] — supported
+  compilers, Boost components, and CMake version.
+* [link boost_taar.quickstart.installation Installation] — header-only
+  drop-in, Boost super-project, and CMake/Conan integration.
+* [link boost_taar.quickstart.hello A Hello World HTTP Server] — a
+  complete program serving a single GET endpoint.
+* [link boost_taar.quickstart.tour A Whirlwind Tour] — stock responses,
+  JSON, path arguments, static files, and hand-written handlers.
+
 [section:requirements Requirements]
 
 * A C++23 conforming compiler. Boost.Taar is exercised on recent GCC, Clang

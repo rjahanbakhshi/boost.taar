@@ -13,19 +13,22 @@ name minus the extension, e.g. `cmake --build build --target http_server`.
 
 [table Examples shipped with the library
 [[Example][What it shows]]
-[[`awaitable_server.cpp`][Plain HTTP server with a handful of REST
- endpoints, demonstrating `path_arg`, `query_arg`, and a JSON-returning
- handler.]]
-[[`chunked_server.cpp`][HTTP server that streams a chunked response from an
- async generator, useful for progress reporting or server-sent events.]]
-[[`htdocs_server.cpp`][Serving a directory of static files with correct
- content types via `taar::handler::htdocs`.]]
-[[`mixed_server.cpp`][Combination of REST handlers and a fallback
- static-file handler on the same session.]]
-[[`response_stream.cpp`][Building a streaming response by hand, without the
- REST adapter.]]
-[[`websocket_server.cpp`][Protocol upgrade to WebSocket via
- `register_raw_handler`.]]
+[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/awaitable_server.cpp awaitable_server.cpp]]
+ [Plain HTTP server with a handful of REST endpoints, demonstrating
+ `path_arg`, `query_arg`, and a JSON-returning handler.]]
+[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/chunked_server.cpp chunked_server.cpp]]
+ [HTTP server that streams a chunked response from an async generator,
+ useful for progress reporting or server-sent events.]]
+[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/htdocs_server.cpp htdocs_server.cpp]]
+ [Serving a directory of static files with correct content types via
+ `taar::handler::htdocs`.]]
+[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/mixed_server.cpp mixed_server.cpp]]
+ [Combination of REST handlers and a fallback static-file handler on the
+ same session.]]
+[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/response_stream.cpp response_stream.cpp]]
+ [Building a streaming response by hand, without the REST adapter.]]
+[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/websocket_server.cpp websocket_server.cpp]]
+ [Protocol upgrade to WebSocket via `register_raw_handler`.]]
 ]
 
 Each example is small enough to be read top-to-bottom in one sitting. They

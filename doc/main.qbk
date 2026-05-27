@@ -25,14 +25,69 @@
 [template indexterm1[term1] '''<indexterm><primary>'''[term1]'''</primary></indexterm>''']
 [template indexterm2[term1 term2] '''<indexterm><primary>'''[term1]'''</primary><secondary>'''[term2]'''</secondary></indexterm>''']
 
+[heading Overview]
+
+Boost.Taar is a portable, header-only C++23 library that provides
+ergonomic building blocks for writing HTTP servers and clients on top of
+__Asio__, __Beast__, __Url__, and __Json__. It is licensed under the
+Boost Software License, Version 1.0.
+
+The library is organised around four ideas:
+
+* a [link boost_taar.intro.matchers /matcher DSL/] for selecting which
+  handler should serve a given HTTP request,
+* a [link boost_taar.intro.handlers /handler/] family that turns ordinary
+  callables into HTTP responders, with automatic argument extraction
+  from path templates, query parameters, headers, cookies, and request
+  bodies,
+* a [link boost_taar.intro.session session coroutine] that owns the
+  request/response lifecycle for one keep-alive connection,
+* a [link boost_taar.intro.server TCP server coroutine] that accepts
+  connections and dispatches them to the session.
+
+[heading At a glance]
+
+A complete HTTP server that responds with a JSON sum for path
+parameters fits in a handful of lines:
+
+    namespace taar = boost::taar;
+    namespace http = boost::beast::http;
+    using taar::matcher::method;
+    using taar::matcher::target;
+
+    taar::session::http http_session;
+    http_session.register_request_handler(
+        method == http::verb::get && target == "/api/sum/{a}/{b}",
+        taar::handler::rest(
+            [](int a, int b)
+            {
+                return boost::json::value {
+                    {"a", a}, {"b", b}, {"result", a + b}
+                };
+            },
+            taar::handler::path_arg("a"),
+            taar::handler::path_arg("b")));
+
+    boost::asio::io_context io;
+    taar::cancellation_signals signals;
+    boost::asio::co_spawn(
+        io,
+        taar::server::tcp("0.0.0.0", "8080", http_session, signals),
+        boost::asio::detached);
+    io.run();
+
+The path-template `{a}` and `{b}` placeholders are extracted, parsed to
+`int`, and forwarded to the lambda. The returned `boost::json::value` is
+serialised as `application/json` automatically. See the
+[link boost_taar.quickstart Quick Start] for a fuller walk-through and
+the [link boost_taar.examples Examples chapter] for complete programs.
+
 [include qbk/01_intro.qbk]
 [include qbk/02_quickstart.qbk]
 [include qbk/03_concepts.qbk]
 [include qbk/04_examples.qbk]
 [include qbk/05_design.qbk]
 
-[section:ref Reference]
 [xinclude reference.xml]
-[endsect]
 
 [include qbk/release_notes.qbk]
