@@ -55,8 +55,14 @@ jobs:
           git clone -b "$BOOST_BRANCH" --depth=1 \
             https://github.com/boostorg/boost.git boost-modular
           cd boost-modular
+          # Initial sparse init. libs/program_options and libs/filesystem
+          # are listed here because the quickbook tool links against them
+          # and depinst.py program_options would otherwise be a no-op —
+          # it walks a library's headers, but the library has to already
+          # be present in libs/ for that walk to find anything.
           git submodule update --init --depth=1 --jobs=8 \
             libs/config libs/headers libs/predef \
+            libs/program_options libs/filesystem \
             tools/build tools/boostbook tools/quickbook tools/boostdep \
             tools/boost_install
 
