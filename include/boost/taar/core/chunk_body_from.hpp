@@ -100,11 +100,19 @@ concept has_built_in_chunk_body_from = requires (T&& arg)
 
 } // namespace detail
 
+/// True if @ref chunk_body_from accepts a value of type @a T.
 template <typename T>
 concept has_chunk_body_from =
     detail::has_user_defined_chunk_body_from<T> ||
     detail::has_built_in_chunk_body_from<T>;
 
+/** Serialise @a value into the bytes of one HTTP chunk.
+
+    A user-defined `tag_invoke(chunk_body_from_tag<...>, ...)` overload
+    takes precedence over the built-in conversions for `std::string`,
+    `std::string_view`, `char const*`, arithmetic values,
+    `boost::json::value` (serialised as JSON), and byte buffers.
+*/
 template <has_chunk_body_from T>
 inline std::string chunk_body_from(T&& value)
 {

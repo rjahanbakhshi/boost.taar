@@ -184,11 +184,36 @@ concept has_built_in_response_from = requires (T&&... args)
 
 } // namespace detail
 
+/** True if @ref response_from accepts the argument pack @a T....
+
+    Satisfied when either a user-defined `tag_invoke` overload exists for
+    @ref response_from_tag, or one of the built-in conversions applies.
+*/
 template <typename... T>
 concept has_response_from =
     detail::has_user_defined_response_from<T...> ||
     detail::has_built_in_response_from<T...>;
 
+/** Convert one or more values into an HTTP response.
+
+    Resolution order:
+
+    @li A user-defined `tag_invoke(response_from_tag<...>, ...)` overload
+        found by ADL takes precedence.
+    @li Otherwise a built-in conversion is selected. Built-ins cover
+        `std::string`, `std::string_view`, `char const*`, integral and
+        floating-point values (rendered with `std::format`),
+        `boost::json::value` (serialised as `application/json`), and
+        `std::span<std::byte const>` / `std::vector<std::byte>` (sent as
+        `application/octet-stream`).
+
+    Calling with no arguments returns a default empty 200 response, which
+    is the response produced when a `void`-returning handler completes
+    successfully.
+
+    @returns A value satisfying @ref boost::taar::is_http_response or a
+             `boost::beast::http::message_generator`.
+*/
 template <has_response_from... T>
 inline constexpr auto response_from(T&&... value)
 {
@@ -206,6 +231,7 @@ inline constexpr auto response_from(T&&... value)
     }
 }
 
+/// The result type produced by @ref response_from for argument pack @a T....
 template <has_response_from... T>
 using response_from_t = std::invoke_result_t<decltype(response_from<T...>), T...>;
 

@@ -12,6 +12,15 @@
 
 namespace boost::taar {
 
+/** Tag used to customise @ref chunk_body_from for user-defined chunk types.
+
+    Overload `tag_invoke(chunk_body_from_tag<MyType>, MyType const&)` to
+    teach the chunked-response machinery how to serialise a value of your
+    type into the bytes of one HTTP chunk. The overload must return a type
+    convertible to `std::string`.
+
+    @tparam T The decayed chunk value type.
+*/
 template <typename T>
 struct chunk_body_from_tag {};
 

@@ -16,6 +16,20 @@
 
 namespace boost::taar {
 
+/** A fixed-length string usable as a non-type template parameter.
+
+    `constexpr_string` is a literal type that can be passed as an NTTP,
+    making it possible to tag types with string identifiers at compile
+    time. Construct it from a string literal:
+
+    @code
+    using boost::taar::literals;
+    constexpr auto kind = "users"_cs;
+    @endcode
+
+    @tparam N The length of the underlying character array, including the
+              terminating null.
+*/
 template <std::size_t N>
 struct constexpr_string
 {

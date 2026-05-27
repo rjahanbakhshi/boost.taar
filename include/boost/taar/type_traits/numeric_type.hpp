@@ -14,6 +14,12 @@
 
 namespace boost::taar::type_traits {
 
+/** Concept: integral or floating-point, but not `bool`.
+
+    The exclusion of `bool` is deliberate: boolean conversions get their
+    own @ref boost::taar::handler::rest_arg_cast path (`"true"`/`"yes"`/`"1"`),
+    so numeric overloads should not also accept `bool`.
+*/
 template <typename T>
 concept numeric_type =
     !std::is_same_v<T, bool> && (

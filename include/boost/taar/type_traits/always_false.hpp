@@ -14,8 +14,14 @@
 
 namespace boost::taar::type_traits {
 
-// A dependent type always evaluating to false_type. This is necessary due to
-// a limitation in C++20 which is addressed with P2593 and accepted in C++23
+/** A dependent `std::false_type` for use in `static_assert`.
+
+    Used to write `static_assert(always_false<T...>, "...")` inside a
+    template branch that should never be instantiated. The dependency on
+    @a T... defers evaluation to the template instantiation site, which
+    avoids triggering the assertion when the surrounding template is only
+    declared but never instantiated.
+*/
 template <typename...>
 inline constexpr std::false_type always_false {};
 

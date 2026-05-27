@@ -14,6 +14,7 @@
 
 namespace boost::taar::type_traits {
 
+/// Concept: a `std::ranges::range` with a nested `value_type`.
 template<typename C>
 concept container_like =
     std::ranges::range<C> &&
@@ -22,6 +23,7 @@ concept container_like =
         typename C::value_type;
     };
 
+/// Concept: a container that exposes `push_back(T)`.
 template<typename C, typename T>
 concept push_backable_container =
     requires(C c, T&& t)
@@ -29,6 +31,7 @@ concept push_backable_container =
         c.push_back(std::forward<T>(t));
     };
 
+/// Concept: a container that exposes `insert(T)`.
 template<typename C, typename T>
 concept insertable_container =
     requires(C c, T&& t)

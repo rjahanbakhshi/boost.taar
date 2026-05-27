@@ -37,12 +37,27 @@ constexpr auto cookie_unquoted_octet_chars =
 
 } // namespace detail
 
+/// A single name/value cookie pair (used when iterating the parser output).
 struct cookie
 {
-    std::string name;
-    std::string value;
+    std::string name;   ///< Cookie name, percent-decoded.
+    std::string value;  ///< Cookie value, percent-decoded.
 };
 
+/** Owning, unordered container of request cookies.
+
+    A `cookies` instance stores the percent-decoded name/value pairs that
+    were parsed from a request's `Cookie` header. The session populates one
+    of these per request when any registered matcher or handler needs
+    cookie data; user code typically does not construct it directly.
+
+    The interface mirrors `std::unordered_map<std::string, std::string>`
+    enough that the usual `find`, `contains`, `at`, range-based for, and
+    structured-binding patterns all work.
+
+    To parse a cookie string outside a session, use the free function
+    @ref parse_cookies.
+*/
 class cookies
 {
 public:
@@ -67,8 +82,14 @@ public:
     using insert_return_type = items_type::insert_return_type;
 
 public:
+    /// Construct an empty container.
     cookies() = default;
 
+    /** Construct by parsing a `Cookie` header value.
+
+        @throws boost::system::system_error if the header is malformed
+                (carries an @ref error::invalid_cookie_format code).
+    */
     cookies(std::string_view cookie_string)
     {
         auto e = parse_cookies(cookie_string, *this);
@@ -177,6 +198,11 @@ public:
         return items_.equal_range(key);
     }
 
+    /** Parse @a cookie_string and append the results into @a result.
+
+        @returns @ref error::success on success or
+                 @ref error::invalid_cookie_format on a syntax error.
+    */
     friend error parse_cookies(std::string_view cookie_string, cookies& result)
     {
         enum class states
@@ -324,6 +350,11 @@ public:
         return error::success;
     }
 
+    /** Parse @a cookie_string into a fresh @ref cookies.
+
+        @returns A `boost::system::result` carrying the parsed cookies, or
+                 an @ref error code if the input is malformed.
+    */
     friend boost::system::result<cookies, error> parse_cookies(
         std::string_view cookie_string)
     {

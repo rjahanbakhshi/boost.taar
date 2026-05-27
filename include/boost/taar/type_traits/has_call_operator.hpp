@@ -12,7 +12,7 @@
 
 namespace boost::taar::type_traits {
 
-// Concept to check if a type has a callable operator()
+/// Satisfied when @a T has a member `operator()` whose address can be taken.
 template <typename T>
 concept has_call_operator = requires(T t)
 {

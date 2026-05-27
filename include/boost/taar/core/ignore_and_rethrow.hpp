@@ -14,6 +14,14 @@
 
 namespace boost::taar {
 
+/** Completion handler that rethrows any reported exception.
+
+    Intended as the completion token for `co_spawn` on a top-level
+    coroutine — most usefully the @ref boost::taar::server::tcp acceptor.
+    A reported exception is rethrown into the surrounding scope so that
+    `io_context::run()` returns and the program can shut down rather than
+    silently swallowing the failure.
+*/
 struct ignore_and_rethrow_t
 {
     void operator()(std::exception_ptr const& eptr)
@@ -24,6 +32,8 @@ struct ignore_and_rethrow_t
         }
     }
 };
+
+/// Stateless instance of @ref ignore_and_rethrow_t.
 static ignore_and_rethrow_t const ignore_and_rethrow;
 
 } // namespace boost::taar

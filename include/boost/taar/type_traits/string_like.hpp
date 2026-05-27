@@ -15,12 +15,15 @@
 
 namespace boost::taar::type_traits {
 
+/// Trait: `value` is true if `std::string` can be constructed from @a T.
 template <typename T>
 using is_string_like = std::is_constructible<std::string, T>;
 
+/// Convenience variable template for @ref is_string_like.
 template <typename T>
 inline constexpr bool is_string_like_v = is_string_like<T>::value;
 
+/// Concept form of @ref is_string_like.
 template <typename T>
 concept string_like = is_string_like_v<T>;
 

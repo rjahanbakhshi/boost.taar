@@ -32,6 +32,32 @@
 
 namespace boost::taar {
 
+/** A coroutine-based asynchronous generator of values of type @a T.
+
+    `async_generator<T>` is the building block for HTTP responses produced
+    incrementally — streaming JSON, server-sent events, NDJSON, or any
+    other body that should be written to the wire as the data becomes
+    available.
+
+    Inside the generator body, suspend with `co_yield value` to produce a
+    value. The session drives the generator with @ref next, which returns
+    an awaitable resolving to `std::optional<T>` — empty when the generator
+    has exhausted. The generator may also `co_await` arbitrary
+    `asio::awaitable`s as long as an executor has been installed via
+    @ref set_executor.
+
+    `async_generator<T>` may yield another `async_generator<T>` to splice
+    its values into the outer stream (flattening). Exceptions thrown from
+    the generator body are stashed on the promise and rethrown from the
+    next @ref next call. Cancellation propagates via @ref set_cancellation_slot.
+
+    See @ref boost::taar::chunked_response for the variant that additionally
+    lets the producer set the HTTP status and headers before the first
+    chunk goes on the wire.
+
+    @tparam T The yielded value type. Any type accepted by
+              @ref boost::taar::chunk_body_from is supported.
+*/
 template <typename T>
 class async_generator
 {
@@ -535,12 +561,14 @@ public:
         destroy_handle();
     }
 
+    /// Install the executor used to drive `co_await`s and post completions.
     void set_executor(executor_type executor)
     {
         if (handle_)
             handle_.promise().executor_ = std::move(executor);
     }
 
+    /// Wire @a slot so that cancelling it cancels all pending work in the generator.
     void set_cancellation_slot(boost::asio::cancellation_slot slot)
     {
         if (handle_ && slot.is_connected())
@@ -566,6 +594,7 @@ public:
         }
     }
 
+    /// If the generator body stashed an exception, rethrow and clear it.
     void rethrow_if_exception()
     {
         if (handle_ && handle_.promise().exception_)
@@ -576,7 +605,18 @@ public:
         }
     }
 
-    // next() returns awaitable<std::optional<T>> for integration with asio coroutines
+    /** Drive the generator forward by one step.
+
+        Returns an awaitable that resolves to a tuple
+        `(error_code, std::optional<T>)`. The optional is empty when the
+        generator has finished producing values; the error code carries
+        any transport-level failure (currently always empty, exceptions
+        from the body are propagated by rethrow inside the coroutine).
+
+        If no executor has been installed via @ref set_executor, the one
+        associated with the calling coroutine is captured on the first
+        call.
+    */
     auto next()
     {
         using token_type = boost::asio::as_tuple_t<

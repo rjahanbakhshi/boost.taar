@@ -16,7 +16,17 @@
 
 namespace boost::taar::type_traits {
 
-// Primary template for retrieving the nth argument type (unspecialized)
+/** Uniform introspection of any callable type.
+
+    `callable<F>` exposes the result type, the parameter types, the
+    `signature`, and the `args_count` of @a F, regardless of whether @a F
+    is a function type, a function pointer, a member-function pointer, or
+    a class type with `operator()` (functor, lambda).
+
+    The primary template is intentionally ill-formed; only specialisations
+    exist. Apply a `static_assert` like the one below if you need to
+    handle non-callable inputs gracefully.
+*/
 template <typename CallableType>
 struct callable
 {
@@ -78,15 +88,19 @@ struct callable<CallableType>
     static constexpr auto args_count = callable<decltype(&CallableType::operator())>::args_count;
 };
 
+/// The @a N-th parameter type of @a CallableType.
 template <typename CallableType, std::size_t N>
 using callable_arg = typename callable<CallableType>::template arg<N>;
 
+/// The result type of @a CallableType.
 template <typename CallableType>
 using callable_result = typename callable<CallableType>::result;
 
+/// The function signature of @a CallableType (as `R(Args...)`).
 template <typename CallableType>
 using callable_signature = typename callable<CallableType>::signature;
 
+/// The number of parameters of @a CallableType.
 template <typename CallableType>
 inline constexpr auto callable_args_count = callable<CallableType>::args_count;
 

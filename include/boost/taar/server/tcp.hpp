@@ -24,7 +24,36 @@
 
 namespace boost::taar::server {
 
-// tcp server coroutine to be spawned for each tcp server instance.
+/** Coroutine that binds, listens, and accepts TCP connections.
+
+    Spawn one instance of this coroutine per listen endpoint. It resolves
+    @a bind_host / @a bind_port, opens an acceptor with `SO_REUSEADDR`,
+    starts listening on `max_listen_connections`, and then loops accepting
+    connections until cancellation is requested through @a signals.
+
+    Each accepted socket is forwarded to @a session_handler on the executor
+    of the new socket. The handler is responsible for the full lifetime of
+    the connection — typically by invoking a
+    @ref boost::taar::session::http instance.
+
+    @param bind_host             Host or address to bind. `"0.0.0.0"` and
+                                 `"::"` accept on all interfaces.
+    @param bind_port             Port string. The empty string asks the OS
+                                 to pick a port; use @a local_endpoint_handler
+                                 to learn the chosen port.
+    @param session_handler       A callable invoked as
+                                 @c session_handler(socket, signals). Usually
+                                 a @ref boost::taar::session::http instance
+                                 by reference.
+    @param signals               Cancellation pool. The same pool is shared
+                                 with spawned sessions so a single
+                                 @ref cancellation_signals::emit shuts the
+                                 server down.
+    @param local_endpoint_handler Optional callback invoked with the
+                                 resolved local endpoint after `bind()`.
+
+    @throws std::system_error if name resolution fails.
+*/
 template <typename SessionHandler> // TODO: SessionHandler concept for callable with correct syntax
 [[nodiscard]] awaitable<void> tcp(
     std::string bind_host,

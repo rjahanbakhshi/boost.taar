@@ -14,6 +14,13 @@
 
 namespace boost::taar {
 
+/** Key/value map produced by @ref boost::taar::handler::url_encoded_form_data_arg.
+
+    Keys are percent-decoded parameter names. Values are percent-decoded
+    parameter values. The map is unordered; if the same key appears more
+    than once in the form data only one value is retained (which one is
+    unspecified).
+*/
 using form_kvp = std::unordered_map<std::string, std::string>;
 
 } // namespace boost::taar

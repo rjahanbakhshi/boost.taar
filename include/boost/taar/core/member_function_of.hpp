@@ -23,6 +23,7 @@ struct is_member_function_of_helper<T U::*, U> : std::is_function<T> {};
 
 } // namespace detail
 
+/// Trait: `value` is true if @a T is a pointer to a non-static member function of @a U.
 template<typename T, typename U>
 struct is_member_function_of
     : detail::is_member_function_of_helper<
@@ -30,9 +31,11 @@ struct is_member_function_of
         std::remove_cvref_t<std::remove_pointer_t<U>>>
 {};
 
+/// Convenience variable template for @ref is_member_function_of.
 template<typename T, typename U>
 inline constexpr bool is_member_function_of_v = is_member_function_of<T, U>::value;
 
+/// Concept form of @ref is_member_function_of.
 template<typename T, typename U>
 concept member_function_of = is_member_function_of_v<T, U>;
 

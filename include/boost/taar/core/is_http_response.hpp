@@ -28,6 +28,7 @@ public:
 
 } // namespace detail
 
+/// True if @a T is a specialisation of `boost::beast::http::response`.
 template<class T>
 concept is_http_response = requires
 {

@@ -16,6 +16,15 @@
 
 namespace boost::taar {
 
+/** Rebind an Asio I/O object to taar's default executor and completion token.
+
+    Given an Asio I/O object type @a T (e.g. `tcp::socket`,
+    `beast::tcp_stream`, `tcp::acceptor`), this alias produces the
+    corresponding type using `io_context::executor_type` and bound to the
+    @ref boost::taar::use_awaitable_tuple completion token. The result is
+    the type Taar's coroutines use throughout, sparing the user from
+    spelling out the rebind boilerplate.
+*/
 template <typename T>
 using rebind_executor = typename T::template
     rebind_executor<

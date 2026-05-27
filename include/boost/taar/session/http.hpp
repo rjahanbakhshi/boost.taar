@@ -273,6 +273,45 @@ awaitable<bool> write_chunked_response(
 
 } // detail
 
+/** Per-connection HTTP session coroutine.
+
+    A single `http` instance is shared across every TCP connection accepted
+    by @ref boost::taar::server::tcp. Each accepted socket is dispatched to
+    the call operator, which reads requests in a keep-alive loop, walks the
+    registered matchers in order, runs the first matching handler, writes
+    the response, and continues with the next request on the same
+    connection until the client closes, the response opts out of
+    keep-alive, or cancellation is requested.
+
+    Register routes with @ref register_request_handler. Each route is a
+    matcher (see @ref boost::taar::matcher) paired with a handler. The
+    handler can be:
+
+    @li A REST adapter produced by
+        @ref boost::taar::handler::rest "taar::handler::rest", or
+    @li A static-file handler @ref boost::taar::handler::htdocs, or
+    @li A user-written callable with the signature
+        `(request, context) -> message_generator` or an awaitable variant.
+
+    Protocol upgrades (WebSocket, HTTP/2 etc.) are supported through
+    @ref register_raw_handler, which hands the socket, the parsed header,
+    and any post-header bytes to the handler and then closes the session
+    cleanly.
+
+    Two error-reporting hooks are exposed:
+
+    @li @ref set_soft_error_handler — invoked when a handler throws.
+        Receives the `exception_ptr`, has access to the stream, and is
+        expected to write an HTTP response describing the error. The
+        default handler turns @ref boost::taar::error codes into 400
+        responses.
+    @li @ref set_hard_error_handler — invoked when the connection itself
+        fails. The default discards the exception silently; a real server
+        should at least log.
+
+    `http` is move-constructible but not copyable; share one instance among
+    spawned sessions by reference.
+*/
 class http
 {
 private:
@@ -348,13 +387,13 @@ public:
         }
     {}
 
-    // Set the request header limit. Default is 8192 bytes.
+    /// Cap the bytes consumed by a request header. Default 8 KiB.
     void set_request_header_limit(std::uint32_t limit)
     {
         request_header_limit_ = limit;
     }
 
-    // Setting body limit to `boost::none` means no limit. The default body limit is 1 MiB.
+    /// Cap the bytes consumed by a request body. `boost::none` disables the cap. Default 1 MiB.
     void set_request_body_limit(boost::optional<std::uint64_t> limit)
     {
         request_body_limit_ = limit;
@@ -366,6 +405,13 @@ public:
     http& operator=(http&&) = default;
     ~http() = default;
 
+    /** Drive one accepted connection to completion.
+
+        Called by @ref boost::taar::server::tcp for every accepted socket.
+        Owns the socket, parses request headers, dispatches to matching
+        handlers, writes responses, honours keep-alive, and terminates on
+        cancellation, peer close, or after a non-keep-alive response.
+    */
     awaitable<void> operator()(
         rebind_executor<boost::asio::ip::tcp::socket> socket,
         cancellation_signals& signals)
@@ -538,6 +584,26 @@ public:
             "Http handler target must be move-constructible");
     }
 
+    /** Register a request handler paired with a matcher.
+
+        Routes are evaluated in registration order on every request. The
+        first matcher that returns `true` wins, the corresponding handler
+        runs, and its response is written back to the client.
+
+        The handler may be:
+
+        @li A @ref boost::taar::handler::rest "rest" adapter,
+        @li A @ref boost::taar::handler::htdocs "htdocs" handler,
+        @li A raw callable accepting
+            `(boost::beast::http::request<Body> const&, taar::matcher::context const&)`
+            and returning a `message_generator` (synchronously or as an
+            awaitable). The body type drives how the session reads the
+            request body.
+
+        @param matcher        A matcher object — see
+                              @ref boost::taar::matcher::is_matcher.
+        @param request_handler The handler callable; must be move-constructible.
+    */
     template <typename MatcherType, typename RequestHandler> requires(
         matcher::is_matcher<std::decay_t<MatcherType>> &&
         std::is_move_constructible_v<std::decay_t<RequestHandler>>)
@@ -686,6 +752,7 @@ public:
         );
     }
 
+    /// Convenience overload that binds a non-const member-function pointer to @a object.
     template <typename MatcherType, typename ObjectType, typename ResultType, typename... ArgsType>
     auto register_request_handler(
         MatcherType&& matcher,
@@ -701,6 +768,7 @@ public:
         );
     }
 
+    /// Convenience overload that binds a const member-function pointer to @a object.
     template <typename MatcherType, typename ObjectType, typename ResultType, typename... ArgsType>
     auto register_request_handler(
         MatcherType&& matcher,
@@ -716,34 +784,33 @@ public:
         );
     }
 
-    // Register a "raw" handler that takes ownership of the connection on
-    // match. Used for protocol upgrades (WebSocket and similar): the handler
-    // receives the parsed request header, the underlying tcp_stream, and the
-    // flat_buffer holding any bytes already read past the header. The session
-    // does not read the request body, write any response, or attempt further
-    // I/O on the stream after the handler is invoked — the handler is fully
-    // responsible for the rest of the connection's lifetime.
-    //
-    // Note: boost::beast::flat_buffer is value-semantic, so passing it
-    // directly to boost::asio::async_read_until / async_read will read into
-    // a copy of the buffer rather than the buffer itself. Pair the buffer
-    // with beast::websocket::stream::async_accept (the natural use case) or
-    // drain pipelined bytes into a std::string and use
-    // boost::asio::dynamic_buffer for further reads.
-    //
-    // After the handler returns, the session's per-connection coroutine ends
-    // (no keep-alive). The post-loop tcp shutdown is harmless on a moved-from
-    // stream — boost::beast::tcp_stream::socket() returns a default-
-    // constructed socket and shutdown's error_code is discarded.
-    //
-    // The handler signature must be compatible with:
-    //
-    //   awaitable<void>(
-    //       matcher::context const& context,
-    //       boost::beast::http::request<boost::beast::http::empty_body>&& request,
-    //       rebind_executor<boost::beast::tcp_stream>&& stream,
-    //       boost::beast::flat_buffer&& buffer,
-    //       cancellation_signals& signals)
+    /** Register a "raw" handler that takes ownership of the connection on match.
+
+        Used for protocol upgrades such as WebSocket. On a match the handler
+        receives the parsed request header, the underlying `tcp_stream`,
+        and the `flat_buffer` holding any bytes already read past the
+        header. The session performs no further I/O on the stream and ends
+        the session as soon as the handler returns.
+
+        The handler signature must be compatible with:
+
+        @code
+        awaitable<void>(
+            matcher::context const& context,
+            boost::beast::http::request<boost::beast::http::empty_body>&& request,
+            rebind_executor<boost::beast::tcp_stream>&& stream,
+            boost::beast::flat_buffer&& buffer,
+            cancellation_signals& signals)
+        @endcode
+
+        @note `boost::beast::flat_buffer` is value-semantic. Passing it
+              directly to `asio::async_read_until` / `asio::async_read`
+              would read into a copy rather than the buffer itself. Pair
+              the buffer with `beast::websocket::stream::async_accept`
+              (the natural use case) or drain pipelined bytes into a
+              `std::string` and use `boost::asio::dynamic_buffer` for
+              further reads.
+    */
     template <typename MatcherType, typename RawHandler> requires(
         matcher::is_matcher<std::decay_t<MatcherType>> &&
         std::is_move_constructible_v<std::decay_t<RawHandler>>)
@@ -794,6 +861,18 @@ public:
             });
     }
 
+    /** Install a custom soft-error handler.
+
+        The handler is invoked when a registered request handler throws,
+        with the captured `std::exception_ptr`. Its return value is fed to
+        @ref boost::taar::response_from, written to the client, and
+        determines whether the session continues (`keep_alive() == true`)
+        or closes.
+
+        Override this when the default 400-with-message behaviour is not
+        what you want — e.g. to map specific exceptions to specific status
+        codes, return JSON-formatted errors, or include a request id.
+    */
     template <detail::soft_error_handler HandlerType>
     void set_soft_error_handler(HandlerType handler)
     {
@@ -812,6 +891,18 @@ public:
             };
     }
 
+    /** Install a custom hard-error handler.
+
+        Invoked when the session aborts because of a connection-level
+        failure (a transport error, a header that is too large, an I/O
+        exception). The handler receives the `std::exception_ptr` and is
+        expected to log or otherwise report it; the connection is already
+        being torn down by the time the handler runs.
+
+        The default handler silently discards the exception, which is
+        almost never the right choice in production — install at least a
+        logging hook.
+    */
     template <detail::hard_error_handler HandlerType>
     void set_hard_error_handler(HandlerType handler)
     {

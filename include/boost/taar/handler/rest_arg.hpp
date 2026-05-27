@@ -107,7 +107,19 @@ std::string arg_provider_name(ArgProviderType&& ap)
 
 } // namespace detail
 
-// REST arg provider providing default value if the underlying value is not found
+/** Wrap an argument provider with a fallback value.
+
+    When the wrapped provider fails with @ref error::argument_not_found,
+    @a default_value is substituted instead. Other errors are propagated
+    unchanged. This is the idiomatic way to make an argument optional with
+    a non-`std::optional` type.
+
+    @code
+    taar::handler::rest(
+        [](int page) { ... },
+        taar::handler::with_default(taar::handler::query_arg("page"), 1));
+    @endcode
+*/
 template <typename ArgProviderType, typename ValueType>
 struct with_default
 {
@@ -251,7 +263,13 @@ auto get_rest_arg(
     }
 }
 
-// REST arg provider from the request path
+/** Argument provider that reads a captured path-template placeholder.
+
+    Looks up @a path_key in @ref boost::taar::matcher::context::path_args,
+    which the @ref boost::taar::matcher::target_t "target" matcher populates
+    when the request path matches its template. Reports
+    @ref error::argument_not_found if the key is absent.
+*/
 struct path_arg
 {
     path_arg(std::string path_key)
@@ -278,7 +296,16 @@ struct path_arg
     std::string path_key_;
 };
 
-// REST arg provider from the request query params
+/** Argument provider that reads a URL query parameter.
+
+    Parses the request target as an origin-form URL and looks up
+    @a query_key in the query string. The second parameter controls
+    case-sensitivity: pass `boost::urls::ignore_case` to match
+    case-insensitively.
+
+    Reports @ref error::argument_not_found if the parameter is absent and
+    @ref error::argument_ambiguous if it appears more than once.
+*/
 struct query_arg
 {
     query_arg(
@@ -323,7 +350,13 @@ struct query_arg
     boost::urls::ignore_case_param ic_;
 };
 
-// REST arg provider from the request headers
+/** Argument provider that reads a request header.
+
+    Accepts either a `boost::beast::http::field` constant for well-known
+    headers or a raw string name. If the same header is present more than
+    once with conflicting values the provider reports
+    @ref error::argument_ambiguous.
+*/
 struct header_arg
 {
     header_arg(std::string header_name)
@@ -389,7 +422,12 @@ struct header_arg
     std::variant<boost::beast::http::field, std::string> header_;
 };
 
-// REST arg provider from the request cookie header
+/** Argument provider that reads a cookie value by name.
+
+    Parses each `Cookie` header on the request and returns the value
+    associated with @a name. Reports @ref error::argument_not_found if no
+    cookie with that name is present.
+*/
 struct cookie_arg
 {
     cookie_arg(std::string name)
@@ -424,10 +462,18 @@ struct cookie_arg
     std::string name_;
 };
 
+/// Tag type accepted by body providers to disable the content-type check.
 struct all_content_types_t {};
+/// Pass to a body provider to accept any `Content-Type`.
 constexpr all_content_types_t all_content_types {};
 
-// REST arg provider from the request body as string
+/** Argument provider that returns the request body as a `std::string`.
+
+    By default the provider only matches requests whose `Content-Type` is
+    in the list passed to the constructor (or `"text/plain"` if none were
+    provided). Pass @ref all_content_types to accept any content type.
+    Mismatches are reported as @ref error::invalid_content_type.
+*/
 struct string_body_arg
 {
     template <type_traits::string_like... T>
@@ -470,7 +516,13 @@ struct string_body_arg
     std::unordered_set<std::string> content_types_;
 };
 
-// REST arg provider from the request body as json value
+/** Argument provider that parses the request body as a JSON value.
+
+    By default only requests with `Content-Type: application/json` are
+    accepted; pass extra content types to the constructor or
+    @ref all_content_types to widen the set. Malformed JSON is reported as
+    @ref error::invalid_request_format.
+*/
 struct json_body_arg
 {
     template <type_traits::string_like... T>
@@ -519,7 +571,12 @@ struct json_body_arg
     std::unordered_set<std::string> content_types_;
 };
 
-// REST arg provider from the request body for application/x-www-form-urlencoded
+/** Argument provider that parses an `application/x-www-form-urlencoded` body.
+
+    Decodes the body into a @ref boost::taar::form_kvp map keyed by the
+    percent-decoded parameter names. Other content types are rejected with
+    @ref error::invalid_content_type unless overridden.
+*/
 struct url_encoded_form_data_arg
 {
     template <type_traits::string_like... T>
@@ -578,10 +635,13 @@ struct url_encoded_form_data_arg
     std::unordered_set<std::string> content_types_;
 };
 
-// REST arg provider returning the full target of the request. It can be used to
-// implement custom path or query param parsing logic that is not covered by
-// path_arg or query_arg. Note that the target includes both the path and the
-// query string (if any), but not the scheme or the authority.
+/** Argument provider that returns the request target as a `std::string`.
+
+    Useful when you need to implement custom parsing logic that
+    @ref path_arg and @ref query_arg cannot express. The target contains
+    the path and query string (if any), but neither the scheme nor the
+    authority.
+*/
 struct target_arg
 {
     target_arg()
@@ -600,7 +660,7 @@ struct target_arg
     }
 };
 
-// REST arg provider returning the byte size of the request body.
+/// Argument provider that returns the byte size of the request body.
 struct body_size_arg
 {
     std::string name() const

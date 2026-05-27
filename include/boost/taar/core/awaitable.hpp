@@ -17,14 +17,21 @@
 
 namespace boost::taar {
 
+/** Convenience alias for `asio::awaitable` bound to an `io_context` executor.
+
+    Boost.Taar uses an `io_context` executor everywhere, so the second
+    template argument of `asio::awaitable` is always
+    `io_context::executor_type`. Returning `taar::awaitable<T>` from a
+    coroutine spares the user from spelling out that pair.
+*/
 template <typename T>
 using awaitable = boost::asio::awaitable<T, boost::asio::io_context::executor_type>;
 
-// Completion token for use in async operations within taar coroutines
+/// Completion token: continue this coroutine, throw on error.
 inline constexpr boost::asio::use_awaitable_t<
     boost::asio::io_context::executor_type> use_awaitable{};
 
-// Tuple-style completion token (returns error_code instead of throwing)
+/// Completion token: continue this coroutine, return `(error_code, result)` instead of throwing.
 inline constexpr boost::asio::as_tuple_t<
     boost::asio::use_awaitable_t<
         boost::asio::io_context::executor_type>> use_awaitable_tuple{};

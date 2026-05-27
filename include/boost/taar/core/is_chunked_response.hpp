@@ -28,12 +28,14 @@ public:
 
 } // namespace detail
 
+/// True if @a T is a specialisation of @ref boost::taar::chunked_response.
 template<class T>
 concept is_chunked_response = requires
 {
     requires detail::is_chunked_response_impl<T>::type::value;
 };
 
+/// Trait: extract the yielded chunk type from a @ref chunked_response.
 template <typename T>
 struct chunked_response_value;
 
@@ -43,6 +45,7 @@ struct chunked_response_value<chunked_response<T>>
     using type = T;
 };
 
+/// Convenience alias for `chunked_response_value<T>::type`.
 template <typename T>
 using chunked_response_value_t = typename chunked_response_value<T>::type;
 

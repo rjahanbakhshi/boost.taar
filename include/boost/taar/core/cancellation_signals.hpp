@@ -17,9 +17,25 @@
 
 namespace boost::taar {
 
+/** A thread-safe pool of `asio::cancellation_signal` instances.
+
+    A `cancellation_signals` instance hands out cancellation slots to async
+    operations and can emit a cancellation to all of them in one call. This
+    is the primary mechanism Boost.Taar offers for shutting down a server:
+
+    @li Bind @ref slot() to each spawned coroutine.
+    @li Install a signal handler that calls @ref emit() from a `SIGINT`
+        / `SIGTERM` slot.
+
+    The pool grows as needed: every call to @ref slot() returns the first
+    unused signal, or appends a new one if all existing signals already have
+    a handler. A mutex serialises @ref slot() and @ref emit() so the same
+    instance can be used from multiple threads.
+*/
 class cancellation_signals
 {
 public:
+    /// Emit cancellation of type @a ct to every signal in the pool.
     void emit(boost::asio::cancellation_type ct = boost::asio::cancellation_type::all)
     {
         std::lock_guard<std::mutex> const lock{mutex_};
@@ -29,6 +45,12 @@ public:
         }
     }
 
+    /** Obtain a cancellation slot bound to one of the signals in the pool.
+
+        Reuses a signal that does not currently have a handler attached,
+        appending a new signal to the pool if every existing one is
+        already bound. Subsequent calls hand out distinct slots.
+    */
     boost::asio::cancellation_slot slot()
     {
         std::lock_guard<std::mutex> const lock{mutex_};

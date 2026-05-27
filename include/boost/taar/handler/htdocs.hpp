@@ -24,12 +24,38 @@
 
 namespace boost::taar::handler {
 
+/** A request handler that serves static files from a directory root.
+
+    Construct with the path to the document root and an optional default
+    filename for directory listings (typically `"index.html"`). Register
+    against a path-matching expression on the session, normally with a
+    greedy template so the handler sees the full request path:
+
+    @code
+    session.register_request_handler(
+        method == http::verb::get && target == "/{*}",
+        taar::handler::htdocs{"./public", "index.html"});
+    @endcode
+
+    The handler only responds to `GET` and `HEAD`. The request target must
+    be absolute and must not contain `..`; otherwise a `400` is returned.
+    Missing files produce `404`. The `Content-Type` header is inferred from
+    the file extension; unknown extensions are sent as
+    `application/octet-stream`.
+*/
 class htdocs
 {
     using request_body_type = boost::beast::http::empty_body;
     using request_type = boost::beast::http::request<request_body_type>;
 
 public:
+    /** Construct an htdocs handler.
+
+        @param htdocs_root Path to the document root. Defaults to the
+                           current working directory.
+        @param default_doc Filename appended to requests that end in `/`.
+                           Defaults to `"index.html"`.
+    */
     htdocs(
         std::string htdocs_root = "./",
         std::string default_doc = "index.html")

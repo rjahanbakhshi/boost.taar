@@ -15,7 +15,16 @@
 
 namespace boost::taar::type_traits {
 
-// Type traits determining whether a group of types have a super type.
+/** Trait: true if @a T... admit a common "super" type.
+
+    A super type exists if for every pair of types in @a T... one is a base
+    of the other or they have a `std::common_type`. The result type can be
+    obtained with @ref super_type_t.
+
+    Used by the @ref boost::taar::matcher::operand "matcher operand"
+    composition operators to find the request type that two matchers can
+    both accept.
+*/
 template <typename... T>
 struct have_super_type;
 
@@ -43,10 +52,16 @@ struct have_super_type<T, U, Rest...>
         have_super_type<U, Rest...>::value;
 };
 
+/// Convenience variable template for @ref have_super_type.
 template <typename... T>
 inline constexpr bool have_super_type_v = have_super_type<T...>::value;
 
-// Type trait evaluating to the super type between two types
+/** Trait: the super type of @a T....
+
+    Computes the "most derived" type all of @a T... can be converted to —
+    a base if one is a base of the others, otherwise `std::common_type`.
+    Use @ref super_type_t for direct access.
+*/
 template <typename... T>
 struct super_type;
 
@@ -76,6 +91,7 @@ struct super_type<T, U, Rest...>
     using type = typename super_type<typename super_type<T, U>::type, Rest...>::type;
 };
 
+/// Convenience alias for `super_type<T...>::type`.
 template <typename... T>
 using super_type_t = typename super_type<T...>::type;
 

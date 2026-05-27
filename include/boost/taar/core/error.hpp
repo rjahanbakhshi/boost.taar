@@ -14,23 +14,34 @@
 
 namespace boost::taar {
 
+/** Error codes reported by Boost.Taar.
+
+    All values share the @ref error_category category, and they can be used
+    transparently with `boost::system::error_code` thanks to the
+    `is_error_code_enum` specialisation at the bottom of this header.
+
+    Many of these are reported as *soft* errors by
+    @ref boost::taar::session::http through its soft-error handler, which
+    by default turns them into 400/404/415 HTTP responses.
+*/
 enum class error
 {
-    success = 0,
-    no_absolute_template,
-    invalid_template,
-    argument_not_found,
-    argument_ambiguous,
-    invalid_argument_format,
-    invalid_request_format,
-    invalid_url_format,
-    invalid_content_type,
-    invalid_cookie_format,
-    invalid_boolean_format,
-    invalid_number_format,
-    late_chunk_metadata,
+    success = 0,                ///< No error.
+    no_absolute_template,       ///< A path template did not begin with '/'.
+    invalid_template,           ///< Path-template syntax error.
+    argument_not_found,         ///< A required argument was absent from the request.
+    argument_ambiguous,         ///< A header or query parameter occurred more than once.
+    invalid_argument_format,    ///< An argument could not be parsed to the requested type.
+    invalid_request_format,     ///< The request body could not be decoded.
+    invalid_url_format,         ///< The request URL could not be parsed.
+    invalid_content_type,       ///< The request `Content-Type` does not match the handler.
+    invalid_cookie_format,      ///< The `Cookie` header could not be parsed.
+    invalid_boolean_format,     ///< A boolean argument could not be parsed.
+    invalid_number_format,      ///< A numeric argument could not be parsed.
+    late_chunk_metadata,        ///< Chunked metadata was yielded after body data.
 };
 
+/// Singleton @c boost::system::error_category instance for @ref error.
 #if (__cpp_constexpr >= 202211L)
 constexpr
 #endif
@@ -86,6 +97,7 @@ inline boost::system::error_category const& error_category() noexcept
     return instance;
 }
 
+/// ADL-found factory required by `is_error_code_enum<error>`.
 #if (__cpp_constexpr >= 202211L)
 constexpr
 #endif

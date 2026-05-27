@@ -57,13 +57,15 @@ inline constexpr bool validate_param_char(char ch)
 
 } // namespace detail
 
+/// Kind of a single segment in a parsed path template.
 enum class template_segment_type
 {
-    literal,
-    param,
-    greedy_param,
+    literal,        ///< A literal path segment, matched verbatim.
+    param,          ///< A `{name}` placeholder matching exactly one segment.
+    greedy_param,   ///< A `{*name}` placeholder matching zero or more segments.
 };
 
+/// Owning representation of one segment in a parsed path template.
 struct template_segment
 {
     template_segment_type type;
@@ -75,8 +77,14 @@ struct template_segment
     }
 };
 
+/// Owning vector of @ref template_segment values.
 using parsed_template = std::vector<template_segment>;
 
+/** Non-owning representation of one segment in a parsed path template.
+
+    Holds a `string_view` into the original template text and implicitly
+    converts to @ref template_segment for storage.
+*/
 struct template_segment_ref
 {
     template_segment_type type;
@@ -93,8 +101,17 @@ struct template_segment_ref
     }
 };
 
+/// Non-owning vector of @ref template_segment_ref values.
 using parsed_template_ref = std::vector<template_segment_ref>;
 
+/** Parse a path template into a sequence of typed segments.
+
+    @param path The template text (e.g. `"/users/{id}/files/{*path}"`).
+    @returns A `boost::system::result` carrying the parsed segments on
+             success, or a @ref boost::taar::error code from
+             `error::no_absolute_template` or `error::invalid_template` on
+             failure.
+*/
 inline /*constexpr*/ boost::system::result<parsed_template_ref> parse_template(
     std::string_view path)
 {

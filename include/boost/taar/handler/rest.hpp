@@ -162,6 +162,45 @@ inline auto rest_for_memfn(
 
 } // namespace detail
 
+/** Adapt an arbitrary callable into an HTTP request handler.
+
+    `rest` wraps @a callable into a handler suitable for
+    @ref boost::taar::session::http::register_request_handler. Each
+    @a arg_provider is responsible for producing one argument of @a callable
+    from the incoming request:
+
+    @li @ref path_arg pulls a captured path-template placeholder.
+    @li @ref query_arg pulls a URL query parameter.
+    @li @ref header_arg pulls a header value.
+    @li @ref cookie_arg pulls a cookie value.
+    @li @ref body_arg parses the request body.
+    @li @ref string_body_arg / @ref json_body_arg / @ref form_body_arg are
+        convenience aliases for common body types.
+
+    The number of providers must equal the number of arguments of
+    @a callable (enforced with `static_assert`). Each provider's request
+    type is unified with the others into the request type passed to the
+    handler; the @ref boost::taar::type_traits::super_type machinery picks
+    the most specific request type all providers agree on.
+
+    The return value of @a callable is converted to an HTTP response with
+    @ref boost::taar::response_from, which means user-defined return types
+    work as long as they have a `tag_invoke` overload for
+    @ref boost::taar::response_from_tag.
+
+    @code
+    using boost::taar::matcher::method;
+    using boost::taar::matcher::target;
+    namespace http  = boost::beast::http;
+    namespace taar  = boost::taar;
+
+    session.register_request_handler(
+        method == http::verb::get && target == "/users/{id}",
+        taar::handler::rest(
+            [](int id) { return load_user(id); },
+            taar::handler::path_arg("id")));
+    @endcode
+*/
 template <typename CallableType, typename... ArgProvidersType>
 requires (!std::is_member_function_pointer_v<std::remove_cvref_t<CallableType>>)
 inline decltype(auto) rest(
@@ -174,6 +213,7 @@ inline decltype(auto) rest(
         std::move(arg_providers)...);
 }
 
+/// Adapt a member-function pointer bound to @a object into an HTTP request handler.
 template <typename MemFnType, typename ObjectType, typename... ArgProvidersType>
 requires (member_function_of<MemFnType, std::remove_cvref_t<ObjectType>>)
 inline decltype(auto) rest(

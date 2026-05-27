@@ -28,12 +28,14 @@ public:
 
 } // namespace detail
 
+/// True if @a T is a specialisation of @ref boost::taar::async_generator.
 template<class T>
 concept is_async_generator = requires
 {
     requires detail::is_async_generator_impl<T>::type::value;
 };
 
+/// Trait: extract the yielded value type from an @ref async_generator.
 template <typename T>
 struct async_generator_value;
 
@@ -43,6 +45,7 @@ struct async_generator_value<async_generator<T>>
     using type = T;
 };
 
+/// Convenience alias for `async_generator_value<T>::type`.
 template <typename T>
 using async_generator_value_t = typename async_generator_value<T>::type;
 

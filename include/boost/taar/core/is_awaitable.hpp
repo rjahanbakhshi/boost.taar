@@ -28,6 +28,7 @@ public:
 
 } // namespace detail
 
+/// True if @a T is a specialisation of `boost::asio::awaitable`.
 template<class T>
 concept is_awaitable = requires
 {

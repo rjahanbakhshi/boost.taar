@@ -23,11 +23,42 @@
 
 namespace boost::taar::matcher {
 
+/** A placeholder that produces matchers over the request target (path).
+
+    Compose with `==` and `!=` against a path template:
+
+    @code
+    using boost::taar::matcher::target;
+
+    auto exact   = target == "/api/version";
+    auto by_id   = target == "/users/{id}";
+    auto bucket  = target == "/files/{*path}";
+    auto any     = target == "/{*}";
+    @endcode
+
+    Path templates use the following grammar:
+
+    @li Literal segments are matched verbatim.
+    @li `{name}` matches one segment and stores it in
+        @ref context.path_args under @c name.
+    @li `{*name}` (greedy) matches zero or more segments joined with `/` and
+        stores the result under @c name.
+    @li `{*}` is shorthand for a greedy capture stored under the key `"*"`.
+
+    On a successful match the captured arguments are written to
+    @ref boost::taar::matcher::context::path_args, where the
+    `taar::handler::path_arg` argument provider can later read them.
+
+    @tparam FieldsType The Beast HTTP fields container of the request to
+                       inspect. Defaults to `boost::beast::http::fields`.
+*/
 template<class FieldsType = boost::beast::http::fields>
 struct target_t
 {
+    /// The request type these matchers accept.
     using request_type = boost::beast::http::request_header<FieldsType>;
 
+    /// Build a matcher for path-template @a target_template.
     friend auto operator==(target_t, std::string_view target_template)
     {
         auto const ptt = parse_template(target_template);
@@ -156,9 +187,11 @@ struct target_t
     }
 };
 
+/// A target-matcher placeholder parameterised by the Fields type.
 template<class FieldsType = boost::beast::http::fields>
 constexpr auto basic_target = target_t<FieldsType>{};
 
+/// The default target-matcher placeholder.
 constexpr auto target = basic_target<boost::beast::http::fields>;
 
 } // namespace boost::taar::matcher

@@ -16,9 +16,27 @@
 
 namespace boost::taar::matcher {
 
+/** A placeholder that produces matchers comparing against a request's HTTP version.
+
+    HTTP versions are encoded as a single unsigned integer in Beast: HTTP/1.0
+    is `10`, HTTP/1.1 is `11`, HTTP/2.0 is `20`. Use the relational and
+    equality operators to build a matcher:
+
+    @code
+    using boost::taar::matcher::version;
+
+    auto only_11      = version == 11;
+    auto at_least_11  = version >= 11;
+    auto pre_2        = version <  20;
+    @endcode
+
+    @tparam FieldsType The Beast HTTP fields container of the request to
+                       inspect. Defaults to `boost::beast::http::fields`.
+*/
 template<class FieldsType = boost::beast::http::fields>
 struct version_t
 {
+    /// The request type these matchers accept.
     using request_type = boost::beast::http::request_header<FieldsType>;
 
     friend auto operator==(version_t, unsigned ver)
@@ -106,9 +124,11 @@ struct version_t
     }
 };
 
+/// A version-matcher placeholder parameterised by the Fields type.
 template<class FieldsType = boost::beast::http::fields>
 constexpr auto basic_version = version_t<FieldsType>{};
 
+/// The default version-matcher placeholder.
 constexpr auto version = basic_version<boost::beast::http::fields>;
 
 } // namespace boost::taar::matcher

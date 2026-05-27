@@ -37,6 +37,29 @@
 
 namespace boost::taar {
 
+/** A coroutine-based generator for chunked HTTP responses with metadata control.
+
+    `chunked_response<T>` extends @ref async_generator<T> with the ability
+    to specify the HTTP status and response headers *before* the first
+    chunk is written. Inside the body, yield:
+
+    @li `chunked_set_status{...}` to set the HTTP status,
+    @li `chunked_set_header{...}` to add a response header,
+    @li `value` (of type @a T) to write a chunk,
+    @li another `chunked_response<T>` to splice its chunks (its metadata
+        is ignored — only the outer's metadata is written).
+
+    Metadata must precede all data yields. After the first data yield,
+    metadata yields throw with @ref error::late_chunk_metadata.
+
+    A handler returning `chunked_response<T>` is dispatched through the
+    chunked-encoding path of @ref boost::taar::session::http, which writes
+    the headers, sets `Transfer-Encoding: chunked`, then streams each
+    yielded value via @ref boost::taar::chunk_body_from.
+
+    @tparam T The yielded chunk type. Any type accepted by
+              @ref boost::taar::chunk_body_from is supported.
+*/
 template <typename T>
 class chunked_response
 {

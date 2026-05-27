@@ -22,6 +22,36 @@
 
 namespace boost::taar::matcher {
 
+/** The canonical wrapper around a request matcher.
+
+    `operand` adapts an arbitrary callable into the unified matcher
+    interface that @ref boost::taar::session::http uses. The callable may
+    take any of the following parameter packs (after `request_type const&`
+    and `context&`):
+
+    @li no extra parameters,
+    @li `boost::urls::url_view const& parsed_target`,
+    @li `taar::cookies const& parsed_cookies`,
+    @li both, in either order.
+
+    `operand` advertises whether the wrapped callable needs the parsed
+    target and/or parsed cookies through the
+    @ref with_parsed_target and @ref with_parsed_cookies constants, so the
+    session can avoid the parsing cost when no registered matcher needs it.
+
+    Instances compose with `&&`, `||`, and unary `!`. Composition lifts the
+    request type to the @ref boost::taar::type_traits::super_type_t
+    "super type" of the operands and forwards the parsed inputs to whichever
+    side needs them.
+
+    Users normally do not construct `operand` directly; matcher placeholders
+    such as @ref boost::taar::matcher::method_t "method",
+    @ref boost::taar::matcher::target_t "target", and others produce
+    operands through their relational operators.
+
+    @tparam RequestType  The Beast request header type the matcher accepts.
+    @tparam CallableType The wrapped callable type.
+*/
 template <typename RequestType, typename CallableType>
 requires (
     detail::callable_with<CallableType, bool, RequestType const&, context&> ||
@@ -32,7 +62,9 @@ requires (
 class operand
 {
 public:
+    /// The Beast request-header type accepted by this matcher.
     using request_type = RequestType;
+    /// The wrapped callable type.
     using callable_type = CallableType;
 
     static constexpr int callabe_kind =
@@ -62,15 +94,30 @@ public:
             RequestType const&,
             context&,
             cookies const&> ? 1 : 0;
+    /// True if the wrapped callable needs the URL-parsed target.
     static constexpr auto with_parsed_target =
         callabe_kind == 4 || callabe_kind == 3 || callabe_kind == 2;
+    /// True if the wrapped callable needs the parsed cookie map.
     static constexpr auto with_parsed_cookies =
         callabe_kind == 4 || callabe_kind == 3 || callabe_kind == 1;
 
 public:
+    /// Construct from a callable that satisfies the matcher concept.
     operand(callable_type callable)
     : callable_ {std::move(callable)}
     {}
+
+    /** Invoke the wrapped matcher.
+
+        The session always passes the parsed target and the parsed cookies;
+        operands that do not need them ignore the corresponding arguments.
+
+        @param request        The incoming request header.
+        @param context        Per-request scratch space (see @ref context).
+        @param parsed_target  The request target after URL parsing.
+        @param parsed_cookies The `Cookie` header parsed into a key/value map.
+        @returns `true` if the request matches.
+    */
 
     auto operator()(
         request_type const& request,
@@ -100,6 +147,7 @@ public:
         }
     }
 
+    /// Negate the wrapped matcher.
     friend auto operator!(operand opr)
     {
         if constexpr (with_parsed_target && with_parsed_cookies)
@@ -150,6 +198,7 @@ public:
         }
     }
 
+    /// Short-circuit AND of two matchers; the right operand may be a raw callable.
     template <typename RHSType>
     requires (!type_traits::specialization_of<matcher::operand, std::remove_cvref_t<RHSType>>)
     friend auto operator&&(
@@ -226,6 +275,7 @@ public:
         }
     }
 
+    /// Short-circuit AND of two matchers; the left operand may be a raw callable.
     template <typename LHSType>
     requires (!type_traits::specialization_of<matcher::operand, std::remove_cvref<LHSType>>)
     friend auto operator&&(
@@ -302,6 +352,7 @@ public:
         }
     }
 
+    /// Short-circuit OR of two matchers; the right operand may be a raw callable.
     template <typename RHSType>
     requires (!type_traits::specialization_of<matcher::operand, std::remove_cvref_t<RHSType>>)
     friend auto operator||(
@@ -378,6 +429,7 @@ public:
         }
     }
 
+    /// Short-circuit OR of two matchers; the left operand may be a raw callable.
     template <typename LHSType>
     requires (!type_traits::specialization_of<matcher::operand, std::remove_cvref<LHSType>>)
     friend auto operator||(
@@ -466,6 +518,11 @@ operand(ObjectType) ->
         >::template arg<0>
     >, ObjectType>;
 
+/** True if @a MatcherType can be wrapped in an @ref operand.
+
+    This is the formal definition of the *Matcher* named requirement
+    described in the @ref taar.concepts.matcher "concepts" chapter.
+*/
 template <typename MatcherType>
 concept is_matcher = requires(MatcherType&& matcher)
 {

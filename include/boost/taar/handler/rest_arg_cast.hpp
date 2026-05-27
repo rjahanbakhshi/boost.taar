@@ -263,15 +263,32 @@ concept has_built_in_rest_arg_cast = requires (FromType const& from)
 
 } // namespace detail
 
-// A type is rest_arg_castable if it is either user-defined rest_arg_castable or
-// built-in rest_arg_castable.
+/** True if @ref rest_arg_cast can convert @a FromType to @a ToType.
+
+    Satisfied when either a user-defined `tag_invoke` overload exists for
+    @ref rest_arg_cast_tag<ToType>, or one of the built-in conversions
+    applies.
+*/
 template <typename FromType, typename ToType>
 concept rest_arg_castable =
     detail::has_user_defined_rest_arg_cast<FromType, ToType> ||
     detail::has_built_in_rest_arg_cast<FromType, ToType>;
 
-// Cast a REST arg from FromType to ToType using either a user-defined or built-in
-// rest_arg_cast. If neither exists, this will fail to compile.
+/** Cast a REST argument from @a FromType to @a ToType.
+
+    Resolution order:
+
+    @li A user-defined `tag_invoke(rest_arg_cast_tag<ToType>, ...)` overload
+        found by ADL takes precedence.
+    @li Otherwise a built-in conversion is selected. Built-ins cover
+        identity, implicit conversions, string-to-bool (`"true"`, `"yes"`,
+        `"1"`), string-to-number (via `std::from_chars`), number-to-string
+        (via `std::to_chars`), `boost::json::value` to any
+        `value_to`-compatible type, and CSV-style string to container.
+
+    Throws `boost::system::system_error` with an @ref boost::taar::error
+    code on conversion failure.
+*/
 template <typename ToType, typename FromType>
 inline constexpr decltype(auto) rest_arg_cast(FromType const& from)
 {

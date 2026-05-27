@@ -108,9 +108,29 @@ private:
 
 } // namespace detail
 
+/** Fluent builder around any value that @ref response_from can convert.
+
+    Wrap an existing body value (a `std::string`, a `boost::json::value`,
+    a `boost::beast::http::response`, etc.), then chain
+    @ref set_status, @ref set_version, @ref set_header, and
+    @ref insert_header on the result before consuming the final response
+    with @ref get_response — or returning the builder from a REST handler,
+    in which case the conversion is automatic:
+
+    @code
+    return taar::response_builder(boost::json::value{ {"ok", true} })
+        .set_status(http::status::created)
+        .set_header(http::field::cache_control, "no-store");
+    @endcode
+
+    Member functions return a reference to allow chaining; the rvalue
+    overloads return a moved-from copy so the temporary can be returned
+    directly.
+*/
 class response_builder
 {
 public:
+    /// Construct around a value that @ref response_from can convert.
     template <typename... ArgsType>
     response_builder(ArgsType&&... args)
         : impl_ {
@@ -207,6 +227,7 @@ public:
         return std::move(*this);
     }
 
+    /// Consume the builder and return a Beast message generator.
     boost::beast::http::message_generator get_response() &&
     {
         return std::move(*impl_).get_response();

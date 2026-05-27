@@ -17,11 +17,13 @@
 
 namespace boost::taar {
 
+/// Metadata token: yield to set the HTTP status of a @ref chunked_response.
 struct chunked_set_status
 {
     boost::beast::http::status value;
 };
 
+/// Metadata token: yield to add a header to a @ref chunked_response.
 struct chunked_set_header
 {
     boost::beast::http::field field = boost::beast::http::field::unknown;
@@ -29,16 +31,19 @@ struct chunked_set_header
     std::string value;
 };
 
+/// Build a @ref chunked_set_status token. Convenience factory.
 inline chunked_set_status set_status(boost::beast::http::status s)
 {
     return {s};
 }
 
+/// Build a @ref chunked_set_header token for a well-known Beast field.
 inline chunked_set_header set_header(boost::beast::http::field f, std::string v)
 {
     return {f, {}, std::move(v)};
 }
 
+/// Build a @ref chunked_set_header token for an arbitrary header name.
 inline chunked_set_header set_header(std::string name, std::string v)
 {
     return {boost::beast::http::field::unknown, std::move(name), std::move(v)};

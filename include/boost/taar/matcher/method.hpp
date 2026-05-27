@@ -16,11 +16,34 @@
 
 namespace boost::taar::matcher {
 
+/** A placeholder that produces matchers comparing against a request's HTTP method.
+
+    Instances of `method_t` are not consumed directly. Apply one of the
+    relational operators to obtain a matcher that the
+    @ref boost::taar::session::http session can use to dispatch a request:
+
+    @code
+    using boost::taar::matcher::method;
+    namespace http = boost::beast::http;
+
+    auto m = method == http::verb::get;          // matches GET
+    auto n = method != "PATCH";                  // matches anything but PATCH
+    @endcode
+
+    Both `boost::beast::http::verb` values and arbitrary string verbs are
+    accepted. The template parameter selects the request `Fields` type so
+    matchers can be paired with non-default beast field containers.
+
+    @tparam FieldsType The Beast HTTP fields container of the request to
+                       inspect. Defaults to `boost::beast::http::fields`.
+*/
 template<class FieldsType = boost::beast::http::fields>
 struct method_t
 {
+    /// The request type these matchers accept.
     using request_type = boost::beast::http::request_header<FieldsType>;
 
+    /// Match requests whose method-string equals @a verb.
     friend auto operator==(method_t, std::string verb)
     {
         return matcher::operand
@@ -78,9 +101,19 @@ struct method_t
     }
 };
 
+/** A method-matcher placeholder parameterised by the Fields type.
+
+    Use `basic_method<MyFields>` when your session is built on a non-default
+    beast `Fields` container; otherwise prefer @ref method.
+*/
 template<class FieldsType = boost::beast::http::fields>
 constexpr auto basic_method = method_t<FieldsType>{};
 
+/** The default method-matcher placeholder.
+
+    Equivalent to `basic_method<boost::beast::http::fields>`. This is the
+    object users normally compose with `==`, `!=`, `&&`, `||`, `!`, etc.
+*/
 constexpr auto method = basic_method<boost::beast::http::fields>;
 
 } // namespace boost::taar::matcher

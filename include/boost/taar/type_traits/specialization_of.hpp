@@ -14,6 +14,7 @@
 
 namespace boost::taar::type_traits {
 
+/// Trait: `value` is true if @a SpecializationType is `TemplateType<...>`.
 template <template <typename...> class, typename>
 struct is_specialization_of : std::false_type {};
 
@@ -21,10 +22,12 @@ template <template <typename...> class TemplateType, typename... ArgsType>
 struct is_specialization_of<TemplateType, TemplateType<ArgsType...>>
     : std::true_type {};
 
+/// Convenience variable template for @ref is_specialization_of.
 template <template <typename...> class TemplateType, typename SpecializationType>
 inline constexpr bool is_specialization_of_v =
     is_specialization_of<TemplateType, SpecializationType>::value;
 
+/// Concept form of @ref is_specialization_of.
 template <template <typename...> class TemplateType, typename SpecializationType>
 concept specialization_of =
     is_specialization_of_v<TemplateType, SpecializationType>;
