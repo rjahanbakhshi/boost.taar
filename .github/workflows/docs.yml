@@ -55,14 +55,16 @@ jobs:
           git clone -b "$BOOST_BRANCH" --depth=1 \
             https://github.com/boostorg/boost.git boost-modular
           cd boost-modular
-          # Initial sparse init. libs/program_options and libs/filesystem
-          # are listed here because the quickbook tool links against them
-          # and depinst.py program_options would otherwise be a no-op —
-          # it walks a library's headers, but the library has to already
-          # be present in libs/ for that walk to find anything.
+          # Initial sparse init. The libs/* entries cover what
+          # tools/quickbook compiles against (program_options,
+          # filesystem, spirit, iostreams). depinst.py only walks the
+          # headers of libraries already checked out, so the libraries
+          # quickbook needs must be present before we can let depinst
+          # pull in their transitive deps.
           git submodule update --init --depth=1 --jobs=8 \
             libs/config libs/headers libs/predef \
             libs/program_options libs/filesystem \
+            libs/spirit libs/iostreams \
             tools/build tools/boostbook tools/quickbook tools/boostdep \
             tools/boost_install
 
@@ -80,7 +82,7 @@ jobs:
         # of their transitive dependencies (atomic, regex, …) lands
         # before b2 starts.
         run: |
-          for lib in taar program_options filesystem; do
+          for lib in taar program_options filesystem spirit iostreams; do
             python ./tools/boostdep/depinst/depinst.py --include example \
               --git_args "--jobs 8" "$lib"
           done
