@@ -36,5 +36,3 @@
 [endsect]
 
 [include qbk/release_notes.qbk]
-
-[xinclude index.xml]

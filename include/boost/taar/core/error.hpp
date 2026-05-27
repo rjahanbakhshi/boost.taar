@@ -41,7 +41,7 @@ enum class error
     late_chunk_metadata,        ///< Chunked metadata was yielded after body data.
 };
 
-/// Singleton @c boost::system::error_category instance for @ref error.
+/// Singleton @c boost::system::error_category instance for the @c error enum.
 #if (__cpp_constexpr >= 202211L)
 constexpr
 #endif

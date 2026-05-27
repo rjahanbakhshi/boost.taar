@@ -34,7 +34,7 @@ BOOST_AUTO_TEST_CASE(test_result_response)
 {
     static_assert(has_response_from<decltype(response_builder{})>);
     BOOST_TEST(to_response<http::empty_body>(response_from(response_builder{})).result() == http::status::ok);
-    BOOST_TEST(to_response<http::empty_body>(response_from(response_builder{})).count(http::field::content_type) == 0);
+    BOOST_TEST(to_response<http::empty_body>(response_from(response_builder{})).count(http::field::content_type) == 0u);
 
     BOOST_TEST(to_response<http::string_body>(response_from(response_builder{std::string{"test2"}})).body() == "test2");
     BOOST_TEST(to_response<http::string_body>(response_from(response_builder{std::string{"test2"}})).result() == http::status::ok);

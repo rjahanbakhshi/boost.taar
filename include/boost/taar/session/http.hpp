@@ -535,7 +535,9 @@ public:
                         // Invoke the hard error handler for server-side visibility.
                         throw boost::system::system_error{req_ec};
                     }
-                    auto const& request = body_parser.get();
+                    // Drain the body so the connection stays in keep-alive
+                    // state; the body itself is discarded.
+                    (void)body_parser.get();
                 }
 
                 // Stock not-found response.
@@ -600,8 +602,8 @@ public:
             awaitable). The body type drives how the session reads the
             request body.
 
-        @param matcher        A matcher object — see
-                              @ref boost::taar::matcher::is_matcher.
+        @param matcher        A matcher object satisfying the
+                              `boost::taar::matcher::is_matcher` concept.
         @param request_handler The handler callable; must be move-constructible.
     */
     template <typename MatcherType, typename RequestHandler> requires(

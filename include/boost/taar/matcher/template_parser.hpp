@@ -108,9 +108,9 @@ using parsed_template_ref = std::vector<template_segment_ref>;
 
     @param path The template text (e.g. `"/users/{id}/files/{*path}"`).
     @returns A `boost::system::result` carrying the parsed segments on
-             success, or a @ref boost::taar::error code from
-             `error::no_absolute_template` or `error::invalid_template` on
-             failure.
+             success, or a `boost::taar::error` code
+             (`error::no_absolute_template` or `error::invalid_template`)
+             on failure.
 */
 inline /*constexpr*/ boost::system::result<parsed_template_ref> parse_template(
     std::string_view path)

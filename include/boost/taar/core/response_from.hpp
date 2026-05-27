@@ -211,7 +211,7 @@ concept has_response_from =
     is the response produced when a `void`-returning handler completes
     successfully.
 
-    @returns A value satisfying @ref boost::taar::is_http_response or a
+    @returns A value satisfying `boost::taar::is_http_response` or a
              `boost::beast::http::message_generator`.
 */
 template <has_response_from... T>

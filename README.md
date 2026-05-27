@@ -22,7 +22,6 @@ boost.json, etc.
     - [Using Conan 2 package manager](#using-conan-2-package-manager)
   - [To build the code after configuring](#to-build-the-code-after-configuring)
   - [To run the unit-tests after the build](#to-run-the-unit-tests-after-the-build)
-  - [To install under the local prefix directory ./out](#to-install-under-the-local-prefix-directory-out)
   - [To build and run the examples](#to-build-and-run-the-examples)
   - [Conan: creating and uploading](#conan-creating-and-uploading)
   - [Tested compilers and platforms](#tested-compilers-and-platforms)
@@ -269,12 +268,6 @@ cmake --build build
 
 ```bash
 build/test/boost-taar-test
-```
-
-## To install under the local prefix directory ./out
-
-```bash
-cmake --install build --prefix out
 ```
 
 ## To build and run the examples

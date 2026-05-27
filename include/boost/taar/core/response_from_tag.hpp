@@ -32,8 +32,7 @@ namespace boost::taar {
 
     The overload may take any number of value arguments. The matching
     `response_from_tag<T1, T2, ...>` specialisation will be used. The
-    returned type must satisfy
-    @ref boost::taar::is_http_response or be a
+    returned type must satisfy `boost::taar::is_http_response` or be a
     `boost::beast::http::message_generator`.
 
     A user-defined overload takes precedence over the built-in conversions

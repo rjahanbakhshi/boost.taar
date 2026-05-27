@@ -64,7 +64,7 @@ BOOST_AUTO_TEST_CASE(test_response_from_built_in)
     static_assert(std::is_same_v<decltype(response_from(13)), response_from_t<int&>>);
     static_assert(std::is_same_v<decltype(response_from(13)), response_from_t<int const&>>);
 
-    BOOST_TEST(response_from().count(http::field::content_type) == 0);
+    BOOST_TEST(response_from().count(http::field::content_type) == 0u);
     BOOST_TEST(response_from().result() == http::status::ok);
 
     BOOST_TEST(response_from('a').at(http::field::content_type) == "text/plain");

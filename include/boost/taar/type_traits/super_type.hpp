@@ -21,9 +21,8 @@ namespace boost::taar::type_traits {
     of the other or they have a `std::common_type`. The result type can be
     obtained with @ref super_type_t.
 
-    Used by the @ref boost::taar::matcher::operand "matcher operand"
-    composition operators to find the request type that two matchers can
-    both accept.
+    Used by the `boost::taar::matcher::operand` composition operators to
+    find the request type that two matchers can both accept.
 */
 template <typename... T>
 struct have_super_type;

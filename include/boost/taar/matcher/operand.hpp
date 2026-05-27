@@ -35,9 +35,9 @@ namespace boost::taar::matcher {
     @li both, in either order.
 
     `operand` advertises whether the wrapped callable needs the parsed
-    target and/or parsed cookies through the
-    @ref with_parsed_target and @ref with_parsed_cookies constants, so the
-    session can avoid the parsing cost when no registered matcher needs it.
+    target and/or parsed cookies through the `with_parsed_target` and
+    `with_parsed_cookies` constants, so the session can avoid the
+    parsing cost when no registered matcher needs it.
 
     Instances compose with `&&`, `||`, and unary `!`. Composition lifts the
     request type to the @ref boost::taar::type_traits::super_type_t
@@ -518,10 +518,10 @@ operand(ObjectType) ->
         >::template arg<0>
     >, ObjectType>;
 
-/** True if @a MatcherType can be wrapped in an @ref operand.
+/** True if @a MatcherType can be wrapped in an `operand`.
 
     This is the formal definition of the *Matcher* named requirement
-    described in the @ref taar.concepts.matcher "concepts" chapter.
+    described in the library's Concepts chapter.
 */
 template <typename MatcherType>
 concept is_matcher = requires(MatcherType&& matcher)

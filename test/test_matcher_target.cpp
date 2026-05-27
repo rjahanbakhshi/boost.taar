@@ -30,7 +30,7 @@ BOOST_AUTO_TEST_CASE(test_matcher_empty_target)
 
     ctx.path_args.clear();
     BOOST_TEST((target == "/{*a}")(req, ctx, parsed_target, {}));
-    BOOST_TEST(ctx.path_args.size() == 1);
+    BOOST_TEST(ctx.path_args.size() == 1u);
     BOOST_TEST(ctx.path_args.contains("a"));
     BOOST_TEST(ctx.path_args.at("a") == "");
 }
@@ -60,25 +60,25 @@ BOOST_AUTO_TEST_CASE(test_matcher_target)
 
     ctx.path_args.clear();
     BOOST_TEST((target == "/{a}/second/third")(req, ctx, parsed_target, {}));
-    BOOST_TEST(ctx.path_args.size() == 1);
+    BOOST_TEST(ctx.path_args.size() == 1u);
     BOOST_TEST(ctx.path_args.contains("a"));
     BOOST_TEST(ctx.path_args.at("a") == "first");
 
     ctx.path_args.clear();
     BOOST_TEST((target == "/first/{a}/third")(req, ctx, parsed_target, {}));
-    BOOST_TEST(ctx.path_args.size() == 1);
+    BOOST_TEST(ctx.path_args.size() == 1u);
     BOOST_TEST(ctx.path_args.contains("a"));
     BOOST_TEST(ctx.path_args.at("a") == "second");
 
     ctx.path_args.clear();
     BOOST_TEST((target == "/first/second/{a}")(req, ctx, parsed_target, {}));
-    BOOST_TEST(ctx.path_args.size() == 1);
+    BOOST_TEST(ctx.path_args.size() == 1u);
     BOOST_TEST(ctx.path_args.contains("a"));
     BOOST_TEST(ctx.path_args.at("a") == "third");
 
     ctx.path_args.clear();
     BOOST_TEST((target == "/{a}/{ab}/third")(req, ctx, parsed_target, {}));
-    BOOST_TEST(ctx.path_args.size() == 2);
+    BOOST_TEST(ctx.path_args.size() == 2u);
     BOOST_TEST(ctx.path_args.contains("a"));
     BOOST_TEST(ctx.path_args.contains("ab"));
     BOOST_TEST(ctx.path_args.at("a") == "first");
@@ -86,7 +86,7 @@ BOOST_AUTO_TEST_CASE(test_matcher_target)
 
     ctx.path_args.clear();
     BOOST_TEST((target == "/{a}/second/{ab}/")(req, ctx, parsed_target, {}));
-    BOOST_TEST(ctx.path_args.size() == 2);
+    BOOST_TEST(ctx.path_args.size() == 2u);
     BOOST_TEST(ctx.path_args.contains("a"));
     BOOST_TEST(ctx.path_args.contains("ab"));
     BOOST_TEST(ctx.path_args.at("a") == "first");
@@ -94,7 +94,7 @@ BOOST_AUTO_TEST_CASE(test_matcher_target)
 
     ctx.path_args.clear();
     BOOST_TEST((target == "/{a}/{ab}/{abc}")(req, ctx, parsed_target, {}));
-    BOOST_TEST(ctx.path_args.size() == 3);
+    BOOST_TEST(ctx.path_args.size() == 3u);
     BOOST_TEST(ctx.path_args.contains("a"));
     BOOST_TEST(ctx.path_args.contains("ab"));
     BOOST_TEST(ctx.path_args.contains("abc"));
@@ -104,31 +104,31 @@ BOOST_AUTO_TEST_CASE(test_matcher_target)
 
     //ctx.path_args.clear();
     //BOOST_TEST((target == "/{*}")(req, ctx, parsed_target, {}));
-    //BOOST_TEST(ctx.path_args.size() == 1);
+    //BOOST_TEST(ctx.path_args.size() == 1u);
     //BOOST_TEST(ctx.path_args.contains("*"));
     //BOOST_TEST(ctx.path_args.at("*") == "first/second/third");
 
     //ctx.path_args.clear();
     //BOOST_TEST((target == "/first/{*}")(req, ctx, parsed_target, {}));
-    //BOOST_TEST(ctx.path_args.size() == 1);
+    //BOOST_TEST(ctx.path_args.size() == 1u);
     //BOOST_TEST(ctx.path_args.contains("*"));
     //BOOST_TEST(ctx.path_args.at("*") == "second/third");
 
     //ctx.path_args.clear();
     //BOOST_TEST((target == "/first/second/{*}")(req, ctx, parsed_target, {}));
-    //BOOST_TEST(ctx.path_args.size() == 1);
+    //BOOST_TEST(ctx.path_args.size() == 1u);
     //BOOST_TEST(ctx.path_args.contains("*"));
     //BOOST_TEST(ctx.path_args.at("*") == "third");
 
     //ctx.path_args.clear();
     //BOOST_TEST((target == "/first/second/third/{*}")(req, ctx, parsed_target, {}));
-    //BOOST_TEST(ctx.path_args.size() == 1);
+    //BOOST_TEST(ctx.path_args.size() == 1u);
     //BOOST_TEST(ctx.path_args.contains("*"));
     //BOOST_TEST(ctx.path_args.at("*") == "");
 
     //ctx.path_args.clear();
     //BOOST_TEST((target == "/{a}/{b}/{c}/{*}")(req, ctx, parsed_target, {}));
-    //BOOST_TEST(ctx.path_args.size() == 4);
+    //BOOST_TEST(ctx.path_args.size() == 4u);
     //BOOST_TEST(ctx.path_args.contains("a"));
     //BOOST_TEST(ctx.path_args.contains("b"));
     //BOOST_TEST(ctx.path_args.contains("c"));
@@ -161,49 +161,49 @@ BOOST_AUTO_TEST_CASE(test_matcher_target_greedy)
 
     ctx.path_args.clear();
     BOOST_TEST((target == "/first/{a}/fifth/sixth")(req, ctx, parsed_target, {}));
-    BOOST_TEST(ctx.path_args.size() == 1);
+    BOOST_TEST(ctx.path_args.size() == 1u);
     BOOST_TEST(ctx.path_args.contains("a"));
     BOOST_TEST(ctx.path_args.at("a") == "second/third/fourth");
 
     ctx.path_args.clear();
     BOOST_TEST((target == "/first/{*a}/fifth/sixth")(req, ctx, parsed_target, {}));
-    BOOST_TEST(ctx.path_args.size() == 1);
+    BOOST_TEST(ctx.path_args.size() == 1u);
     BOOST_TEST(ctx.path_args.contains("a"));
     BOOST_TEST(ctx.path_args.at("a") == "second/third/fourth");
 
     ctx.path_args.clear();
     BOOST_TEST((target == "/first/{*a}/sixth")(req, ctx, parsed_target, {}));
-    BOOST_TEST(ctx.path_args.size() == 1);
+    BOOST_TEST(ctx.path_args.size() == 1u);
     BOOST_TEST(ctx.path_args.contains("a"));
     BOOST_TEST(ctx.path_args.at("a") == "second/third/fourth/fifth");
 
     ctx.path_args.clear();
     BOOST_TEST((target == "/first/{*a}")(req, ctx, parsed_target, {}));
-    BOOST_TEST(ctx.path_args.size() == 1);
+    BOOST_TEST(ctx.path_args.size() == 1u);
     BOOST_TEST(ctx.path_args.contains("a"));
     BOOST_TEST(ctx.path_args.at("a") == "second/third/fourth/fifth/sixth");
 
     ctx.path_args.clear();
     BOOST_TEST((target == "/{*a}")(req, ctx, parsed_target, {}));
-    BOOST_TEST(ctx.path_args.size() == 1);
+    BOOST_TEST(ctx.path_args.size() == 1u);
     BOOST_TEST(ctx.path_args.contains("a"));
     BOOST_TEST(ctx.path_args.at("a") == "first/second/third/fourth/fifth/sixth");
 
     ctx.path_args.clear();
     BOOST_TEST((target == "/{*a}/sixth")(req, ctx, parsed_target, {}));
-    BOOST_TEST(ctx.path_args.size() == 1);
+    BOOST_TEST(ctx.path_args.size() == 1u);
     BOOST_TEST(ctx.path_args.contains("a"));
     BOOST_TEST(ctx.path_args.at("a") == "first/second/third/fourth/fifth");
 
     ctx.path_args.clear();
     BOOST_TEST((target == "/first/{*a}/sixth")(req, ctx, parsed_target, {}));
-    BOOST_TEST(ctx.path_args.size() == 1);
+    BOOST_TEST(ctx.path_args.size() == 1u);
     BOOST_TEST(ctx.path_args.contains("a"));
     BOOST_TEST(ctx.path_args.at("a") == "second/third/fourth/fifth");
 
     ctx.path_args.clear();
     BOOST_TEST((target == "/first/{*a}/{b}/sixth")(req, ctx, parsed_target, {}));
-    BOOST_TEST(ctx.path_args.size() == 2);
+    BOOST_TEST(ctx.path_args.size() == 2u);
     BOOST_TEST((
         ctx.path_args.contains("a") &&
         ctx.path_args.at("a") == "second/third/fourth"));
@@ -213,7 +213,7 @@ BOOST_AUTO_TEST_CASE(test_matcher_target_greedy)
 
     ctx.path_args.clear();
     BOOST_TEST((target == "/first/{*a}/{*b}")(req, ctx, parsed_target, {}));
-    BOOST_TEST(ctx.path_args.size() == 2);
+    BOOST_TEST(ctx.path_args.size() == 2u);
     BOOST_TEST((
         ctx.path_args.contains("a") &&
         ctx.path_args.at("a") == "second/third/fourth"));
@@ -223,7 +223,7 @@ BOOST_AUTO_TEST_CASE(test_matcher_target_greedy)
 
     ctx.path_args.clear();
     BOOST_TEST((target == "/first/{*a}/sixth/{*b}")(req, ctx, parsed_target, {}));
-    BOOST_TEST(ctx.path_args.size() == 2);
+    BOOST_TEST(ctx.path_args.size() == 2u);
     BOOST_TEST((
         ctx.path_args.contains("a") &&
         ctx.path_args.at("a") == "second/third/fourth/fifth"));

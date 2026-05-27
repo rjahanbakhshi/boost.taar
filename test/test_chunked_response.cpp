@@ -903,7 +903,7 @@ BOOST_AUTO_TEST_CASE(test_chunked_response_auto_executor_with_chaining)
 // outstanding frames still referenced it.
 //
 // Run under valgrind to verify no invalid memory accesses:
-//   valgrind --leak-check=full build/test/boost-taar-test \
+//   valgrind --leak-check=full build/test/boost-taar-test
 //       --run_test=test_chunked_response_flatten_async_inner_with_cancellation_slot
 // ============================================================================
 
@@ -1132,7 +1132,7 @@ BOOST_AUTO_TEST_CASE(test_chunked_response_multiple_co_awaits_with_cancellation_
 // alive flag + destructor cancellation, the co_spawn's wrapper frame leaks.
 //
 // Run under valgrind to verify no leaked blocks:
-//   valgrind --leak-check=full build/test/boost-taar-test \
+//   valgrind --leak-check=full build/test/boost-taar-test
 //       --run_test=test_chunked_response_destroy_with_pending_co_spawn
 // ============================================================================
 

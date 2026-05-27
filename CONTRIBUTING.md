@@ -82,11 +82,22 @@ git clone --recursive https://github.com/boostorg/boost.git \
 cd ~/src/boost-modular && ./bootstrap.sh
 ```
 
-Then symlink (or `git submodule add`) your working copy of taar into
-`libs/`:
+Then drop a clean checkout of your branch into `libs/taar`. Do **not**
+symlink your everyday working tree into `libs/`: the super-project's
+header-link machinery scans `libs/*/include/boost/` recursively, and any
+stray include layout sitting beside it — for example an `out/include/`
+left over from `cmake --install --prefix out`, a `build/` tree generated
+by CMake, or a Conan-populated `_deps/` — collides with the real
+headers and aborts the build with a "Link previously defined to another
+file" error.
+
+A clean separate checkout avoids the problem:
 
 ```bash
-ln -s ~/proj/boost.taar ~/src/boost-modular/libs/taar
+cd ~/src/boost-modular/libs
+rm -rf taar
+git clone ~/proj/boost.taar taar
+git -C taar checkout <branch-under-test>
 ```
 
 Run the tests with B2:
@@ -96,13 +107,31 @@ cd ~/src/boost-modular
 ./b2 libs/taar/test cxxstd=23
 ```
 
-Build the documentation. This requires `doxygen`, `xsltproc`, and the
-`docbook-xsl` stylesheets to be installed on your system; B2 compiles
-QuickBook itself the first time:
+Build the documentation. The toolchain requirements:
+
+- `doxygen` — extracts the reference content from header comments.
+- `xsltproc` — runs the BoostBook XSL transforms.
+- DocBook XSL stylesheets (Arch: `docbook-xsl`,
+  Debian/Ubuntu: `docbook-xsl`, Fedora: `docbook-style-xsl`).
+- DocBook XML DTD (Arch: `docbook-xml`,
+  Debian/Ubuntu: `docbook-xml`, Fedora: `docbook-dtds`).
+
+B2 compiles QuickBook itself from `tools/quickbook/` the first time
+docs are built, adding ~30 seconds to the cold-cache run.
+
+`doc/Jamfile` reads `DOCBOOK_XSL_DIR` and `DOCBOOK_DTD_DIR` from the
+environment to locate the DocBook resources; the typical paths on Arch
+are shown below. Adjust for your distro's layout (look under
+`/usr/share/xml/docbook/`):
 
 ```bash
+export DOCBOOK_XSL_DIR=/usr/share/xml/docbook/xsl-stylesheets-1.79.2
+export DOCBOOK_DTD_DIR=/usr/share/xml/docbook/xml-dtd-4.2
 ./b2 libs/taar/doc
 ```
+
+Without those exported, BoostBook falls back to downloading the
+stylesheets over HTTP, which is slow and fails offline.
 
 Generated HTML lands in `libs/taar/doc/html/`. Open `index.html` in a
 browser to sanity-check that the narrative chapters in `doc/qbk/` render

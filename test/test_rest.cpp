@@ -100,14 +100,14 @@ BOOST_AUTO_TEST_CASE(test_rest_void)
         path_arg("a"),
         path_arg("b"));
     auto resp1 = to_response(rh1(req, ctx));
-    BOOST_TEST(resp1.count(http::field::content_type) == 0);
+    BOOST_TEST(resp1.count(http::field::content_type) == 0u);
 
     auto rh2 = taar::handler::rest(
         voidfn,
         path_arg("a"),
         path_arg("b"));
     auto resp2 = to_response(rh2(req, ctx));
-    BOOST_TEST(resp2.count(http::field::content_type) == 0);
+    BOOST_TEST(resp2.count(http::field::content_type) == 0u);
 }
 
 BOOST_AUTO_TEST_CASE(test_rest_fixed_value)
@@ -126,7 +126,7 @@ BOOST_AUTO_TEST_CASE(test_rest_fixed_value)
         path_arg("a"),
         42);
     auto resp1 = to_response(rh1(req, ctx));
-    BOOST_TEST(resp1.count(http::field::content_type) == 0);
+    BOOST_TEST(resp1.count(http::field::content_type) == 0u);
 }
 
 struct const_obj_handler

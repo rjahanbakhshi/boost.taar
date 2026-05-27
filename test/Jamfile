@@ -14,8 +14,8 @@ project /boost/taar/test
         <library>/boost/test//boost_unit_test_framework
         <cxxstd>23
         <toolset>msvc:<cxxflags>/bigobj
-        <toolset>msvc:<cxxflags>/Zc:preprocessor
-        <toolset>msvc:<cxxflags>/Zc:__cplusplus
+        <toolset>msvc:<cxxflags>/Zc\:preprocessor
+        <toolset>msvc:<cxxflags>/Zc\:__cplusplus
     ;
 
 run

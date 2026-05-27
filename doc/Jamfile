@@ -6,17 +6,31 @@
 #
 # Official repository: https://github.com/rjahanbakhshi/boost.taar
 
-import boostbook ;
-import doxygen ;
+import boostbook : boostbook ;
+import doxygen : doxygen ;
 import os ;
 import path ;
 import project ;
 import quickbook ;
 
+# Initialise the documentation toolsets. With no arguments these search
+# PATH for doxygen / quickbook. boostbook reads the DocBook XSL and DTD
+# locations from the DOCBOOK_XSL_DIR and DOCBOOK_DTD_DIR environment
+# variables (also accepted as `-s` flags on the b2 command line). When
+# unset, BoostBook falls back to downloading the stylesheets, which is
+# very slow; install docbook-xsl / docbook-xml from your distro and
+# point these at /usr/share/xml/docbook/xsl-stylesheets-* and
+# /usr/share/xml/docbook/xml-dtd-4.2 respectively.
+using doxygen ;
+using quickbook ;
+using boostbook
+    : [ os.environ DOCBOOK_XSL_DIR ]
+    : [ os.environ DOCBOOK_DTD_DIR ]
+    ;
+
 project taar/doc ;
 
 path-constant INCLUDES : ../include ;
-path-constant IMAGES   : images ;
 
 local doxygen-inputs =
     [ glob $(INCLUDES)/boost/taar/core/*.hpp ]
@@ -27,57 +41,54 @@ local doxygen-inputs =
     [ glob $(INCLUDES)/boost/taar/type_traits/*.hpp ]
     ;
 
-doxygen reference.xml
+# Generate a BoostBook-flavoured XML reference from the Doxygen comments
+# on the public headers. The target name has no extension: the b2
+# doxygen rule produces a corresponding `<name>.xml` stage target plus
+# an alias under the bare name. main.qbk references the .xml file via
+# [xinclude reference.xml]; the boostbook target below uses the alias
+# via <dependency>reference.
+doxygen reference
     : $(doxygen-inputs)
-    : <doxygen:param>PROJECT_NAME="Boost.Taar"
-      <doxygen:param>PROJECT_BRIEF="HTTP server and client building blocks for C++23"
+    : <doxygen:param>PROJECT_NAME=Boost.Taar
       <doxygen:param>JAVADOC_AUTOBRIEF=YES
-      <doxygen:param>AUTOLINK_SUPPORT=YES
+      # AUTOLINK_SUPPORT=NO: BoostBook's docbook XSL predates C++20 and
+      # does not emit anchors for concepts (or for many class-internal
+      # members exposed via auto-linking). Leaving auto-linking on
+      # produced "no ID for constraint linkend" errors at xsltproc time
+      # for every bare mention of boost::taar::is_http_response,
+      # is_matcher, etc. Disable it; cross-references can still be made
+      # with explicit @ref where the target is known to render.
+      <doxygen:param>AUTOLINK_SUPPORT=NO
       <doxygen:param>EXTRACT_ALL=NO
       <doxygen:param>EXTRACT_PRIVATE=NO
       <doxygen:param>EXTRACT_LOCAL_CLASSES=NO
       <doxygen:param>HIDE_UNDOC_MEMBERS=YES
       <doxygen:param>HIDE_UNDOC_CLASSES=YES
       <doxygen:param>HIDE_FRIEND_COMPOUNDS=YES
-      <doxygen:param>HIDE_SCOPE_NAMES=NO
       <doxygen:param>SHOW_INCLUDE_FILES=YES
       <doxygen:param>INHERIT_DOCS=YES
       <doxygen:param>QUIET=YES
       <doxygen:param>WARN_IF_UNDOCUMENTED=NO
       <doxygen:param>WARN_NO_PARAMDOC=NO
-      <doxygen:param>FILE_PATTERNS="*.hpp"
+      <doxygen:param>FILE_PATTERNS=*.hpp
       <doxygen:param>RECURSIVE=YES
-      <doxygen:param>EXCLUDE_SYMBOLS="*detail* *impl*"
       <doxygen:param>ENABLE_PREPROCESSING=YES
       <doxygen:param>MACRO_EXPANSION=YES
       <doxygen:param>EXPAND_ONLY_PREDEF=YES
       <doxygen:param>SEARCH_INCLUDES=NO
-      <doxygen:param>PREDEFINED="BOOST_TAAR_DOC \\
-                                 BOOST_SYMBOL_VISIBLE= \\
-                                 BOOST_FORCEINLINE=inline"
-      <doxygen:param>GENERATE_HTML=NO
-      <doxygen:param>GENERATE_LATEX=NO
-      <doxygen:param>GENERATE_XML=YES
-      <doxygen:param>XML_OUTPUT=reference-xml
-      <doxygen:param>XML_PROGRAMLISTING=YES
-      <doxygen:xml-imagedir>$(IMAGES)
     ;
 
 xml taar
     : main.qbk
     : <include>.
-      <dependency>reference.xml
     ;
 
 explicit taar ;
 
 boostbook standalone
     : taar
-    : <xsl:param>boost.root=../../../..
-      <xsl:param>boost.image.src=images/boost.png
-      <xsl:param>boost.image.alt=\"Boost C++ Libraries\"
-      <xsl:param>boost.image.w=277
-      <xsl:param>boost.image.h=86
+    : <dependency>reference
+      <xsl:param>boost.root=../../../..
       <xsl:param>nav.layout=none
       <xsl:param>boost.libraries=../../../libraries.htm
       <xsl:param>chapter.autolabel=1
@@ -86,19 +97,12 @@ boostbook standalone
       <xsl:param>toc.section.depth=2
       <xsl:param>toc.max.depth=2
       <xsl:param>generate.section.toc.level=2
-      <xsl:param>generate.toc="chapter toc,title section nop reference nop"
+      <xsl:param>"generate.toc=chapter toc,title section nop reference nop"
       <format>html:<xsl:param>admon.graphics.path=images/
       <format>html:<xsl:param>img.src.path=images/
     ;
 
-install images
-    : [ glob images/*.png ]
-    : <location>html/taar/images
-    ;
-
-explicit images ;
-
 ###############################################################################
 # Build everything by default.
-alias docs : standalone images ;
+alias docs : standalone ;
 explicit docs ;

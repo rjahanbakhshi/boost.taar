@@ -8,8 +8,8 @@
 [section:concepts Concepts]
 
 This chapter describes the named requirements and concepts that make up the
-public interface of Boost.Taar. Each concept is named, given a semantic
-description, and linked to the reference page for its formal definition.
+public interface of Boost.Taar. Each concept is named and given a semantic
+description; the formal definitions live in the Reference chapter.
 
 [section:matcher Matcher]
 
@@ -21,9 +21,8 @@ objects exported by `boost::taar::matcher` (`method`, `target`, `header`,
 
 [heading Required expressions]
 
-Given an instance `m` of a /Matcher/, a request `req`, a
-[link taar.ref.boost__taar__matcher__context `context`] object `ctx`, and a
-parsed target URL `url`:
+Given an instance `m` of a /Matcher/, a request `req`, a `context` object
+`ctx`, and a parsed target URL `url`:
 
 [table
 [[Expression][Semantics]]
@@ -37,8 +36,7 @@ parsed target URL `url`:
 
 An /Argument Provider/ is an object that, given an HTTP request, produces
 exactly one argument for a wrapped callable. Argument providers are
-supplied as the trailing arguments to
-[link taar.ref.boost__taar__handler__rest `taar::handler::rest`].
+supplied as the trailing arguments to `taar::handler::rest`.
 
 The library exports `path_arg`, `query_arg`, `header_arg`, `cookie_arg`, and
 `body_arg`. User code can define new argument providers by satisfying the
@@ -49,12 +47,11 @@ required expressions.
 [section:response_from response_from]
 
 Any user-defined return type can be converted to an HTTP response by
-overloading the `boost::taar::core::response_from` tag (see the
-[link taar.ref.boost__taar__core__response_from reference]).
-This extension point is the basis for the automatic JSON conversion of
-`boost::json::value`, the string conversion of `std::string` and
-`std::string_view`, and the file conversion used by
-[link taar.ref.boost__taar__handler__htdocs `htdocs`].
+overloading the `boost::taar::response_from_tag` tag (declared in
+`<boost/taar/core/response_from_tag.hpp>`). This extension point is the
+basis for the automatic JSON conversion of `boost::json::value`, the
+string conversion of `std::string` and `std::string_view`, and the file
+conversion used by `taar::handler::htdocs`.
 
 [endsect]
 
@@ -63,7 +60,7 @@ This extension point is the basis for the automatic JSON conversion of
 `rest_arg_cast` is the extension point used by argument providers to turn a
 string view extracted from the request into the typed argument of a
 callable. Customise it by overloading
-`boost::taar::handler::rest_arg_cast` for your type.
+`boost::taar::handler::rest_arg_cast_tag` for your type.
 
 [endsect]
 

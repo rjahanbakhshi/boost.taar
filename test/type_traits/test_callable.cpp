@@ -12,7 +12,7 @@
 
 namespace {
 
-void void_fn();
+[[maybe_unused]] void void_fn();
 void my_function(int, double&, float const&) {}
 
 struct functor

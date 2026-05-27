@@ -173,9 +173,8 @@ inline auto rest_for_memfn(
     @li @ref query_arg pulls a URL query parameter.
     @li @ref header_arg pulls a header value.
     @li @ref cookie_arg pulls a cookie value.
-    @li @ref body_arg parses the request body.
-    @li @ref string_body_arg / @ref json_body_arg / @ref form_body_arg are
-        convenience aliases for common body types.
+    @li @ref string_body_arg, @ref json_body_arg, and
+        @ref url_encoded_form_data_arg read and decode the request body.
 
     The number of providers must equal the number of arguments of
     @a callable (enforced with `static_assert`). Each provider's request
@@ -184,7 +183,7 @@ inline auto rest_for_memfn(
     the most specific request type all providers agree on.
 
     The return value of @a callable is converted to an HTTP response with
-    @ref boost::taar::response_from, which means user-defined return types
+    `boost::taar::response_from`, which means user-defined return types
     work as long as they have a `tag_invoke` overload for
     @ref boost::taar::response_from_tag.
 

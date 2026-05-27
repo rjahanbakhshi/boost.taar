@@ -67,7 +67,7 @@ acceptor on port 8080:
     }
 
 For a full version that includes signal handling and graceful shutdown,
-see the [link taar.examples examples chapter].
+see the [link boost_taar.examples examples chapter].
 
 [endsect]
 

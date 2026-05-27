@@ -125,7 +125,6 @@ template <type_traits::numeric_type FromType>
 inline std::string tag_invoke(rest_arg_cast_built_in_tag<std::string>, FromType const& from)
 {
     std::string result(sizeof(FromType) * 4 + 1, '\0');
-    std::to_chars_result tcr;
     for(int i = 0; i < 3; ++i)
     {
         auto [ptr, ec] = std::to_chars(result.data(), result.data() + result.size(), from);
@@ -286,8 +285,8 @@ concept rest_arg_castable =
         (via `std::to_chars`), `boost::json::value` to any
         `value_to`-compatible type, and CSV-style string to container.
 
-    Throws `boost::system::system_error` with an @ref boost::taar::error
-    code on conversion failure.
+    Throws `boost::system::system_error` with a `boost::taar::error` code
+    on conversion failure.
 */
 template <typename ToType, typename FromType>
 inline constexpr decltype(auto) rest_arg_cast(FromType const& from)

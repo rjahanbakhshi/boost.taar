@@ -104,7 +104,7 @@ struct method_t
 /** A method-matcher placeholder parameterised by the Fields type.
 
     Use `basic_method<MyFields>` when your session is built on a non-default
-    beast `Fields` container; otherwise prefer @ref method.
+    beast `Fields` container; otherwise prefer the unspecialised `method`.
 */
 template<class FieldsType = boost::beast::http::fields>
 constexpr auto basic_method = method_t<FieldsType>{};

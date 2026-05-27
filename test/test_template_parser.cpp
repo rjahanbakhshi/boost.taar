@@ -66,43 +66,43 @@ BOOST_AUTO_TEST_CASE(test_matcher_template_parser)
 
     auto result = parse_template("/");
     BOOST_TEST(!result.has_error());
-    BOOST_TEST(result.value().size() == 0);
+    BOOST_TEST(result.value().size() == 0u);
 
     result = parse_template("//");
     BOOST_TEST(!result.has_error());
-    BOOST_TEST(result.value().size() == 0);
+    BOOST_TEST(result.value().size() == 0u);
 
     result = parse_template("///");
     BOOST_TEST(!result.has_error());
-    BOOST_TEST(result.value().size() == 0);
+    BOOST_TEST(result.value().size() == 0u);
 
     result = parse_template("/first");
     BOOST_TEST(!result.has_error());
-    BOOST_TEST(result.value().size() == 1);
+    BOOST_TEST(result.value().size() == 1u);
     BOOST_TEST(result.value()[0].type == template_segment_type::literal);
     BOOST_TEST(result.value()[0].value == "first");
 
     result = parse_template("/first/");
     BOOST_TEST(!result.has_error());
-    BOOST_TEST(result.value().size() == 1);
+    BOOST_TEST(result.value().size() == 1u);
     BOOST_TEST(result.value()[0].type == template_segment_type::literal);
     BOOST_TEST(result.value()[0].value == "first");
 
     result = parse_template("/first//");
     BOOST_TEST(!result.has_error());
-    BOOST_TEST(result.value().size() == 1);
+    BOOST_TEST(result.value().size() == 1u);
     BOOST_TEST(result.value()[0].type == template_segment_type::literal);
     BOOST_TEST(result.value()[0].value == "first");
 
     result = parse_template("//first/");
     BOOST_TEST(!result.has_error());
-    BOOST_TEST(result.value().size() == 1);
+    BOOST_TEST(result.value().size() == 1u);
     BOOST_TEST(result.value()[0].type == template_segment_type::literal);
     BOOST_TEST(result.value()[0].value == "first");
 
     result = parse_template("/first/second");
     BOOST_TEST(!result.has_error());
-    BOOST_TEST(result.value().size() == 2);
+    BOOST_TEST(result.value().size() == 2u);
     BOOST_TEST(result.value()[0].type == template_segment_type::literal);
     BOOST_TEST(result.value()[0].value == "first");
     BOOST_TEST(result.value()[1].type == template_segment_type::literal);
@@ -110,7 +110,7 @@ BOOST_AUTO_TEST_CASE(test_matcher_template_parser)
 
     result = parse_template("/first/second/");
     BOOST_TEST(!result.has_error());
-    BOOST_TEST(result.value().size() == 2);
+    BOOST_TEST(result.value().size() == 2u);
     BOOST_TEST(result.value()[0].type == template_segment_type::literal);
     BOOST_TEST(result.value()[0].value == "first");
     BOOST_TEST(result.value()[1].type == template_segment_type::literal);
@@ -118,13 +118,13 @@ BOOST_AUTO_TEST_CASE(test_matcher_template_parser)
 
     result = parse_template("/{first}");
     BOOST_TEST(!result.has_error());
-    BOOST_TEST(result.value().size() == 1);
+    BOOST_TEST(result.value().size() == 1u);
     BOOST_TEST(result.value()[0].type == template_segment_type::param);
     BOOST_TEST(result.value()[0].value == "first");
 
     result = parse_template("/first/{second}");
     BOOST_TEST(!result.has_error());
-    BOOST_TEST(result.value().size() == 2);
+    BOOST_TEST(result.value().size() == 2u);
     BOOST_TEST(result.value()[0].type == template_segment_type::literal);
     BOOST_TEST(result.value()[0].value == "first");
     BOOST_TEST(result.value()[1].type == template_segment_type::param);
@@ -132,7 +132,7 @@ BOOST_AUTO_TEST_CASE(test_matcher_template_parser)
 
     result = parse_template("/first/{second}/");
     BOOST_TEST(!result.has_error());
-    BOOST_TEST(result.value().size() == 2);
+    BOOST_TEST(result.value().size() == 2u);
     BOOST_TEST(result.value()[0].type == template_segment_type::literal);
     BOOST_TEST(result.value()[0].value == "first");
     BOOST_TEST(result.value()[1].type == template_segment_type::param);
@@ -140,7 +140,7 @@ BOOST_AUTO_TEST_CASE(test_matcher_template_parser)
 
     result = parse_template("/{first}/second/");
     BOOST_TEST(!result.has_error());
-    BOOST_TEST(result.value().size() == 2);
+    BOOST_TEST(result.value().size() == 2u);
     BOOST_TEST(result.value()[0].type == template_segment_type::param);
     BOOST_TEST(result.value()[0].value == "first");
     BOOST_TEST(result.value()[1].type == template_segment_type::literal);
@@ -148,7 +148,7 @@ BOOST_AUTO_TEST_CASE(test_matcher_template_parser)
 
     result = parse_template("/first/{second}/third");
     BOOST_TEST(!result.has_error());
-    BOOST_TEST(result.value().size() == 3);
+    BOOST_TEST(result.value().size() == 3u);
     BOOST_TEST(result.value()[0].type == template_segment_type::literal);
     BOOST_TEST(result.value()[0].value == "first");
     BOOST_TEST(result.value()[1].type == template_segment_type::param);
@@ -158,7 +158,7 @@ BOOST_AUTO_TEST_CASE(test_matcher_template_parser)
 
     result = parse_template("/{*first}/{second}/{*third}");
     BOOST_TEST(!result.has_error());
-    BOOST_TEST(result.value().size() == 3);
+    BOOST_TEST(result.value().size() == 3u);
     BOOST_TEST(result.value()[0].type == template_segment_type::greedy_param);
     BOOST_TEST(result.value()[0].value == "first");
     BOOST_TEST(result.value()[1].type == template_segment_type::param);
@@ -168,7 +168,7 @@ BOOST_AUTO_TEST_CASE(test_matcher_template_parser)
 
     result = parse_template("/first/{*second}/third");
     BOOST_TEST(!result.has_error());
-    BOOST_TEST(result.value().size() == 3);
+    BOOST_TEST(result.value().size() == 3u);
     BOOST_TEST(result.value()[0].type == template_segment_type::literal);
     BOOST_TEST(result.value()[0].value == "first");
     BOOST_TEST(result.value()[1].type == template_segment_type::greedy_param);
@@ -178,7 +178,7 @@ BOOST_AUTO_TEST_CASE(test_matcher_template_parser)
 
     result = parse_template("/first/second/{*third}");
     BOOST_TEST(!result.has_error());
-    BOOST_TEST(result.value().size() == 3);
+    BOOST_TEST(result.value().size() == 3u);
     BOOST_TEST(result.value()[0].type == template_segment_type::literal);
     BOOST_TEST(result.value()[0].value == "first");
     BOOST_TEST(result.value()[1].type == template_segment_type::literal);
@@ -188,7 +188,7 @@ BOOST_AUTO_TEST_CASE(test_matcher_template_parser)
 
     result = parse_template("/{*first}/{*second}/{*third}");
     BOOST_TEST(!result.has_error());
-    BOOST_TEST(result.value().size() == 3);
+    BOOST_TEST(result.value().size() == 3u);
     BOOST_TEST(result.value()[0].type == template_segment_type::greedy_param);
     BOOST_TEST(result.value()[0].value == "first");
     BOOST_TEST(result.value()[1].type == template_segment_type::greedy_param);
@@ -198,7 +198,7 @@ BOOST_AUTO_TEST_CASE(test_matcher_template_parser)
 
     result = parse_template("/first/!$&'()*+,;=:@second/third");
     BOOST_TEST(!result.has_error());
-    BOOST_TEST(result.value().size() == 3);
+    BOOST_TEST(result.value().size() == 3u);
     BOOST_TEST(result.value()[0].type == template_segment_type::literal);
     BOOST_TEST(result.value()[0].value == "first");
     BOOST_TEST(result.value()[1].type == template_segment_type::literal);

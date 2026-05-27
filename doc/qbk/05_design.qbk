@@ -24,11 +24,9 @@ matcher/handler ecosystem on top of Boost.Beast and Boost.Asio.
 
 [section:tag_invoke Tag invoke as the extension story]
 
-The two main customisation points,
-[link taar.ref.boost__taar__core__response_from `response_from`] and
-[link taar.ref.boost__taar__handler__rest_arg_cast `rest_arg_cast`], are
-exposed as `tag_invoke` overloads rather than virtual functions or class
-template specialisations.
+The two main customisation points, `response_from` and `rest_arg_cast`,
+are exposed as `tag_invoke` overloads rather than virtual functions or
+class template specialisations.
 
 `tag_invoke` is found by ordinary argument-dependent lookup, which means a
 user-defined return type or argument type can opt in to Taar by declaring a
