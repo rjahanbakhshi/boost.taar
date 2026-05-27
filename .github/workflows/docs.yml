@@ -65,13 +65,17 @@ jobs:
           rm -rf "$TAAR_LIB_DIR"
           mv taar "$TAAR_LIB_DIR"
 
-      - name: Pull submodules taar's headers transitively need
+      - name: Pull submodules taar's headers and quickbook need
         working-directory: boost-modular
-        # depinst.py walks taar's headers and fetches the submodules they
-        # #include, transitively (asio, beast, json, url, system, …).
+        # depinst.py walks one library's headers and fetches the
+        # submodules they #include, transitively. We need two passes:
+        # one for taar (asio, beast, json, url, system, …) and one for
+        # program_options, which the quickbook tool links against.
         run: |
           python ./tools/boostdep/depinst/depinst.py --include example \
             --git_args "--jobs 8" taar
+          python ./tools/boostdep/depinst/depinst.py --include example \
+            --git_args "--jobs 8" program_options
 
       - name: Bootstrap b2
         working-directory: boost-modular
