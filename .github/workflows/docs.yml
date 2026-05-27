@@ -74,14 +74,16 @@ jobs:
       - name: Pull submodules taar's headers and quickbook need
         working-directory: boost-modular
         # depinst.py walks one library's headers and fetches the
-        # submodules they #include, transitively. We need two passes:
-        # one for taar (asio, beast, json, url, system, …) and one for
-        # program_options, which the quickbook tool links against.
+        # submodules they #include, transitively. Run it for every
+        # library we explicitly checked out — taar for the test deps,
+        # program_options + filesystem for the quickbook tool — so each
+        # of their transitive dependencies (atomic, regex, …) lands
+        # before b2 starts.
         run: |
-          python ./tools/boostdep/depinst/depinst.py --include example \
-            --git_args "--jobs 8" taar
-          python ./tools/boostdep/depinst/depinst.py --include example \
-            --git_args "--jobs 8" program_options
+          for lib in taar program_options filesystem; do
+            python ./tools/boostdep/depinst/depinst.py --include example \
+              --git_args "--jobs 8" "$lib"
+          done
 
       - name: Bootstrap b2
         working-directory: boost-modular
