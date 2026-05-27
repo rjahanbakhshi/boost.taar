@@ -56,21 +56,22 @@ jobs:
             https://github.com/boostorg/boost.git boost-modular
           cd boost-modular
           git submodule update --init --depth=1 --jobs=8 \
-            libs/asio libs/beast libs/json libs/url libs/system \
             libs/config libs/headers libs/predef \
             tools/build tools/boostbook tools/quickbook tools/boostdep \
             tools/boost_install
-
-      - name: Pull additional submodules required by taar's dependencies
-        working-directory: boost-modular
-        run: |
-          python ./tools/boostdep/depinst/depinst.py --include example \
-            --git_args "--jobs 8" asio beast json url system
 
       - name: Slot taar into the super-project
         run: |
           rm -rf "$TAAR_LIB_DIR"
           mv taar "$TAAR_LIB_DIR"
+
+      - name: Pull submodules taar's headers transitively need
+        working-directory: boost-modular
+        # depinst.py walks taar's headers and fetches the submodules they
+        # #include, transitively (asio, beast, json, url, system, …).
+        run: |
+          python ./tools/boostdep/depinst/depinst.py --include example \
+            --git_args "--jobs 8" taar
 
       - name: Bootstrap b2
         working-directory: boost-modular
@@ -78,6 +79,11 @@ jobs:
 
       - name: Build the docs
         working-directory: boost-modular
+        env:
+          # Ubuntu 24.04 layout. doc/Jamfile reads these to avoid
+          # downloading the stylesheets over HTTP.
+          DOCBOOK_XSL_DIR: /usr/share/xml/docbook/stylesheet/docbook-xsl-nons
+          DOCBOOK_DTD_DIR: /usr/share/xml/docbook/schema/dtd/4.5
         run: ./b2 -j2 libs/taar/doc
 
       - name: Collect HTML output

@@ -56,20 +56,23 @@ jobs:
             https://github.com/boostorg/boost.git boost-modular
           cd boost-modular
           git submodule update --init --depth=1 --jobs=8 \
-            libs/asio libs/beast libs/json libs/url libs/system \
-            libs/test libs/config libs/headers libs/predef \
+            libs/config libs/headers libs/predef \
             tools/build tools/boostdep tools/boost_install
-
-      - name: Pull additional submodules required by taar's dependencies
-        working-directory: boost-modular
-        run: |
-          python ./tools/boostdep/depinst/depinst.py --include example \
-            --git_args "--jobs 8" asio beast json url system test
 
       - name: Slot taar into the super-project
         run: |
           rm -rf "$TAAR_LIB_DIR"
           mv taar "$TAAR_LIB_DIR"
+
+      - name: Pull submodules taar's headers transitively need
+        working-directory: boost-modular
+        # depinst.py walks the headers of one library and pulls in the
+        # submodules it #includes, transitively. Running it against
+        # taar fetches asio, beast, json, url, system, test, and any of
+        # their dependents that aren't already present.
+        run: |
+          python ./tools/boostdep/depinst/depinst.py --include example \
+            --git_args "--jobs 8" taar
 
       - name: Bootstrap b2
         working-directory: boost-modular
