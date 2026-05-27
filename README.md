@@ -1,5 +1,10 @@
 # boost.taar
 
+[![CI](https://github.com/rjahanbakhshi/boost.taar/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/rjahanbakhshi/boost.taar/actions/workflows/ci.yml)
+[![B2](https://github.com/rjahanbakhshi/boost.taar/actions/workflows/b2.yml/badge.svg?branch=master)](https://github.com/rjahanbakhshi/boost.taar/actions/workflows/b2.yml)
+[![Docs](https://github.com/rjahanbakhshi/boost.taar/actions/workflows/docs.yml/badge.svg?branch=master)](https://github.com/rjahanbakhshi/boost.taar/actions/workflows/docs.yml)
+[![License: BSL-1.0](https://img.shields.io/badge/License-BSL--1.0-blue.svg)](https://www.boost.org/LICENSE_1_0.txt)
+
 ***⚠️ Warning: This library is not production ready and is a work in progress. Use
 with care.***
 
