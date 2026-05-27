@@ -1,0 +1,126 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.experimental == true }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-gcc-14
+            os: ubuntu-24.04
+            cc: gcc-14
+            cxx: g++-14
+            apt: gcc-14 g++-14
+
+          - name: linux-clang-18
+            os: ubuntu-24.04
+            cc: clang-18
+            cxx: clang++-18
+            apt: clang-18
+
+          - name: windows-msvc-2022
+            os: windows-2022
+            conan_profile: profiles/windows-vs2022.profile
+
+          - name: macos-clang
+            os: macos-14
+            cc: clang
+            cxx: clang++
+            experimental: true
+
+    env:
+      CMAKE_BUILD_TYPE: Release
+      CONAN_HOME: ${{ github.workspace }}/.conan2
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Conan
+        run: |
+          python -m pip install --upgrade pip
+          pip install "conan>=2.0"
+          conan --version
+
+      - name: Install Linux toolchain
+        if: runner.os == 'Linux' && matrix.apt
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ${{ matrix.apt }} ninja-build
+          echo "CC=${{ matrix.cc }}"  >> "$GITHUB_ENV"
+          echo "CXX=${{ matrix.cxx }}" >> "$GITHUB_ENV"
+
+      - name: Install macOS toolchain
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      - name: Cache Conan packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CONAN_HOME }}
+          key: conan-${{ matrix.name }}-${{ hashFiles('conanfile.py') }}
+          restore-keys: |
+            conan-${{ matrix.name }}-
+
+      - name: Detect default Conan profile (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: conan profile detect --force
+
+      - name: Conan install (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: |
+          conan install . -of=build \
+            -s build_type=$CMAKE_BUILD_TYPE \
+            -s compiler.cppstd=23 \
+            --build=missing
+
+      - name: Conan install (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          conan install . -of=build ^
+            -pr:h=${{ matrix.conan_profile }} ^
+            -pr:b=${{ matrix.conan_profile }} ^
+            -s build_type=%CMAKE_BUILD_TYPE% ^
+            --build=missing
+
+      - name: CMake configure (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: cmake --preset conan-release
+
+      - name: CMake configure (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: cmake --preset conan-release
+
+      - name: Build
+        run: cmake --build --preset conan-release -j
+
+      - name: Test
+        run: ctest --preset conan-release --output-on-failure
+
+      - name: Build examples
+        run: |
+          cmake --build --preset conan-release -j \
+            --target awaitable_server chunked_server htdocs_server \
+                     mixed_server response_stream websocket_server
+        shell: bash

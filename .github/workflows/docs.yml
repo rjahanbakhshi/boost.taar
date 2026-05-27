@@ -1,0 +1,120 @@
+name: Docs
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'doc/**'
+      - 'include/**'
+      - 'build.jam'
+      - 'meta/**'
+      - '.github/workflows/docs.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'doc/**'
+      - 'include/**'
+      - 'build.jam'
+      - 'meta/**'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: docs-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build BoostBook docs
+    runs-on: ubuntu-24.04
+    outputs:
+      artifact-name: ${{ steps.upload.outputs.artifact-id && 'taar-docs' || '' }}
+
+    env:
+      BOOST_BRANCH: develop
+      TAAR_LIB_DIR: ${{ github.workspace }}/boost-modular/libs/taar
+
+    steps:
+      - name: Checkout taar
+        uses: actions/checkout@v4
+        with:
+          path: taar
+
+      - name: Install doc toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential gcc-14 g++-14 \
+            doxygen xsltproc docbook-xsl docbook-xml
+
+      - name: Clone Boost super-project
+        run: |
+          git clone -b "$BOOST_BRANCH" --depth=1 \
+            https://github.com/boostorg/boost.git boost-modular
+          cd boost-modular
+          git submodule update --init --depth=1 --jobs=8 \
+            libs/asio libs/beast libs/json libs/url libs/system \
+            libs/config libs/headers libs/predef \
+            tools/build tools/boostbook tools/quickbook tools/boostdep \
+            tools/boost_install
+
+      - name: Pull additional submodules required by taar's dependencies
+        working-directory: boost-modular
+        run: |
+          python ./tools/boostdep/depinst/depinst.py --include example \
+            --git_args "--jobs 8" asio beast json url system
+
+      - name: Slot taar into the super-project
+        run: |
+          rm -rf "$TAAR_LIB_DIR"
+          mv taar "$TAAR_LIB_DIR"
+
+      - name: Bootstrap b2
+        working-directory: boost-modular
+        run: ./bootstrap.sh
+
+      - name: Build the docs
+        working-directory: boost-modular
+        run: ./b2 -j2 libs/taar/doc
+
+      - name: Collect HTML output
+        id: collect
+        run: |
+          mkdir -p site
+          if [ -d boost-modular/libs/taar/doc/html ]; then
+            cp -r boost-modular/libs/taar/doc/html/* site/
+          fi
+          ls -la site
+
+      - name: Upload docs artifact
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: taar-docs
+          path: site
+          if-no-files-found: error
+
+      - name: Upload Pages artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,88 @@
+name: B2
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'build.jam'
+      - 'test/Jamfile'
+      - 'doc/Jamfile'
+      - 'meta/**'
+      - 'include/**'
+      - 'test/**'
+      - '.github/workflows/b2.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'build.jam'
+      - 'test/Jamfile'
+      - 'doc/Jamfile'
+      - 'meta/**'
+      - 'include/**'
+      - 'test/**'
+      - '.github/workflows/b2.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: b2-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  b2-test:
+    name: b2 libs/taar/test
+    runs-on: ubuntu-24.04
+
+    env:
+      BOOST_BRANCH: develop
+      TAAR_LIB_DIR: ${{ github.workspace }}/boost-modular/libs/taar
+
+    steps:
+      - name: Checkout taar
+        uses: actions/checkout@v4
+        with:
+          path: taar
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential gcc-14 g++-14 ninja-build
+          echo "CC=gcc-14"  >> "$GITHUB_ENV"
+          echo "CXX=g++-14" >> "$GITHUB_ENV"
+
+      - name: Clone Boost super-project
+        run: |
+          git clone -b "$BOOST_BRANCH" --depth=1 \
+            https://github.com/boostorg/boost.git boost-modular
+          cd boost-modular
+          git submodule update --init --depth=1 --jobs=8 \
+            libs/asio libs/beast libs/json libs/url libs/system \
+            libs/test libs/config libs/headers libs/predef \
+            tools/build tools/boostdep tools/boost_install
+
+      - name: Pull additional submodules required by taar's dependencies
+        working-directory: boost-modular
+        run: |
+          python ./tools/boostdep/depinst/depinst.py --include example \
+            --git_args "--jobs 8" asio beast json url system test
+
+      - name: Slot taar into the super-project
+        run: |
+          rm -rf "$TAAR_LIB_DIR"
+          mv taar "$TAAR_LIB_DIR"
+
+      - name: Bootstrap b2
+        working-directory: boost-modular
+        run: ./bootstrap.sh
+
+      - name: Cache b2 build artifacts
+        uses: actions/cache@v4
+        with:
+          path: boost-modular/bin.v2
+          key: b2-${{ runner.os }}-${{ hashFiles('boost-modular/.git/HEAD', 'taar/build.jam', 'taar/test/Jamfile') }}
+          restore-keys: |
+            b2-${{ runner.os }}-
+
+      - name: Build and run taar tests
+        working-directory: boost-modular
+        run: ./b2 -j2 libs/taar/test cxxstd=23 toolset=gcc
