@@ -98,11 +98,20 @@ boostbook standalone
       <xsl:param>nav.layout=none
       <xsl:param>boost.libraries=https://www.boost.org/doc/libs/
       <xsl:param>chapter.autolabel=1
-      <xsl:param>chunk.section.depth=8
+      # chunk.section.depth=1: one HTML page per top-level chapter.
+      # The Reference chapter therefore renders as a single page with
+      # every header inline (rather than ~40 separate files that left
+      # the Reference landing page empty and dumped the whole header
+      # list onto the home page TOC).
+      <xsl:param>chunk.section.depth=1
       <xsl:param>chunk.first.sections=1
-      <xsl:param>toc.section.depth=2
-      <xsl:param>toc.max.depth=2
-      <xsl:param>generate.section.toc.level=2
+      # toc.max.depth is an absolute depth from the document root. At 1
+      # the home/library TOC lists only the top-level chapters and never
+      # recurses into the Reference chapter's per-header subsections, so
+      # the overview is visible without scrolling past a wall of links.
+      <xsl:param>toc.section.depth=1
+      <xsl:param>toc.max.depth=1
+      <xsl:param>generate.section.toc.level=1
       <xsl:param>"generate.toc=chapter toc,title section nop reference nop"
       <format>html:<xsl:param>admon.graphics.path=images/
       <format>html:<xsl:param>img.src.path=images/
