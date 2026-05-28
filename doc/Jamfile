@@ -88,9 +88,15 @@ explicit taar ;
 boostbook standalone
     : taar
     : <dependency>reference
-      <xsl:param>boost.root=../../../..
+      # boost.root locates the shared Boost doc assets: the boostbook
+      # CSS, the boost.png logo, and the prev/up/home/next navigation
+      # icons. For docs that live inside the boost.org tree this is a
+      # relative path; for a standalone deployment (GitHub Pages here)
+      # those assets aren't shipped, so point at the live boost.org
+      # docs instead. Same approach libs/any uses.
+      <xsl:param>boost.root=https://www.boost.org/doc/libs/release
       <xsl:param>nav.layout=none
-      <xsl:param>boost.libraries=../../../libraries.htm
+      <xsl:param>boost.libraries=https://www.boost.org/doc/libs/
       <xsl:param>chapter.autolabel=1
       <xsl:param>chunk.section.depth=8
       <xsl:param>chunk.first.sections=1
