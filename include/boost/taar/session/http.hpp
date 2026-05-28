@@ -251,7 +251,7 @@ awaitable<bool> write_chunked_response(
     // If the generator stored an exception (i.e., it threw mid-stream after
     // yielding values), do NOT send the terminating chunk. The chunked
     // protocol has no way to signal failure once headers are on the wire,
-    // so we drop the connection — the client sees a truncated response
+    // so we drop the connection: the client sees a truncated response
     // rather than a falsely-successful one.
     try
     {
@@ -300,12 +300,12 @@ awaitable<bool> write_chunked_response(
 
     Two error-reporting hooks are exposed:
 
-    @li @ref set_soft_error_handler — invoked when a handler throws.
+    @li @ref set_soft_error_handler: invoked when a handler throws.
         Receives the `exception_ptr`, has access to the stream, and is
         expected to write an HTTP response describing the error. The
         default handler turns @ref boost::taar::error codes into 400
         responses.
-    @li @ref set_hard_error_handler — invoked when the connection itself
+    @li @ref set_hard_error_handler: invoked when the connection itself
         fails. The default discards the exception silently; a real server
         should at least log.
 
@@ -857,7 +857,7 @@ public:
                     std::move(buffer),
                     signals);
 
-                // Always close the session — the handler now owns the socket,
+                // Always close the session: the handler now owns the socket,
                 // and the session's loop must not read or write again.
                 co_return false;
             });
@@ -872,7 +872,7 @@ public:
         or closes.
 
         Override this when the default 400-with-message behaviour is not
-        what you want — e.g. to map specific exceptions to specific status
+        what you want, e.g. to map specific exceptions to specific status
         codes, return JSON-formatted errors, or include a request id.
     */
     template <detail::soft_error_handler HandlerType>
@@ -902,7 +902,7 @@ public:
         being torn down by the time the handler runs.
 
         The default handler silently discards the exception, which is
-        almost never the right choice in production — install at least a
+        almost never the right choice in production; install at least a
         logging hook.
     */
     template <detail::hard_error_handler HandlerType>

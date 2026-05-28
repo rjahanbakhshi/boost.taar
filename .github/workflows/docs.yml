@@ -77,8 +77,8 @@ jobs:
         working-directory: boost-modular
         # depinst.py walks one library's headers and fetches the
         # submodules they #include, transitively. Run it for every
-        # library we explicitly checked out — taar for the test deps,
-        # program_options + filesystem for the quickbook tool — so each
+        # library we explicitly checked out: taar for the test deps,
+        # program_options + filesystem for the quickbook tool, so each
         # of their transitive dependencies (atomic, regex, …) lands
         # before b2 starts.
         run: |

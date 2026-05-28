@@ -33,13 +33,13 @@ where a thoughtful patch lands but cannot be merged because it conflicts
 with an unstated design constraint.
 
 Bug fixes, documentation improvements, build-system fixes, and additional
-test coverage do not need a prior discussion — feel free to open a PR
+test coverage do not need a prior discussion. Feel free to open a PR
 directly.
 
 ## Pull request workflow
 
 1. Fork the repository and create a feature branch off `master`.
-2. Make your changes. Keep commits focused — one concern per commit, with a
+2. Make your changes. Keep commits focused: one concern per commit, with a
    commit message that explains the *why*, not just the *what*.
 3. Add or update tests in `test/` so that the change is covered by the
    existing `boost-taar-test` binary. Compile-time properties (concepts,
@@ -85,9 +85,9 @@ cd ~/src/boost-modular && ./bootstrap.sh
 Then drop a clean checkout of your branch into `libs/taar`. Do **not**
 symlink your everyday working tree into `libs/`: the super-project's
 header-link machinery scans `libs/*/include/boost/` recursively, and any
-stray include layout sitting beside it — for example an `out/include/`
+stray include layout sitting beside it (for example an `out/include/`
 left over from `cmake --install --prefix out`, a `build/` tree generated
-by CMake, or a Conan-populated `_deps/` — collides with the real
+by CMake, or a Conan-populated `_deps/`) collides with the real
 headers and aborts the build with a "Link previously defined to another
 file" error.
 
@@ -109,8 +109,8 @@ cd ~/src/boost-modular
 
 Build the documentation. The toolchain requirements:
 
-- `doxygen` — extracts the reference content from header comments.
-- `xsltproc` — runs the BoostBook XSL transforms.
+- `doxygen`: extracts the reference content from header comments.
+- `xsltproc`: runs the BoostBook XSL transforms.
 - DocBook XSL stylesheets (Arch: `docbook-xsl`,
   Debian/Ubuntu: `docbook-xsl`, Fedora: `docbook-style-xsl`).
 - DocBook XML DTD (Arch: `docbook-xml`,
@@ -194,8 +194,8 @@ should be a separate commit from any behavioural change.
   test files must be added to that list.
 - Test cases are declared with `BOOST_AUTO_TEST_CASE` and assertions with
   `BOOST_TEST`.
-- Prefer `static_assert` for compile-time invariants — concept satisfaction,
-  trait results, signature deductions — even when a runtime test also
+- Prefer `static_assert` for compile-time invariants (concept satisfaction,
+  trait results, signature deductions) even when a runtime test also
   exists.
 
 ### CMake

@@ -33,7 +33,7 @@ namespace boost::taar::server {
 
     Each accepted socket is forwarded to @a session_handler on the executor
     of the new socket. The handler is responsible for the full lifetime of
-    the connection — typically by invoking a
+    the connection, typically by invoking a
     @ref boost::taar::session::http instance.
 
     @param bind_host             Host or address to bind. `"0.0.0.0"` and

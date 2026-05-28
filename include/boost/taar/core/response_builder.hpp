@@ -114,7 +114,7 @@ private:
     a `boost::beast::http::response`, etc.), then chain
     @ref set_status, @ref set_version, @ref set_header, and
     @ref insert_header on the result before consuming the final response
-    with @ref get_response — or returning the builder from a REST handler,
+    with @ref get_response, or returning the builder from a REST handler,
     in which case the conversion is automatic:
 
     @code

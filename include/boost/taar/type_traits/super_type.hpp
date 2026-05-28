@@ -57,7 +57,7 @@ inline constexpr bool have_super_type_v = have_super_type<T...>::value;
 
 /** Trait: the super type of @a T....
 
-    Computes the "most derived" type all of @a T... can be converted to —
+    Computes the "most derived" type all of @a T... can be converted to:
     a base if one is a base of the others, otherwise `std::common_type`.
     Use @ref super_type_t for direct access.
 */

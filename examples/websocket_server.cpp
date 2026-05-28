@@ -68,7 +68,7 @@ int main(int argc, char* argv[])
 
     taar::session::http http_session;
 
-    // Plain HTTP route — proves /api/* requests still flow through the
+    // Plain HTTP route: proves /api/* requests still flow through the
     // normal request-handler dispatch.
     http_session.register_request_handler(
         method == http::verb::get && target == "/api/version",
@@ -76,7 +76,7 @@ int main(int argc, char* argv[])
 
     // WebSocket upgrade route via register_raw_handler. Once the matcher
     // fires, the session's per-connection coroutine ends and ownership of
-    // the stream + buffer passes to this handler — taar will not touch
+    // the stream + buffer passes to this handler: taar will not touch
     // the socket again.
     http_session.register_raw_handler(
         method == http::verb::get && target == "/echo",

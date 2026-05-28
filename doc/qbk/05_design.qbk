@@ -10,24 +10,27 @@
 This chapter records the design decisions that are not obvious from the
 reference documentation alone.
 
-* [link boost_taar.design.why_header_only Why header-only?] — what would
+* [link boost_taar.design.why_header_only Why header-only?]: what would
   be different if Taar were a compiled library.
-* [link boost_taar.design.tag_invoke Tag invoke as the extension story]
-  — why `tag_invoke` overloads instead of virtual functions or template
+* [link boost_taar.design.tag_invoke Tag invoke as the extension story]:
+  why `tag_invoke` overloads instead of virtual functions or template
   specialisations.
-* [link boost_taar.design.soft_vs_hard Soft errors vs hard errors] —
+* [link boost_taar.design.soft_vs_hard Soft errors vs hard errors]:
   what gets turned into an HTTP response and what tears the connection
   down.
-* [link boost_taar.design.matchers Matchers as expression templates] —
+* [link boost_taar.design.matchers Matchers as expression templates]:
   why operator overloading and how it interacts with route dispatch
   cost.
+* [link boost_taar.design.async The asynchronous model]: how
+  coroutines thread through the session, the handlers, and streaming
+  responses.
 
 [section:why_header_only Why header-only?]
 
 Every public type in Taar is a template that instantiates differently for
 each user-supplied handler signature, request body, response body, and
 executor. There is no implementation that would benefit from being
-precompiled into a library — separating declaration from definition would
+precompiled into a library: separating declaration from definition would
 force users to instantiate every combination explicitly. A header-only
 distribution keeps the build simple and matches the rest of the
 matcher/handler ecosystem on top of Boost.Beast and Boost.Asio.
@@ -79,6 +82,64 @@ This is the same technique that __Boost_Spirit__, __Boost_Hana__, and
 __Boost_Proto__ rely on. The cost is that diagnostics for an ill-formed
 matcher are longer than they would be with a runtime API; the benefit is
 that route dispatch is a flat sequence of `if`s with no virtual calls.
+
+[endsect]
+
+[section:async The asynchronous model]
+
+Taar is asynchronous from top to bottom, built on __Asio__ C++20
+coroutines. There is no thread-per-connection pool and no callback
+plumbing in user code; concurrency is expressed with `co_await`.
+
+[heading Everything is a coroutine]
+
+The TCP acceptor (`taar::server::tcp`) and the per-connection session
+(`taar::session::http`) are both `taar::awaitable<void>` coroutines
+spawned with `boost::asio::co_spawn`. One in-flight connection is one
+suspended coroutine frame, not a thread, so a single-threaded
+`io_context` already serves many simultaneous connections; running the
+`io_context` from several threads scales it across cores.
+
+`taar::awaitable<T>` is a thin alias for
+`boost::asio::awaitable<T, io_context::executor_type>`: the executor is
+pinned because Taar uses an `io_context` throughout, which spares users
+from spelling the second template argument every time.
+
+[heading Synchronous or asynchronous handlers]
+
+A request handler wrapped by `taar::handler::rest` may return its value
+directly /or/ return a `taar::awaitable<T>`. The session detects which
+and does the right thing: a plain value is converted to a response
+immediately; an awaitable is `co_await`ed first. This means a handler
+that needs to talk to a database or call another service simply becomes
+a coroutine (its signature changes from `T` to `taar::awaitable<T>` and
+its body gains `co_await`/`co_return`) with no change to how it is
+registered or how its arguments are extracted.
+
+The soft-error handler (see
+[link boost_taar.design.soft_vs_hard Soft errors vs hard errors]) may
+likewise be a coroutine, so error responses can also be produced from
+asynchronous work.
+
+[heading Streaming responses]
+
+For responses that are produced incrementally (server-sent events, a
+large file, the output of a long-running job), a handler can return a
+`taar::async_generator<T>` or a `taar::chunked_response<T>`. These are
+themselves coroutines: the body `co_yield`s each piece of the response
+and may `co_await` between pieces, while `taar::chunked_response`
+additionally lets the producer set the HTTP status and headers (by
+`co_yield`ing `taar::set_status` / `taar::set_header`) before the first
+chunk goes on the wire. The session drives the generator and writes each
+yielded value using HTTP chunked transfer-encoding.
+
+[heading Cancellation]
+
+Shutdown is cooperative. A `taar::cancellation_signals` pool hands a
+cancellation slot to every spawned coroutine; emitting on the pool
+(typically from a `SIGINT`/`SIGTERM` handler) unwinds the acceptor and
+the in-flight sessions cleanly, and the cancellation propagates into a
+streaming generator's pending `co_await`.
 
 [endsect]
 

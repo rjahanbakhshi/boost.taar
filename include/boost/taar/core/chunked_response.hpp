@@ -47,7 +47,7 @@ namespace boost::taar {
     @li `chunked_set_header{...}` to add a response header,
     @li `value` (of type @a T) to write a chunk,
     @li another `chunked_response<T>` to splice its chunks (its metadata
-        is ignored — only the outer's metadata is written).
+        is ignored; only the outer's metadata is written).
 
     Metadata must precede all data yields. After the first data yield,
     metadata yields throw with @ref error::late_chunk_metadata.
@@ -139,7 +139,7 @@ public:
             void await_resume() noexcept {}
         };
 
-        // Data yield — suspends like async_generator
+        // Data yield: suspends like async_generator
         yield_awaiter yield_value(T value)
         {
             data_yielded_ = true;
@@ -147,7 +147,7 @@ public:
             return {};
         }
 
-        // Metadata yields — don't suspend
+        // Metadata yields: don't suspend
         std::suspend_never yield_value(chunked_set_status meta)
         {
             if (data_yielded_)
@@ -196,7 +196,7 @@ public:
                 // The completion_handler_ is still set from the outer's next() call.
                 if (!promise.executor_ && promise.completion_handler_)
                 {
-                    // No executor — cannot drive the inner. Surface as an
+                    // No executor: cannot drive the inner. Surface as an
                     // exception via the outer's completion handler so the
                     // consumer doesn't hang waiting for a value that will
                     // never arrive.
@@ -544,7 +544,7 @@ public:
         std::vector<chunked_set_header> headers_;
         bool data_yielded_ = false;
 
-        // Alive flag — shared with co_spawn completion handlers so they can
+        // Alive flag: shared with co_spawn completion handlers so they can
         // detect that the coroutine frame has been destroyed.
         std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
 
@@ -836,7 +836,7 @@ private:
         {
             auto& promise = handle_.promise();
             // Signal to any in-flight co_spawn completion handlers that the
-            // coroutine frame is gone — they must not access it.
+            // coroutine frame is gone: they must not access it.
             *promise.alive_ = false;
             // Cancel pending co_spawns so their wrapper frames are freed.
             if (promise.active_co_spawn_signal_)

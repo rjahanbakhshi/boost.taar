@@ -8,7 +8,7 @@
 ***⚠️ Warning: This library is not production ready and is a work in progress. Use
 with care.***
 
-A header-only library created to facilitate web server and client development
+A header-only library created to facilitate web server development
 built on top of other boost libraries like boost.beast, boost.asio, boost.url,
 boost.json, etc.
 
@@ -38,7 +38,7 @@ boost.json, etc.
 ## Overview
 
 Boost.taar is a portable C++ header-only library which provides convenient tools
-for web server and client development. This library is built on top of other boost
+for web server development. This library is built on top of other boost
 libraries, like Boost.ASIO, Boost.Beast, Boost.URL, and Boost.JSON, and Boost.system.
 
 ### Requirements
@@ -230,9 +230,9 @@ cmake \
 
 Two project-local profiles are provided:
 
-- `profiles/windows-vs2022.profile` — Visual Studio 2022, MSVC v143
+- `profiles/windows-vs2022.profile`: Visual Studio 2022, MSVC v143
   (`compiler.version=194`).
-- `profiles/windows-vs2026.profile` — Visual Studio 2026, MSVC v145
+- `profiles/windows-vs2026.profile`: Visual Studio 2026, MSVC v145
   (`compiler.version=195`).
 
 Both target `compiler.cppstd=23` and force the Ninja generator for Conan

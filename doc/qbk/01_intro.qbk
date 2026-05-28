@@ -8,7 +8,7 @@
 [section:intro Introduction]
 
 Boost.Taar is a portable, header-only C++23 library that provides building
-blocks for writing HTTP servers and clients on top of __Asio__, __Beast__,
+blocks for writing HTTP servers on top of __Asio__, __Beast__,
 __Url__, and __Json__.
 
 The library is organised around four ideas:

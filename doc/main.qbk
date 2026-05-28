@@ -10,7 +10,7 @@
 [library Boost.Taar
     [quickbook 1.7]
     [copyright 2021, 2024 Reza Jahanbakhshi]
-    [purpose HTTP server and client building blocks for C++23.]
+    [purpose HTTP server building blocks for C++23.]
     [license
         Distributed under the Boost Software License, Version 1.0.
         (See accompanying file LICENSE_1_0.txt or copy at
@@ -25,10 +25,22 @@
 [template indexterm1[term1] '''<indexterm><primary>'''[term1]'''</primary></indexterm>''']
 [template indexterm2[term1 term2] '''<indexterm><primary>'''[term1]'''</primary><secondary>'''[term2]'''</secondary></indexterm>''']
 
+[/ Link macros for the Boost libraries taar builds on. Defined here so
+   they expand to hyperlinks throughout this document and every included
+   chapter; left undefined they render literally as __Asio__ etc. ]
+[def __Asio__   [@https://www.boost.org/doc/libs/release/doc/html/boost_asio.html Boost.Asio]]
+[def __Beast__  [@https://www.boost.org/doc/libs/release/libs/beast/index.html Boost.Beast]]
+[def __Url__    [@https://www.boost.org/doc/libs/release/libs/url/index.html Boost.URL]]
+[def __Json__   [@https://www.boost.org/doc/libs/release/libs/json/index.html Boost.JSON]]
+[def __System__ [@https://www.boost.org/doc/libs/release/libs/system/index.html Boost.System]]
+[def __Boost_Spirit__ [@https://www.boost.org/doc/libs/release/libs/spirit/index.html Boost.Spirit]]
+[def __Boost_Hana__   [@https://www.boost.org/doc/libs/release/libs/hana/index.html Boost.Hana]]
+[def __Boost_Proto__  [@https://www.boost.org/doc/libs/release/libs/proto/index.html Boost.Proto]]
+
 [heading Overview]
 
 Boost.Taar is a portable, header-only C++23 library that provides
-ergonomic building blocks for writing HTTP servers and clients on top of
+ergonomic building blocks for writing HTTP servers on top of
 __Asio__, __Beast__, __Url__, and __Json__. It is licensed under the
 Boost Software License, Version 1.0.
 
@@ -44,6 +56,15 @@ The library is organised around four ideas:
   request/response lifecycle for one keep-alive connection,
 * a [link boost_taar.intro.server TCP server coroutine] that accepts
   connections and dispatches them to the session.
+
+All of it is asynchronous by construction. The session and the TCP
+acceptor are C++20 coroutines, and a request handler can itself be a
+coroutine: declare its result as `taar::awaitable<T>` and `co_await`
+a database query, an outbound HTTP call, or a timer before responding,
+without ever blocking the connection. Long or open-ended responses can
+stream incrementally through an async generator. See
+[link boost_taar.design.async the asynchronous model] for the full
+picture.
 
 [heading At a glance]
 

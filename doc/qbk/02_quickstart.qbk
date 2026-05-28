@@ -12,13 +12,13 @@ how to bring it into your own project, the smallest useful HTTP server
 you can write with it, and a tour of the four idioms you will see again
 and again:
 
-* [link boost_taar.quickstart.requirements Requirements] — supported
+* [link boost_taar.quickstart.requirements Requirements]: supported
   compilers, Boost components, and CMake version.
-* [link boost_taar.quickstart.installation Installation] — header-only
+* [link boost_taar.quickstart.installation Installation]: header-only
   drop-in, Boost super-project, and CMake/Conan integration.
-* [link boost_taar.quickstart.hello A Hello World HTTP Server] — a
+* [link boost_taar.quickstart.hello A Hello World HTTP Server]: a
   complete program serving a single GET endpoint.
-* [link boost_taar.quickstart.tour A Whirlwind Tour] — stock responses,
+* [link boost_taar.quickstart.tour A Whirlwind Tour]: stock responses,
   JSON, path arguments, static files, and hand-written handlers.
 
 [section:requirements Requirements]
@@ -109,6 +109,31 @@ see the [link boost_taar.examples examples chapter].
             },
             taar::handler::path_arg("a"),
             taar::handler::path_arg("b")));
+
+[heading Asynchronous handler]
+
+A handler may be a coroutine. Declare its result type as
+`taar::awaitable<T>` and `co_await` other asynchronous work (here a
+lookup that hits the network or a database) before producing the
+response. The session awaits the handler, so the connection is never
+blocked while the work is in flight:
+
+    http_session.register_request_handler(
+        method == http::verb::get && target == "/api/user/{id}",
+        taar::handler::rest(
+            [](int id) -> taar::awaitable<boost::json::value>
+            {
+                auto user = co_await find_user(id);  // co_awaits I/O
+                co_return boost::json::value {
+                    {"id", id},
+                    {"name", user.name}
+                };
+            },
+            taar::handler::path_arg("id")));
+
+The argument extraction and the `response_from` conversion of the
+returned value work exactly as in the synchronous case; only the result
+type and the `co_return` change.
 
 [heading Serving static files]
 

@@ -558,7 +558,7 @@ BOOST_AUTO_TEST_CASE(test_http_session_request_body_limit_matched)
 // register_raw_handler hands the connection (parsed header + tcp_stream +
 // buffer) over to the registered handler, which is then responsible for the
 // rest of the wire protocol. The raw handler below echoes a single line of
-// text the client writes after the HTTP request — the simplest exercise of
+// text the client writes after the HTTP request: the simplest exercise of
 // ownership transfer that doesn't pull in the full WebSocket framing.
 BOOST_AUTO_TEST_CASE(test_http_session_raw_handler_takeover)
 {

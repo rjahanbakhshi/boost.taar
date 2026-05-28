@@ -738,7 +738,7 @@ BOOST_AUTO_TEST_CASE(test_async_generator_auto_executor)
         [&]() -> awaitable<void>
         {
             auto gen = three_values();
-            // No set_executor() call — executor should be auto-captured from caller
+            // No set_executor() call: executor should be auto-captured from caller
 
             std::vector<int> values;
 
@@ -774,7 +774,7 @@ BOOST_AUTO_TEST_CASE(test_async_generator_auto_executor_with_co_await)
         [&]() -> awaitable<void>
         {
             auto gen = generator_with_timer();
-            // No set_executor() call — executor should be auto-captured from caller
+            // No set_executor() call: executor should be auto-captured from caller
 
             std::vector<int> values;
 
@@ -809,7 +809,7 @@ BOOST_AUTO_TEST_CASE(test_async_generator_auto_executor_with_chaining)
         [&]() -> awaitable<void>
         {
             auto gen = outer_with_inner();
-            // No set_executor() call — executor should be auto-captured from caller
+            // No set_executor() call: executor should be auto-captured from caller
 
             std::vector<int> values;
 

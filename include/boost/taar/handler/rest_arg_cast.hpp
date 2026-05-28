@@ -27,7 +27,7 @@
 
 namespace boost::taar::handler {
 
-// Forward declaration — defined after the detail namespace.
+// Forward declaration: defined after the detail namespace.
 template <typename ToType, typename FromType>
 inline constexpr decltype(auto) rest_arg_cast(FromType const& from);
 

@@ -35,13 +35,13 @@ namespace boost::taar {
 /** A coroutine-based asynchronous generator of values of type @a T.
 
     `async_generator<T>` is the building block for HTTP responses produced
-    incrementally — streaming JSON, server-sent events, NDJSON, or any
+    incrementally: streaming JSON, server-sent events, NDJSON, or any
     other body that should be written to the wire as the data becomes
     available.
 
     Inside the generator body, suspend with `co_yield value` to produce a
     value. The session drives the generator with @ref next, which returns
-    an awaitable resolving to `std::optional<T>` — empty when the generator
+    an awaitable resolving to `std::optional<T>`: empty when the generator
     has exhausted. The generator may also `co_await` arbitrary
     `asio::awaitable`s as long as an executor has been installed via
     @ref set_executor.
@@ -370,7 +370,7 @@ public:
                 // The completion_handler_ is still set from the outer's next() call.
                 if (!promise.executor_ && promise.completion_handler_)
                 {
-                    // No executor — cannot drive the inner. Surface as an
+                    // No executor: cannot drive the inner. Surface as an
                     // exception via the outer's completion handler so the
                     // consumer doesn't hang waiting for a value that will
                     // never arrive.
@@ -519,7 +519,7 @@ public:
         boost::asio::cancellation_signal internal_signal_;
         std::optional<boost::asio::cancellation_state> cancellation_state_;
 
-        // Alive flag — shared with co_spawn completion handlers so they can
+        // Alive flag: shared with co_spawn completion handlers so they can
         // detect that the coroutine frame has been destroyed.
         std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
 
@@ -643,7 +643,7 @@ private:
         }
 
         // Check if there's a pending exception from a previous resume
-        // before checking done() — the coroutine may be at final_suspend
+        // before checking done(), the coroutine may be at final_suspend
         // with a stored exception that must be propagated.
         if (handle_ && handle_.promise().exception_)
         {
@@ -811,7 +811,7 @@ private:
         {
             auto& promise = handle_.promise();
             // Signal to any in-flight co_spawn completion handlers that the
-            // coroutine frame is gone — they must not access it.
+            // coroutine frame is gone: they must not access it.
             *promise.alive_ = false;
             // Cancel pending co_spawns so their wrapper frames are freed.
             if (promise.active_co_spawn_signal_)

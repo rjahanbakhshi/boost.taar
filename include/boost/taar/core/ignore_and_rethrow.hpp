@@ -17,7 +17,7 @@ namespace boost::taar {
 /** Completion handler that rethrows any reported exception.
 
     Intended as the completion token for `co_spawn` on a top-level
-    coroutine — most usefully the @ref boost::taar::server::tcp acceptor.
+    coroutine, most usefully the @ref boost::taar::server::tcp acceptor.
     A reported exception is rethrown into the surrounding scope so that
     `io_context::run()` returns and the program can shut down rather than
     silently swallowing the failure.
