@@ -14,6 +14,7 @@
 #include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/write.hpp>
 #include <boost/beast/http/fields.hpp>
+#include <boost/taar/handler/path_arg_check.hpp>
 #include <boost/taar/matcher/context.hpp>
 #include <boost/taar/matcher/operand.hpp>
 #include <boost/taar/core/response_from.hpp>
@@ -616,6 +617,12 @@ public:
         namespace http = boost::beast::http;
 
         matcher::operand operand {std::forward<MatcherType>(matcher)};
+
+        // Fail fast on path_arg(name)/target-template mismatches: the
+        // check is a no-op when the matcher has no target_constraint or
+        // the handler does not expose path_arg_names().
+        handler::validate_path_args_against_target(operand, request_handler);
+
         needs_parsed_target_ |= decltype(operand)::with_parsed_target;
         needs_parsed_cookies_ |= decltype(operand)::with_parsed_cookies;
 

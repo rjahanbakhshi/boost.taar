@@ -33,6 +33,7 @@ target_sources(
         test_matcher_target.cpp
         test_matcher_version.cpp
         test_member_function_of.cpp
+        test_path_arg_check.cpp
         test_response_builder.cpp
         test_response_from.cpp
         test_response_from_user.cpp

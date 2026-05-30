@@ -18,14 +18,18 @@
 #include <boost/taar/core/awaitable.hpp>
 #include <boost/taar/core/error.hpp>
 #include <boost/taar/type_traits/callable.hpp>
+#include <boost/taar/type_traits/specialization_of.hpp>
 #include <boost/taar/type_traits/super_type.hpp>
 #include <boost/beast/http/message_generator.hpp>
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/field.hpp>
 #include <boost/beast/http/string_body.hpp>
 #include <boost/beast/http/message.hpp>
-#include <utility>
+#include <string>
+#include <tuple>
 #include <type_traits>
+#include <utility>
+#include <vector>
 
 namespace boost::taar::handler {
 namespace detail {
@@ -63,6 +67,137 @@ struct common_requests_type<>
 template <typename... T>
 using common_requests_type_t = typename common_requests_type<T...>::type;
 
+/// True if @a T is a `path_arg` or a `with_default<path_arg, …>`.
+/// Phrased as a concept so the conjunction short-circuits at constraint
+/// evaluation: types that are not `with_default` specialisations never
+/// hit `typename T::arg_provider_type`.
+template <typename T>
+concept is_path_arg_provider =
+    std::is_same_v<std::remove_cvref_t<T>, path_arg> ||
+    (type_traits::specialization_of<with_default, std::remove_cvref_t<T>> &&
+     std::is_same_v<
+        typename std::remove_cvref_t<T>::arg_provider_type,
+        path_arg>);
+
+template <typename ProvidersTupleType>
+auto collect_path_arg_names(ProvidersTupleType const& providers)
+    -> std::vector<std::string>
+{
+    std::vector<std::string> result;
+    std::apply([&]<typename... AP>(AP const&... ap)
+    {
+        ([&]<typename T>(T const& provider)
+        {
+            if constexpr (is_path_arg_provider<T>)
+            {
+                result.push_back(provider.name());
+            }
+        }(ap), ...);
+    }, providers);
+    return result;
+}
+
+template <
+    typename CallableType,
+    typename ProvidersTupleType,
+    typename RequestType,
+    typename IndexSeq>
+struct rest_handler;
+
+template <
+    typename CallableType,
+    typename ProvidersTupleType,
+    typename RequestType,
+    std::size_t... Indexes>
+struct rest_handler<CallableType, ProvidersTupleType, RequestType, std::index_sequence<Indexes...>>
+{
+    // Storage decays function types to function pointers. Introspection
+    // (`callable_arg`) uses the original type so a free function and its
+    // pointer report the same arguments.
+    using callable_storage = std::decay_t<CallableType>;
+
+    callable_storage callable_;
+    ProvidersTupleType arg_providers_tuple_;
+
+    auto operator()(RequestType const& request, matcher::context const& context)
+        -> decltype(response_from_invoke(
+            std::declval<callable_storage&>(),
+            get_rest_arg<
+                type_traits::callable_arg<CallableType, Indexes>,
+                std::tuple_element_t<Indexes, ProvidersTupleType>
+            >(
+                std::declval<std::tuple_element_t<Indexes, ProvidersTupleType>&>(),
+                Indexes,
+                request,
+                context)...))
+    {
+        co_return co_await response_from_invoke(
+            callable_,
+            get_rest_arg<
+                type_traits::callable_arg<CallableType, Indexes>,
+                std::tuple_element_t<Indexes, ProvidersTupleType>
+            >(std::get<Indexes>(arg_providers_tuple_), Indexes, request, context)...
+        );
+    }
+
+    /// Names of every `path_arg` (and `with_default<path_arg, …>`) provider
+    /// declared on this handler, in declaration order. Used by the
+    /// registration-time cross-check against the matcher's target template.
+    auto path_arg_names() const -> std::vector<std::string>
+    {
+        return collect_path_arg_names(arg_providers_tuple_);
+    }
+};
+
+template <
+    typename MemFnType,
+    typename ObjectType,
+    typename ProvidersTupleType,
+    typename RequestType,
+    typename IndexSeq>
+struct rest_memfn_handler;
+
+template <
+    typename MemFnType,
+    typename ObjectType,
+    typename ProvidersTupleType,
+    typename RequestType,
+    std::size_t... Indexes>
+struct rest_memfn_handler<MemFnType, ObjectType, ProvidersTupleType, RequestType, std::index_sequence<Indexes...>>
+{
+    MemFnType memfn_;
+    ObjectType object_;
+    ProvidersTupleType arg_providers_tuple_;
+
+    auto operator()(RequestType const& request, matcher::context const& context)
+        -> decltype(response_from_invoke(
+            std::declval<MemFnType&>(),
+            std::declval<ObjectType&>(),
+            get_rest_arg<
+                type_traits::callable_arg<std::remove_reference_t<MemFnType>, Indexes>,
+                std::tuple_element_t<Indexes, ProvidersTupleType>
+            >(
+                std::declval<std::tuple_element_t<Indexes, ProvidersTupleType>&>(),
+                Indexes,
+                request,
+                context)...))
+    {
+        co_return co_await response_from_invoke(
+            memfn_,
+            object_,
+            get_rest_arg<
+                type_traits::callable_arg<std::remove_reference_t<MemFnType>, Indexes>,
+                std::tuple_element_t<Indexes, ProvidersTupleType>
+            >(std::get<Indexes>(arg_providers_tuple_), Indexes, request, context)...
+        );
+    }
+
+    auto path_arg_names() const -> std::vector<std::string>
+    {
+        return collect_path_arg_names(arg_providers_tuple_);
+    }
+};
+
 template <
     typename CallableType,
     std::size_t... Indexes,
@@ -72,7 +207,7 @@ inline auto rest_for_callable(
     std::index_sequence<Indexes...>,
     ArgProvidersType... arg_providers)
 {
-    using noref_fn_type = std::remove_reference_t<CallableType>;
+    using noref_fn_type = std::remove_cvref_t<CallableType>;
 
     static_assert(
         type_traits::callable_args_count<noref_fn_type> == sizeof...(ArgProvidersType),
@@ -82,30 +217,14 @@ inline auto rest_for_callable(
     using request_type = detail::common_requests_type_t<ArgProvidersType...>;
     using arg_providers_tuple_t = std::tuple<ArgProvidersType...>;
 
-    return
-    [
-        callable = std::forward<CallableType>(callable),
-        arg_providers_tuple = arg_providers_tuple_t{std::move(arg_providers)...}
-    ](request_type const& request, matcher::context const& context) mutable ->
-        decltype(response_from_invoke(
-            std::declval<noref_fn_type&>(),
-            get_rest_arg<
-                type_traits::callable_arg<noref_fn_type, Indexes>,
-                std::tuple_element_t<Indexes, arg_providers_tuple_t>
-            >(
-                std::declval<std::tuple_element_t<Indexes, arg_providers_tuple_t>&>(),
-                Indexes,
-                request,
-                context)...
-        ))
-    {
-        co_return co_await response_from_invoke(
-            callable,
-            get_rest_arg<
-                type_traits::callable_arg<noref_fn_type, Indexes>,
-                std::tuple_element_t<Indexes, arg_providers_tuple_t>
-            >(std::get<Indexes>(arg_providers_tuple), Indexes, request, context)...
-        );
+    return rest_handler<
+        noref_fn_type,
+        arg_providers_tuple_t,
+        request_type,
+        std::index_sequence<Indexes...>
+    >{
+        std::forward<CallableType>(callable),
+        arg_providers_tuple_t {std::move(arg_providers)...}
     };
 }
 
@@ -120,7 +239,7 @@ inline auto rest_for_memfn(
     std::index_sequence<Indexes...>,
     ArgProvidersType... arg_providers)
 {
-    using noref_fn_type = std::remove_reference_t<MemFnType>;
+    using noref_fn_type = std::remove_cvref_t<MemFnType>;
 
     static_assert(
         type_traits::callable_args_count<noref_fn_type> == sizeof...(ArgProvidersType),
@@ -129,34 +248,18 @@ inline auto rest_for_memfn(
 
     using request_type = detail::common_requests_type_t<ArgProvidersType...>;
     using arg_providers_tuple_t = std::tuple<ArgProvidersType...>;
+    using object_storage = std::remove_cvref_t<ObjectType>;
 
-    return
-    [
+    return rest_memfn_handler<
+        MemFnType,
+        object_storage,
+        arg_providers_tuple_t,
+        request_type,
+        std::index_sequence<Indexes...>
+    >{
         memfn,
-        object = std::forward<ObjectType>(object),
-        arg_providers_tuple = arg_providers_tuple_t{std::move(arg_providers)...}
-    ](request_type const& request, matcher::context const& context) mutable ->
-        decltype(response_from_invoke(
-            std::declval<MemFnType&>(),
-            std::declval<ObjectType>(),
-            get_rest_arg<
-                type_traits::callable_arg<noref_fn_type, Indexes>,
-                std::tuple_element_t<Indexes, arg_providers_tuple_t>
-            >(
-                std::declval<std::tuple_element_t<Indexes, arg_providers_tuple_t>&>(),
-                Indexes,
-                request,
-                context)...
-        ))
-    {
-        co_return co_await response_from_invoke(
-            memfn,
-            std::forward<ObjectType>(object),
-            get_rest_arg<
-                type_traits::callable_arg<noref_fn_type, Indexes>,
-                std::tuple_element_t<Indexes, arg_providers_tuple_t>
-            >(std::get<Indexes>(arg_providers_tuple), Indexes, request, context)...
-        );
+        std::forward<ObjectType>(object),
+        arg_providers_tuple_t {std::move(arg_providers)...}
     };
 }
 
@@ -186,6 +289,13 @@ inline auto rest_for_memfn(
     `boost::taar::response_from`, which means user-defined return types
     work as long as they have a `tag_invoke` overload for
     @ref boost::taar::response_from_tag.
+
+    The returned handler exposes a `path_arg_names()` accessor that lists
+    every `path_arg` (and `with_default<path_arg, …>`) provider in
+    declaration order. The session uses this list at registration time to
+    cross-check against the matcher's target template, so typos like
+    `path_arg("ud")` against `target == "/users/{id}"` fail at server
+    startup rather than at the first request.
 
     @code
     using boost::taar::matcher::method;

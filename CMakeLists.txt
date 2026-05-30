@@ -43,6 +43,7 @@ target_sources(
         include/boost/taar/core/response_from.hpp
         include/boost/taar/core/response_from_tag.hpp
         include/boost/taar/handler/htdocs.hpp
+        include/boost/taar/handler/path_arg_check.hpp
         include/boost/taar/handler/rest.hpp
         include/boost/taar/handler/rest_arg.hpp
         include/boost/taar/handler/rest_arg_cast.hpp
