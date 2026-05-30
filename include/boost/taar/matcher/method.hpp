@@ -11,8 +11,10 @@
 #define BOOST_TAAR_MATCHER_METHOD_HPP
 
 #include <boost/taar/matcher/context.hpp>
+#include <boost/taar/matcher/metadata.hpp>
 #include <boost/taar/matcher/operand.hpp>
 #include <boost/beast/http/message.hpp>
+#include <utility>
 
 namespace boost::taar::matcher {
 
@@ -34,6 +36,10 @@ namespace boost::taar::matcher {
     accepted. The template parameter selects the request `Fields` type so
     matchers can be paired with non-default beast field containers.
 
+    The produced operand carries @ref method_eq_constraint or
+    @ref method_ne_constraint metadata with the captured verb in its
+    @ref operand::captures "captures" tuple.
+
     @tparam FieldsType The Beast HTTP fields container of the request to
                        inspect. Defaults to `boost::beast::http::fields`.
 */
@@ -46,6 +52,11 @@ struct method_t
     /// Match requests whose method-string equals @a verb.
     friend auto operator==(method_t, std::string verb)
     {
+        data_tuple_t<method_eq_constraint> captures
+        {
+            method_constraint_value {verb}
+        };
+
         return matcher::operand
         {
             [verb = std::move(verb)](
@@ -53,20 +64,29 @@ struct method_t
                 context& context)
             {
                 return request.method_string() == verb;
-            }
+            },
+            method_eq_constraint {},
+            std::move(captures)
         };
     }
 
     friend auto operator==(method_t, boost::beast::http::verb verb)
     {
+        data_tuple_t<method_eq_constraint> captures
+        {
+            method_constraint_value {verb}
+        };
+
         return matcher::operand
         {
-            [verb = std::move(verb)](
+            [verb](
                 request_type const& request,
                 context& context)
             {
                 return request.method() == verb;
-            }
+            },
+            method_eq_constraint {},
+            std::move(captures)
         };
     }
 
@@ -77,17 +97,47 @@ struct method_t
 
     friend auto operator==(boost::beast::http::verb verb, method_t)
     {
-        return operator==(method_t{}, std::move(verb));
+        return operator==(method_t{}, verb);
     }
 
     friend auto operator!=(method_t, std::string verb)
     {
-        return !operator==(method_t{}, std::move(verb));
+        data_tuple_t<method_ne_constraint> captures
+        {
+            method_constraint_value {verb}
+        };
+
+        return matcher::operand
+        {
+            [verb = std::move(verb)](
+                request_type const& request,
+                context& context)
+            {
+                return request.method_string() != verb;
+            },
+            method_ne_constraint {},
+            std::move(captures)
+        };
     }
 
     friend auto operator!=(method_t, boost::beast::http::verb verb)
     {
-        return !operator==(method_t{}, std::move(verb));
+        data_tuple_t<method_ne_constraint> captures
+        {
+            method_constraint_value {verb}
+        };
+
+        return matcher::operand
+        {
+            [verb](
+                request_type const& request,
+                context& context)
+            {
+                return request.method() != verb;
+            },
+            method_ne_constraint {},
+            std::move(captures)
+        };
     }
 
     friend auto operator!=(std::string verb, method_t)
@@ -97,7 +147,7 @@ struct method_t
 
     friend auto operator!=(boost::beast::http::verb verb, method_t)
     {
-        return operator!=(method_t{}, std::move(verb));
+        return operator!=(method_t{}, verb);
     }
 };
 

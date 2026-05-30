@@ -11,8 +11,10 @@
 #define BOOST_TAAR_MATCHER_COOKIE_HPP
 
 #include <boost/taar/matcher/context.hpp>
+#include <boost/taar/matcher/metadata.hpp>
 #include <boost/taar/matcher/operand.hpp>
 #include <boost/beast/http/message.hpp>
+#include <utility>
 
 namespace boost::taar::matcher {
 namespace detail {
@@ -37,6 +39,12 @@ namespace detail {
     auto admin     = cookie("role") == "admin";
     @endcode
 
+    The produced operand carries @ref cookie_eq_constraint,
+    @ref cookie_ne_constraint, or @ref cookie_exists_constraint metadata
+    with the cookie name and the constrained value in its
+    @ref operand::captures "captures" tuple. Existence matchers leave the
+    captured value empty.
+
     @tparam FieldsType The Beast HTTP fields container of the request to
                        inspect. Defaults to `boost::beast::http::fields`.
 */
@@ -54,6 +62,11 @@ struct cookie_t
 
         friend auto operator==(cookie_item lhs, std::string rhs)
         {
+            data_tuple_t<cookie_eq_constraint> captures
+            {
+                cookie_constraint_value {lhs.name, rhs}
+            };
+
             return matcher::operand
             {
                 [lhs = std::move(lhs), rhs = std::move(rhs)](
@@ -65,7 +78,9 @@ struct cookie_t
                     return
                         iter != parsed_cookies.end() &&
                         iter->second == rhs;
-                }
+                },
+                cookie_eq_constraint {},
+                std::move(captures)
             };
         }
 
@@ -76,17 +91,41 @@ struct cookie_t
 
         friend auto operator!=(cookie_item lhs, std::string rhs)
         {
-            return !operator==(std::move(lhs), std::move(rhs));
+            data_tuple_t<cookie_ne_constraint> captures
+            {
+                cookie_constraint_value {lhs.name, rhs}
+            };
+
+            return matcher::operand
+            {
+                [lhs = std::move(lhs), rhs = std::move(rhs)](
+                    request_type const&,
+                    context&,
+                    cookies const& parsed_cookies)
+                {
+                    auto iter = parsed_cookies.find(lhs.name);
+                    return
+                        iter == parsed_cookies.end() ||
+                        iter->second != rhs;
+                },
+                cookie_ne_constraint {},
+                std::move(captures)
+            };
         }
 
         friend auto operator!=(std::string lhs, cookie_item rhs)
         {
-            return !operator==(std::move(rhs), std::move(lhs));
+            return operator!=(std::move(rhs), std::move(lhs));
         }
 
         /// Match requests that carry @a cookie, regardless of its value.
         friend auto exist(cookie_item cookie)
         {
+            data_tuple_t<cookie_exists_constraint> captures
+            {
+                cookie_constraint_value {cookie.name, {}}
+            };
+
             return matcher::operand
             {
                 [cookie = std::move(cookie)](
@@ -95,7 +134,9 @@ struct cookie_t
                     cookies const& parsed_cookies)
                 {
                     return parsed_cookies.contains(cookie.name);
-                }
+                },
+                cookie_exists_constraint {},
+                std::move(captures)
             };
         }
     };

@@ -11,6 +11,7 @@
 #define BOOST_TAAR_MATCHER_TARGET_HPP
 
 #include <boost/taar/matcher/context.hpp>
+#include <boost/taar/matcher/metadata.hpp>
 #include <boost/taar/matcher/operand.hpp>
 #include <boost/taar/matcher/template_parser.hpp>
 #include <boost/taar/matcher/detail/ranges_to.hpp>
@@ -18,8 +19,9 @@
 #include <boost/beast/http/message.hpp>
 #include <boost/url/url_view.hpp>
 #include <ranges>
-#include <vector>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace boost::taar::matcher {
 
@@ -49,6 +51,12 @@ namespace boost::taar::matcher {
     @ref boost::taar::matcher::context::path_args, where the
     `taar::handler::path_arg` argument provider can later read them.
 
+    The produced operand carries @ref target_constraint metadata with the
+    *raw* template string (unparsed) in its @ref operand::captures
+    "captures" tuple. Auxiliary generators (OpenAPI, MCP, …) read the
+    template verbatim from the captures; the parsed-segment representation
+    used for matching at runtime remains an implementation detail.
+
     @tparam FieldsType The Beast HTTP fields container of the request to
                        inspect. Defaults to `boost::beast::http::fields`.
 */
@@ -63,6 +71,11 @@ struct target_t
     {
         auto const ptt = parse_template(target_template);
         parsed_template template_segments {ptt.value().begin(), ptt.value().end()};
+
+        data_tuple_t<target_constraint> captures
+        {
+            target_constraint_value {std::string {target_template}}
+        };
 
         return matcher::operand
         {
@@ -167,7 +180,9 @@ struct target_t
                 return
                     target_iter == target_segments.end() &&
                     template_iter == template_segments.end();
-            }
+            },
+            target_constraint {},
+            std::move(captures)
         };
     }
 

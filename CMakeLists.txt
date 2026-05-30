@@ -53,6 +53,7 @@ target_sources(
         include/boost/taar/matcher/context.hpp
         include/boost/taar/matcher/cookie.hpp
         include/boost/taar/matcher/header.hpp
+        include/boost/taar/matcher/metadata.hpp
         include/boost/taar/matcher/method.hpp
         include/boost/taar/matcher/operand.hpp
         include/boost/taar/matcher/target.hpp

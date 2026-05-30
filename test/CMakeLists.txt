@@ -27,6 +27,7 @@ target_sources(
         test_is_http_response.cpp
         test_matcher_cookie.cpp
         test_matcher_header.cpp
+        test_matcher_metadata.cpp
         test_matcher_method.cpp
         test_matcher_operand.cpp
         test_matcher_target.cpp

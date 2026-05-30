@@ -11,8 +11,10 @@
 #define BOOST_TAAR_MATCHER_VERSION_HPP
 
 #include <boost/taar/matcher/context.hpp>
+#include <boost/taar/matcher/metadata.hpp>
 #include <boost/taar/matcher/operand.hpp>
 #include <boost/beast/http/message.hpp>
+#include <utility>
 
 namespace boost::taar::matcher {
 
@@ -30,6 +32,12 @@ namespace boost::taar::matcher {
     auto pre_2        = version <  20;
     @endcode
 
+    Each relational operator produces a *single-leaf* operand carrying one
+    of the @ref version_eq_constraint / @ref version_ne_constraint /
+    @ref version_lt_constraint / @ref version_le_constraint /
+    @ref version_gt_constraint / @ref version_ge_constraint tags with the
+    compared version in its @ref operand::captures "captures" tuple.
+
     @tparam FieldsType The Beast HTTP fields container of the request to
                        inspect. Defaults to `boost::beast::http::fields`.
 */
@@ -41,14 +49,21 @@ struct version_t
 
     friend auto operator==(version_t, unsigned ver)
     {
+        data_tuple_t<version_eq_constraint> captures
+        {
+            version_constraint_value {ver}
+        };
+
         return matcher::operand
         {
-            [ver = std::move(ver)](
+            [ver](
                 request_type const& request,
                 context& context)
             {
                 return request.version() == ver;
-            }
+            },
+            version_eq_constraint {},
+            std::move(captures)
         };
     }
 
@@ -59,7 +74,22 @@ struct version_t
 
     friend auto operator!=(version_t, unsigned ver)
     {
-        return !operator==(version_t{}, ver);
+        data_tuple_t<version_ne_constraint> captures
+        {
+            version_constraint_value {ver}
+        };
+
+        return matcher::operand
+        {
+            [ver](
+                request_type const& request,
+                context& context)
+            {
+                return request.version() != ver;
+            },
+            version_ne_constraint {},
+            std::move(captures)
+        };
     }
 
     friend auto operator!=(unsigned ver, version_t)
@@ -69,14 +99,21 @@ struct version_t
 
     friend auto operator<(version_t, unsigned ver)
     {
+        data_tuple_t<version_lt_constraint> captures
+        {
+            version_constraint_value {ver}
+        };
+
         return matcher::operand
         {
-            [ver = std::move(ver)](
+            [ver](
                 request_type const& request,
                 context& context)
             {
                 return request.version() < ver;
-            }
+            },
+            version_lt_constraint {},
+            std::move(captures)
         };
     }
 
@@ -87,14 +124,21 @@ struct version_t
 
     friend auto operator>(version_t, unsigned ver)
     {
+        data_tuple_t<version_gt_constraint> captures
+        {
+            version_constraint_value {ver}
+        };
+
         return matcher::operand
         {
-            [ver = std::move(ver)](
+            [ver](
                 request_type const& request,
                 context& context)
             {
                 return request.version() > ver;
-            }
+            },
+            version_gt_constraint {},
+            std::move(captures)
         };
     }
 
@@ -105,7 +149,22 @@ struct version_t
 
     friend auto operator<=(version_t, unsigned ver)
     {
-        return operator<(version_t{}, ver) || operator==(version_t{}, ver);
+        data_tuple_t<version_le_constraint> captures
+        {
+            version_constraint_value {ver}
+        };
+
+        return matcher::operand
+        {
+            [ver](
+                request_type const& request,
+                context& context)
+            {
+                return request.version() <= ver;
+            },
+            version_le_constraint {},
+            std::move(captures)
+        };
     }
 
     friend auto operator<=(unsigned ver, version_t)
@@ -115,7 +174,22 @@ struct version_t
 
     friend auto operator>=(version_t, unsigned ver)
     {
-        return operator>(version_t{}, ver) || operator==(version_t{}, ver);
+        data_tuple_t<version_ge_constraint> captures
+        {
+            version_constraint_value {ver}
+        };
+
+        return matcher::operand
+        {
+            [ver](
+                request_type const& request,
+                context& context)
+            {
+                return request.version() >= ver;
+            },
+            version_ge_constraint {},
+            std::move(captures)
+        };
     }
 
     friend auto operator>=(unsigned ver, version_t)

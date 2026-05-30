@@ -11,12 +11,15 @@
 #define BOOST_TAAR_MATCHER_MATCHER_HPP
 
 #include <boost/taar/matcher/context.hpp>
+#include <boost/taar/matcher/metadata.hpp>
 #include <boost/taar/core/cookies.hpp>
 #include <boost/taar/matcher/detail/callable_with.hpp>
 #include <boost/taar/type_traits/specialization_of.hpp>
 #include <boost/taar/type_traits/super_type.hpp>
 #include <boost/taar/type_traits/callable.hpp>
 #include <boost/url/url_view.hpp>
+#include <concepts>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -44,6 +47,16 @@ namespace boost::taar::matcher {
     "super type" of the operands and forwards the parsed inputs to whichever
     side needs them.
 
+    In addition to its runtime behaviour, every operand carries a
+    *metadata description* of its constraint: the type-level AST (the
+    @a Metadata template parameter) and a runtime captures tuple
+    (@ref captures_type, accessible via @ref captures). Leaf matchers
+    such as @ref method_t and @ref target_t attach a tag and the
+    captured value at construction time; composition operators combine
+    the tags with @ref and_, @ref or_, @ref not_ and concatenate the
+    captures tuples. See @ref matcher_metadata for the type vocabulary
+    and the rationale.
+
     Users normally do not construct `operand` directly; matcher placeholders
     such as @ref boost::taar::matcher::method_t "method",
     @ref boost::taar::matcher::target_t "target", and others produce
@@ -51,8 +64,11 @@ namespace boost::taar::matcher {
 
     @tparam RequestType  The Beast request header type the matcher accepts.
     @tparam CallableType The wrapped callable type.
+    @tparam Metadata     The metadata AST node for this operand. Defaults
+                         to @ref any_metadata, which means "opaque to
+                         introspecting generators".
 */
-template <typename RequestType, typename CallableType>
+template <typename RequestType, typename CallableType, typename Metadata = any_metadata>
 requires (
     detail::callable_with<CallableType, bool, RequestType const&, context&> ||
     detail::callable_with<CallableType, bool, RequestType const&, context&, boost::urls::url_view const&> ||
@@ -66,6 +82,10 @@ public:
     using request_type = RequestType;
     /// The wrapped callable type.
     using callable_type = CallableType;
+    /// The metadata AST that describes this operand's constraint.
+    using metadata_type = Metadata;
+    /// The runtime captures tuple keyed by the metadata's flattened leaf order.
+    using captures_type = data_tuple_t<Metadata>;
 
     static constexpr int callabe_kind =
         detail::callable_with<
@@ -102,10 +122,42 @@ public:
         callabe_kind == 4 || callabe_kind == 3 || callabe_kind == 1;
 
 public:
-    /// Construct from a callable that satisfies the matcher concept.
+    /** Construct from a callable that satisfies the matcher concept.
+
+        This constructor is available only when @a Metadata is
+        @ref any_metadata, because the operand has no leaf-specific value
+        to capture. Leaf matchers use the
+        @ref operand(callable_type, Metadata, captures_type) "metadata-aware
+        constructor" instead.
+    */
     operand(callable_type callable)
+        requires std::same_as<Metadata, any_metadata>
     : callable_ {std::move(callable)}
+    , captures_ {}
     {}
+
+    /** Construct with an explicit metadata description and captures.
+
+        Used by leaf matcher placeholders (e.g. @ref method_t,
+        @ref target_t) and by the composition operators to assemble a
+        new operand whose metadata describes the combined constraint.
+
+        @param callable The wrapped predicate.
+        @param          A value of @a Metadata. Carries no information at
+                        run time; passed by value to drive CTAD on the
+                        deduction guide.
+        @param captures The captured values for the leaves of @a Metadata.
+    */
+    operand(callable_type callable, Metadata, captures_type captures)
+    : callable_ {std::move(callable)}
+    , captures_ {std::move(captures)}
+    {}
+
+    /// The captured values for this operand's metadata leaves.
+    constexpr captures_type const& captures() const noexcept
+    {
+        return captures_;
+    }
 
     /** Invoke the wrapped matcher.
 
@@ -150,6 +202,9 @@ public:
     /// Negate the wrapped matcher.
     friend auto operator!(operand opr)
     {
+        using new_meta = not_<Metadata>;
+        auto new_caps = opr.captures_;
+
         if constexpr (with_parsed_target && with_parsed_cookies)
         {
             return matcher::operand {
@@ -160,7 +215,9 @@ public:
                     cookies const& parsed_cookies)
                 {
                     return !opr.operator()(request, context, parsed_target, parsed_cookies);
-                }
+                },
+                new_meta {},
+                std::move(new_caps)
             };
         }
         else if constexpr (with_parsed_target)
@@ -172,7 +229,9 @@ public:
                     boost::urls::url_view const& parsed_target)
                 {
                     return !opr.operator()(request, context, parsed_target, {});
-                }
+                },
+                new_meta {},
+                std::move(new_caps)
             };
         }
         else if constexpr (with_parsed_cookies)
@@ -184,7 +243,9 @@ public:
                     cookies const& parsed_cookies)
                 {
                     return !opr.operator()(request, context, {}, parsed_cookies);
-                }
+                },
+                new_meta {},
+                std::move(new_caps)
             };
         }
         else
@@ -193,22 +254,28 @@ public:
                 [opr = std::move(opr)](request_type const& request, context& context)
                 {
                     return !opr.operator()(request, context, {}, {});
-                }
+                },
+                new_meta {},
+                std::move(new_caps)
             };
         }
     }
 
-    /// Short-circuit AND of two matchers; the right operand may be a raw callable.
+    /// Short-circuit AND; the right operand is a raw callable.
     template <typename RHSType>
     requires (!type_traits::specialization_of<matcher::operand, std::remove_cvref_t<RHSType>>)
     friend auto operator&&(
         operand lhs_operand,
         RHSType&& rhs)
     {
-        matcher::operand rhs_operand {std::forward<RHSType&&>(rhs)};
+        matcher::operand rhs_operand {std::forward<RHSType>(rhs)};
         using rhs_operand_type = decltype(rhs_operand);
         using rhs_request_type = typename rhs_operand_type::request_type;
+        using rhs_meta = typename rhs_operand_type::metadata_type;
         using super_request_type = type_traits::super_type_t<request_type, rhs_request_type>;
+        using new_meta = and_<Metadata, rhs_meta>;
+
+        auto new_caps = std::tuple_cat(lhs_operand.captures_, rhs_operand.captures());
 
         constexpr auto with_target = with_parsed_target || rhs_operand_type::with_parsed_target;
         constexpr auto with_cookie = with_parsed_cookies || rhs_operand_type::with_parsed_cookies;
@@ -226,7 +293,9 @@ public:
                     return
                         lhs_operand(request, context, parsed_target, parsed_cookies) &&
                         rhs_operand(request, context, parsed_target, parsed_cookies);
-                }
+                },
+                new_meta {},
+                std::move(new_caps)
             };
         }
         else if constexpr (with_target)
@@ -241,7 +310,9 @@ public:
                     return
                         lhs_operand(request, context, parsed_target, {}) &&
                         rhs_operand(request, context, parsed_target, {});
-                }
+                },
+                new_meta {},
+                std::move(new_caps)
             };
         }
         else if constexpr (with_cookie)
@@ -256,7 +327,9 @@ public:
                     return
                         lhs_operand(request, context, {}, parsed_cookies) &&
                         rhs_operand(request, context, {}, parsed_cookies);
-                }
+                },
+                new_meta {},
+                std::move(new_caps)
             };
         }
         else
@@ -270,22 +343,28 @@ public:
                     return
                         lhs_operand(request, context, {}, {}) &&
                         rhs_operand(request, context, {}, {});
-                }
+                },
+                new_meta {},
+                std::move(new_caps)
             };
         }
     }
 
-    /// Short-circuit AND of two matchers; the left operand may be a raw callable.
+    /// Short-circuit AND; the left operand is a raw callable.
     template <typename LHSType>
-    requires (!type_traits::specialization_of<matcher::operand, std::remove_cvref<LHSType>>)
+    requires (!type_traits::specialization_of<matcher::operand, std::remove_cvref_t<LHSType>>)
     friend auto operator&&(
         LHSType&& lhs,
         operand rhs_operand)
     {
-        matcher::operand lhs_operand {std::forward<LHSType&&>(lhs)};
+        matcher::operand lhs_operand {std::forward<LHSType>(lhs)};
         using lhs_operand_type = decltype(lhs_operand);
         using lhs_request_type = typename lhs_operand_type::request_type;
+        using lhs_meta = typename lhs_operand_type::metadata_type;
         using super_request_type = type_traits::super_type_t<request_type, lhs_request_type>;
+        using new_meta = and_<lhs_meta, Metadata>;
+
+        auto new_caps = std::tuple_cat(lhs_operand.captures(), rhs_operand.captures_);
 
         constexpr auto with_target = with_parsed_target || lhs_operand_type::with_parsed_target;
         constexpr auto with_cookie = with_parsed_cookies || lhs_operand_type::with_parsed_cookies;
@@ -303,7 +382,9 @@ public:
                     return
                         lhs_operand(request, context, parsed_target, parsed_cookies) &&
                         rhs_operand(request, context, parsed_target, parsed_cookies);
-                }
+                },
+                new_meta {},
+                std::move(new_caps)
             };
         }
         else if constexpr (with_target)
@@ -318,7 +399,9 @@ public:
                     return
                         lhs_operand(request, context, parsed_target, {}) &&
                         rhs_operand(request, context, parsed_target, {});
-                }
+                },
+                new_meta {},
+                std::move(new_caps)
             };
         }
         else if constexpr (with_cookie)
@@ -333,7 +416,9 @@ public:
                     return
                         lhs_operand(request, context, {}, parsed_cookies) &&
                         rhs_operand(request, context, {}, parsed_cookies);
-                }
+                },
+                new_meta {},
+                std::move(new_caps)
             };
         }
         else
@@ -347,22 +432,28 @@ public:
                     return
                         lhs_operand(request, context, {}, {}) &&
                         rhs_operand(request, context, {}, {});
-                }
+                },
+                new_meta {},
+                std::move(new_caps)
             };
         }
     }
 
-    /// Short-circuit OR of two matchers; the right operand may be a raw callable.
+    /// Short-circuit OR; the right operand is a raw callable.
     template <typename RHSType>
     requires (!type_traits::specialization_of<matcher::operand, std::remove_cvref_t<RHSType>>)
     friend auto operator||(
         operand lhs_operand,
         RHSType&& rhs)
     {
-        matcher::operand rhs_operand {std::forward<RHSType&&>(rhs)};
+        matcher::operand rhs_operand {std::forward<RHSType>(rhs)};
         using rhs_operand_type = decltype(rhs_operand);
         using rhs_request_type = typename rhs_operand_type::request_type;
+        using rhs_meta = typename rhs_operand_type::metadata_type;
         using super_request_type = type_traits::super_type_t<request_type, rhs_request_type>;
+        using new_meta = or_<Metadata, rhs_meta>;
+
+        auto new_caps = std::tuple_cat(lhs_operand.captures_, rhs_operand.captures());
 
         constexpr auto with_target = with_parsed_target || rhs_operand_type::with_parsed_target;
         constexpr auto with_cookie = with_parsed_cookies || rhs_operand_type::with_parsed_cookies;
@@ -380,7 +471,9 @@ public:
                     return
                         lhs_operand(request, context, parsed_target, parsed_cookies) ||
                         rhs_operand(request, context, parsed_target, parsed_cookies);
-                }
+                },
+                new_meta {},
+                std::move(new_caps)
             };
         }
         else if constexpr (with_target)
@@ -395,7 +488,9 @@ public:
                     return
                         lhs_operand(request, context, parsed_target, {}) ||
                         rhs_operand(request, context, parsed_target, {});
-                }
+                },
+                new_meta {},
+                std::move(new_caps)
             };
         }
         else if constexpr (with_cookie)
@@ -410,7 +505,9 @@ public:
                     return
                         lhs_operand(request, context, {}, parsed_cookies) ||
                         rhs_operand(request, context, {}, parsed_cookies);
-                }
+                },
+                new_meta {},
+                std::move(new_caps)
             };
         }
         else
@@ -424,22 +521,28 @@ public:
                     return
                         lhs_operand(request, context, {}, {}) ||
                         rhs_operand(request, context, {}, {});
-                }
+                },
+                new_meta {},
+                std::move(new_caps)
             };
         }
     }
 
-    /// Short-circuit OR of two matchers; the left operand may be a raw callable.
+    /// Short-circuit OR; the left operand is a raw callable.
     template <typename LHSType>
-    requires (!type_traits::specialization_of<matcher::operand, std::remove_cvref<LHSType>>)
+    requires (!type_traits::specialization_of<matcher::operand, std::remove_cvref_t<LHSType>>)
     friend auto operator||(
         LHSType&& lhs,
         operand rhs_operand)
     {
-        matcher::operand lhs_operand {std::forward<LHSType&&>(lhs)};
+        matcher::operand lhs_operand {std::forward<LHSType>(lhs)};
         using lhs_operand_type = decltype(lhs_operand);
         using lhs_request_type = typename lhs_operand_type::request_type;
+        using lhs_meta = typename lhs_operand_type::metadata_type;
         using super_request_type = type_traits::super_type_t<request_type, lhs_request_type>;
+        using new_meta = or_<lhs_meta, Metadata>;
+
+        auto new_caps = std::tuple_cat(lhs_operand.captures(), rhs_operand.captures_);
 
         constexpr auto with_target = with_parsed_target || lhs_operand_type::with_parsed_target;
         constexpr auto with_cookie = with_parsed_cookies || lhs_operand_type::with_parsed_cookies;
@@ -457,7 +560,9 @@ public:
                     return
                         lhs_operand(request, context, parsed_target, parsed_cookies) ||
                         rhs_operand(request, context, parsed_target, parsed_cookies);
-                }
+                },
+                new_meta {},
+                std::move(new_caps)
             };
         }
         else if constexpr (with_target)
@@ -472,7 +577,9 @@ public:
                     return
                         lhs_operand(request, context, parsed_target, {}) ||
                         rhs_operand(request, context, parsed_target, {});
-                }
+                },
+                new_meta {},
+                std::move(new_caps)
             };
         }
         else if constexpr (with_cookie)
@@ -487,7 +594,9 @@ public:
                     return
                         lhs_operand(request, context, {}, parsed_cookies) ||
                         rhs_operand(request, context, {}, parsed_cookies);
-                }
+                },
+                new_meta {},
+                std::move(new_caps)
             };
         }
         else
@@ -501,13 +610,16 @@ public:
                     return
                         lhs_operand(request, context, {}, {}) ||
                         rhs_operand(request, context, {}, {});
-                }
+                },
+                new_meta {},
+                std::move(new_caps)
             };
         }
     }
 
 private:
     callable_type callable_;
+    captures_type captures_;
 };
 
 template <typename ObjectType>
@@ -517,6 +629,192 @@ operand(ObjectType) ->
             typename type_traits::callable<std::remove_cvref_t<ObjectType>
         >::template arg<0>
     >, ObjectType>;
+
+template <typename ObjectType, typename MetaType>
+operand(ObjectType, MetaType, data_tuple_t<MetaType>) ->
+    operand<
+        std::remove_cvref_t<
+            typename type_traits::callable<std::remove_cvref_t<ObjectType>
+        >::template arg<0>
+    >, ObjectType, MetaType>;
+
+// --- Operand-by-operand composition ----------------------------------------
+//
+// The class-template friend overloads above intentionally reject the case
+// where the *other* side is itself an `operand` specialisation, so we route
+// `op && op` and `op || op` through the function templates below. They
+// combine both sides' metadata under @ref and_ / @ref or_ and concatenate
+// the captures tuples without re-wrapping either operand.
+
+template <
+    typename LReq, typename LCall, typename LMeta,
+    typename RReq, typename RCall, typename RMeta>
+auto operator&&(operand<LReq, LCall, LMeta> lhs, operand<RReq, RCall, RMeta> rhs)
+{
+    using lhs_type = operand<LReq, LCall, LMeta>;
+    using rhs_type = operand<RReq, RCall, RMeta>;
+    using super_request_type = type_traits::super_type_t<LReq, RReq>;
+    using new_meta = and_<LMeta, RMeta>;
+
+    auto new_caps = std::tuple_cat(lhs.captures(), rhs.captures());
+
+    constexpr auto with_target = lhs_type::with_parsed_target || rhs_type::with_parsed_target;
+    constexpr auto with_cookie = lhs_type::with_parsed_cookies || rhs_type::with_parsed_cookies;
+
+    if constexpr (with_target && with_cookie)
+    {
+        return matcher::operand
+        {
+            [lhs = std::move(lhs), rhs = std::move(rhs)](
+                super_request_type const& request,
+                context& context,
+                boost::urls::url_view const& parsed_target,
+                cookies const& parsed_cookies)
+            {
+                return
+                    lhs(request, context, parsed_target, parsed_cookies) &&
+                    rhs(request, context, parsed_target, parsed_cookies);
+            },
+            new_meta {},
+            std::move(new_caps)
+        };
+    }
+    else if constexpr (with_target)
+    {
+        return matcher::operand
+        {
+            [lhs = std::move(lhs), rhs = std::move(rhs)](
+                super_request_type const& request,
+                context& context,
+                boost::urls::url_view const& parsed_target)
+            {
+                return
+                    lhs(request, context, parsed_target, {}) &&
+                    rhs(request, context, parsed_target, {});
+            },
+            new_meta {},
+            std::move(new_caps)
+        };
+    }
+    else if constexpr (with_cookie)
+    {
+        return matcher::operand
+        {
+            [lhs = std::move(lhs), rhs = std::move(rhs)](
+                super_request_type const& request,
+                context& context,
+                cookies const& parsed_cookies)
+            {
+                return
+                    lhs(request, context, {}, parsed_cookies) &&
+                    rhs(request, context, {}, parsed_cookies);
+            },
+            new_meta {},
+            std::move(new_caps)
+        };
+    }
+    else
+    {
+        return matcher::operand
+        {
+            [lhs = std::move(lhs), rhs = std::move(rhs)](
+                super_request_type const& request,
+                context& context)
+            {
+                return
+                    lhs(request, context, {}, {}) &&
+                    rhs(request, context, {}, {});
+            },
+            new_meta {},
+            std::move(new_caps)
+        };
+    }
+}
+
+template <
+    typename LReq, typename LCall, typename LMeta,
+    typename RReq, typename RCall, typename RMeta>
+auto operator||(operand<LReq, LCall, LMeta> lhs, operand<RReq, RCall, RMeta> rhs)
+{
+    using lhs_type = operand<LReq, LCall, LMeta>;
+    using rhs_type = operand<RReq, RCall, RMeta>;
+    using super_request_type = type_traits::super_type_t<LReq, RReq>;
+    using new_meta = or_<LMeta, RMeta>;
+
+    auto new_caps = std::tuple_cat(lhs.captures(), rhs.captures());
+
+    constexpr auto with_target = lhs_type::with_parsed_target || rhs_type::with_parsed_target;
+    constexpr auto with_cookie = lhs_type::with_parsed_cookies || rhs_type::with_parsed_cookies;
+
+    if constexpr (with_target && with_cookie)
+    {
+        return matcher::operand
+        {
+            [lhs = std::move(lhs), rhs = std::move(rhs)](
+                super_request_type const& request,
+                context& context,
+                boost::urls::url_view const& parsed_target,
+                cookies const& parsed_cookies)
+            {
+                return
+                    lhs(request, context, parsed_target, parsed_cookies) ||
+                    rhs(request, context, parsed_target, parsed_cookies);
+            },
+            new_meta {},
+            std::move(new_caps)
+        };
+    }
+    else if constexpr (with_target)
+    {
+        return matcher::operand
+        {
+            [lhs = std::move(lhs), rhs = std::move(rhs)](
+                super_request_type const& request,
+                context& context,
+                boost::urls::url_view const& parsed_target)
+            {
+                return
+                    lhs(request, context, parsed_target, {}) ||
+                    rhs(request, context, parsed_target, {});
+            },
+            new_meta {},
+            std::move(new_caps)
+        };
+    }
+    else if constexpr (with_cookie)
+    {
+        return matcher::operand
+        {
+            [lhs = std::move(lhs), rhs = std::move(rhs)](
+                super_request_type const& request,
+                context& context,
+                cookies const& parsed_cookies)
+            {
+                return
+                    lhs(request, context, {}, parsed_cookies) ||
+                    rhs(request, context, {}, parsed_cookies);
+            },
+            new_meta {},
+            std::move(new_caps)
+        };
+    }
+    else
+    {
+        return matcher::operand
+        {
+            [lhs = std::move(lhs), rhs = std::move(rhs)](
+                super_request_type const& request,
+                context& context)
+            {
+                return
+                    lhs(request, context, {}, {}) ||
+                    rhs(request, context, {}, {});
+            },
+            new_meta {},
+            std::move(new_caps)
+        };
+    }
+}
 
 /** True if @a MatcherType can be wrapped in an `operand`.
 

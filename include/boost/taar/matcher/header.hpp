@@ -11,8 +11,10 @@
 #define BOOST_TAAR_MATCHER_HEADER_HPP
 
 #include <boost/taar/matcher/context.hpp>
+#include <boost/taar/matcher/metadata.hpp>
 #include <boost/taar/matcher/operand.hpp>
 #include <boost/beast/http/message.hpp>
+#include <utility>
 
 namespace boost::taar::matcher {
 
@@ -30,6 +32,12 @@ namespace boost::taar::matcher {
     auto is_json   = header(http::field::content_type) == "application/json";
     auto has_auth  = exist(header("X-Auth"));
     @endcode
+
+    The produced operand carries @ref header_eq_constraint,
+    @ref header_ne_constraint, or @ref header_exists_constraint metadata
+    with the field key (as a @ref header_key variant) and the constrained
+    value in its @ref operand::captures "captures" tuple. Existence
+    matchers leave the captured value empty.
 
     @tparam FieldsType The Beast HTTP fields container of the request to
                        inspect. Defaults to `boost::beast::http::fields`.
@@ -53,6 +61,11 @@ struct header_t
 
         friend auto operator==(header_item lhs, std::string rhs)
         {
+            data_tuple_t<header_eq_constraint> captures
+            {
+                header_constraint_value {header_key {lhs.key}, rhs}
+            };
+
             return matcher::operand
             {
                 [lhs = std::move(lhs), rhs = std::move(rhs)](
@@ -60,7 +73,9 @@ struct header_t
                     context& context)
                 {
                     return request[lhs.key] == rhs;
-                }
+                },
+                header_eq_constraint {},
+                std::move(captures)
             };
         }
 
@@ -71,17 +86,37 @@ struct header_t
 
         friend auto operator!=(header_item lhs, std::string rhs)
         {
-            return !operator==(std::move(lhs), std::move(rhs));
+            data_tuple_t<header_ne_constraint> captures
+            {
+                header_constraint_value {header_key {lhs.key}, rhs}
+            };
+
+            return matcher::operand
+            {
+                [lhs = std::move(lhs), rhs = std::move(rhs)](
+                    request_type const& request,
+                    context& context)
+                {
+                    return request[lhs.key] != rhs;
+                },
+                header_ne_constraint {},
+                std::move(captures)
+            };
         }
 
         friend auto operator!=(std::string lhs, header_item rhs)
         {
-            return !operator==(std::move(rhs), std::move(lhs));
+            return operator!=(std::move(rhs), std::move(lhs));
         }
 
         /// Match requests that carry @a header, regardless of its value.
         friend auto exist(header_item header)
         {
+            data_tuple_t<header_exists_constraint> captures
+            {
+                header_constraint_value {header_key {header.key}, {}}
+            };
+
             return matcher::operand
             {
                 [header = std::move(header)](
@@ -89,7 +124,9 @@ struct header_t
                     context& context)
                 {
                     return request.find(header.key) != request.end();
-                }
+                },
+                header_exists_constraint {},
+                std::move(captures)
             };
         }
     };
