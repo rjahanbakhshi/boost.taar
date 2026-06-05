@@ -50,6 +50,7 @@
 #include <boost/system/system_error.hpp>
 #include <boost/url/url_view.hpp>
 #include <functional>
+#include <memory>
 #include <type_traits>
 #include <vector>
 #include <utility>
@@ -57,6 +58,16 @@
 #include <cstdint>
 
 namespace boost::taar::session {
+
+/** Sentinel for `basic_http`'s default `Context` parameter.
+
+    Indicates that the session has no per-connection context: no shared
+    object is created on accept, and handlers may not opt into one. The
+    default `using http = basic_http<>` selects this case to keep
+    pre-existing code working unchanged.
+ */
+struct no_context {};
+
 namespace detail {
 
 template <typename HandlerType>
@@ -71,6 +82,100 @@ concept hard_error_handler = requires
 {
     requires std::is_invocable_v<T, std::exception_ptr>;
 };
+
+template <typename T> struct is_shared_ptr_ : std::false_type {};
+template <typename T> struct is_shared_ptr_<std::shared_ptr<T>> : std::true_type {};
+
+// std::tuple_element<0, tuple<>> is a hard error, not SFINAE. Gate any
+// arg<0> access behind a partial specialisation that fires only when the
+// handler actually has at least one argument.
+template <typename H, std::size_t N = type_traits::callable_args_count<H>>
+struct advertises_connection_context_impl_
+{
+    static constexpr bool value = false;
+};
+
+template <typename H, std::size_t N>
+    requires (N >= 1)
+struct advertises_connection_context_impl_<H, N>
+{
+    static constexpr bool value = is_shared_ptr_<
+        std::remove_cvref_t<type_traits::callable_arg<H, 0>>>::value;
+};
+
+/** True if @a H's first parameter is a `std::shared_ptr` of *some* type.
+
+    Used to detect that a handler is opting into a connection context so the
+    session can either inject one (when the type matches) or fail with a
+    clear `static_assert` (when it does not).
+ */
+template <typename H>
+inline constexpr bool advertises_connection_context =
+    advertises_connection_context_impl_<H>::value;
+
+template <typename H, typename Context, std::size_t N = type_traits::callable_args_count<H>>
+struct takes_connection_context_impl_
+{
+    static constexpr bool value = false;
+};
+
+template <typename H, typename Context, std::size_t N>
+    requires (N >= 1)
+struct takes_connection_context_impl_<H, Context, N>
+{
+    static constexpr bool value = std::is_same_v<
+        std::remove_cvref_t<type_traits::callable_arg<H, 0>>,
+        std::shared_ptr<Context>>;
+};
+
+/** True if @a H's first parameter is `std::shared_ptr<Context>` exactly.
+
+    This is the trait `register_request_handler` consults to choose between
+    the two-argument and three-argument invocation paths.
+ */
+template <typename H, typename Context>
+inline constexpr bool takes_connection_context =
+    takes_connection_context_impl_<H, Context>::value;
+
+/// Invoke @a h with @a conn_ctx threaded as a leading arg when it opts in.
+template <typename H, typename Context, typename Request>
+decltype(auto) invoke_with_optional_context(
+    H&& h,
+    std::shared_ptr<Context> const& conn_ctx,
+    Request&& request,
+    matcher::context const& mctx)
+{
+    if constexpr (takes_connection_context<std::remove_cvref_t<H>, Context>)
+    {
+        return std::invoke(
+            std::forward<H>(h), conn_ctx, std::forward<Request>(request), mctx);
+    }
+    else
+    {
+        return std::invoke(
+            std::forward<H>(h), std::forward<Request>(request), mctx);
+    }
+}
+
+/// `response_from_invoke` variant that threads @a conn_ctx when @a h opts in.
+template <typename H, typename Context, typename Request>
+decltype(auto) response_from_invoke_with_optional_context(
+    H&& h,
+    std::shared_ptr<Context> const& conn_ctx,
+    Request&& request,
+    matcher::context const& mctx)
+{
+    if constexpr (takes_connection_context<std::remove_cvref_t<H>, Context>)
+    {
+        return response_from_invoke(
+            std::forward<H>(h), conn_ctx, std::forward<Request>(request), mctx);
+    }
+    else
+    {
+        return response_from_invoke(
+            std::forward<H>(h), std::forward<Request>(request), mctx);
+    }
+}
 
 template <typename StreamType>
 auto async_write(
@@ -312,9 +417,24 @@ awaitable<bool> write_chunked_response(
 
     `http` is move-constructible but not copyable; share one instance among
     spawned sessions by reference.
+
+    @tparam Context Per-connection state type. When set to anything other
+                    than @ref no_context, the session calls
+                    `std::make_shared<Context>()` on every accepted TCP
+                    connection and keeps that pointer alive across all
+                    keep-alive requests on the connection. Handlers opt in
+                    by accepting `std::shared_ptr<Context>` as their first
+                    parameter; handlers that do not are unaffected. The
+                    default specialisation, @ref http, uses @ref no_context
+                    and behaves identically to the pre-Phase-0 session.
 */
-class http
+template <typename Context = no_context>
+class basic_http
 {
+public:
+    /// The per-connection context type carried by this session.
+    using context_type = Context;
+
 private:
     using matcher_type = std::move_only_function<
         bool(
@@ -329,7 +449,8 @@ private:
             rebind_executor<boost::beast::tcp_stream>&,
             boost::beast::flat_buffer&,
             boost::beast::http::request_parser<boost::beast::http::buffer_body>&,
-            cancellation_signals&)>;
+            cancellation_signals&,
+            std::shared_ptr<Context> const&)>;
 
     struct matcher_handler_type
     {
@@ -347,7 +468,7 @@ private:
     using hard_error_handler_type = std::move_only_function<void(std::exception_ptr)>;
 
 public:
-    http()
+    basic_http()
         : wrapped_soft_error_handler_ {
             [](
                 std::exception_ptr eptr,
@@ -400,11 +521,11 @@ public:
         request_body_limit_ = limit;
     }
 
-    http(http const&) = delete;
-    http(http&&) = default;
-    http& operator=(http const&) = delete;
-    http& operator=(http&&) = default;
-    ~http() = default;
+    basic_http(basic_http const&) = delete;
+    basic_http(basic_http&&) = default;
+    basic_http& operator=(basic_http const&) = delete;
+    basic_http& operator=(basic_http&&) = default;
+    ~basic_http() = default;
 
     /** Drive one accepted connection to completion.
 
@@ -424,6 +545,18 @@ public:
         using boost::beast::flat_buffer;
 
         rebind_executor<tcp_stream> stream {std::move(socket)};
+
+        // Per-connection context. Created once on accept and carried
+        // across every keep-alive request on this connection. For the
+        // `no_context` specialisation the pointer stays empty and the
+        // dispatcher's `takes_connection_context` check never selects the
+        // context-aware branch, so behaviour is identical to a session
+        // with no context plumbing.
+        std::shared_ptr<Context> conn_ctx;
+        if constexpr (!std::is_same_v<Context, no_context>)
+        {
+            conn_ctx = std::make_shared<Context>();
+        }
 
         try
         {
@@ -496,7 +629,8 @@ public:
                         stream,
                         buffer,
                         header_parser,
-                        signals))
+                        signals,
+                        conn_ctx))
                     {
                         // Handler instructed to close the session.
                         break;
@@ -623,6 +757,18 @@ public:
         // the handler does not expose path_arg_names().
         handler::validate_path_args_against_target(operand, request_handler);
 
+        // If the handler opts into a connection context, the type must
+        // match the session's. Diagnose early with a clear message.
+        if constexpr (detail::advertises_connection_context<RequestHandler>)
+        {
+            static_assert(
+                detail::takes_connection_context<RequestHandler, Context>,
+                "Handler advertises a std::shared_ptr<...> first parameter "
+                "whose type does not match the session's Context. Either "
+                "switch the handler to use the session's context type or "
+                "instantiate basic_http<> with the handler's context type.");
+        }
+
         needs_parsed_target_ |= decltype(operand)::with_parsed_target;
         needs_parsed_cookies_ |= decltype(operand)::with_parsed_cookies;
 
@@ -640,10 +786,17 @@ public:
                 rebind_executor<boost::beast::tcp_stream>& stream,
                 boost::beast::flat_buffer& buffer,
                 boost::beast::http::request_parser<boost::beast::http::buffer_body>& header_parser,
-                cancellation_signals& signals) mutable
+                cancellation_signals& signals,
+                std::shared_ptr<Context> const& conn_ctx) mutable
             -> awaitable<bool>
             {
-                using request_type = std::remove_cvref_t<type_traits::callable_arg<RequestHandler, 0>>;
+                // The body type is read from whichever of the user
+                // handler's parameters carries the request: with a
+                // connection context that's index 1, otherwise index 0.
+                constexpr std::size_t request_index =
+                    detail::takes_connection_context<RequestHandler, Context> ? 1 : 0;
+                using request_type = std::remove_cvref_t<
+                    type_traits::callable_arg<RequestHandler, request_index>>;
                 using body_type = request_type::body_type;
                 using result_type = type_traits::callable_result<RequestHandler>;
 
@@ -681,8 +834,9 @@ public:
                     if constexpr (is_chunked_response<result_type>)
                     {
                         // Sync handler returning chunked_response<T>
-                        auto generator = std::invoke(
+                        auto generator = detail::invoke_with_optional_context(
                             std::move(request_handler),
+                            conn_ctx,
                             body_parser.get(),
                             context);
                         co_return co_await detail::write_chunked_response(
@@ -691,8 +845,9 @@ public:
                     else if constexpr (is_async_generator<result_type>)
                     {
                         // Sync handler returning async_generator<T>
-                        auto generator = std::invoke(
+                        auto generator = detail::invoke_with_optional_context(
                             std::move(request_handler),
+                            conn_ctx,
                             body_parser.get(),
                             context);
                         co_return co_await detail::write_chunked_response(
@@ -703,8 +858,9 @@ public:
                         if constexpr (is_chunked_response<typename result_type::value_type>)
                         {
                             // Async handler returning awaitable<chunked_response<T>>
-                            auto generator = co_await std::invoke(
+                            auto generator = co_await detail::invoke_with_optional_context(
                                 std::move(request_handler),
+                                conn_ctx,
                                 body_parser.get(),
                                 context);
                             co_return co_await detail::write_chunked_response(
@@ -713,8 +869,9 @@ public:
                         else if constexpr (is_async_generator<typename result_type::value_type>)
                         {
                             // Async handler returning awaitable<async_generator<T>>
-                            auto generator = co_await std::invoke(
+                            auto generator = co_await detail::invoke_with_optional_context(
                                 std::move(request_handler),
+                                conn_ctx,
                                 body_parser.get(),
                                 context);
                             co_return co_await detail::write_chunked_response(
@@ -723,8 +880,9 @@ public:
                         else
                         {
                             // Existing awaitable path
-                            auto response = co_await response_from_invoke(
+                            auto response = co_await detail::response_from_invoke_with_optional_context(
                                 std::move(request_handler),
+                                conn_ctx,
                                 body_parser.get(),
                                 context);
 
@@ -736,8 +894,9 @@ public:
                     else
                     {
                         // Existing path: response_from_invoke -> async_write
-                        auto response = co_await response_from_invoke(
+                        auto response = co_await detail::response_from_invoke_with_optional_context(
                             std::move(request_handler),
+                            conn_ctx,
                             body_parser.get(),
                             context);
 
@@ -847,7 +1006,8 @@ public:
                 rebind_executor<boost::beast::tcp_stream>& stream,
                 boost::beast::flat_buffer& buffer,
                 boost::beast::http::request_parser<boost::beast::http::buffer_body>& header_parser,
-                cancellation_signals& signals) mutable
+                cancellation_signals& signals,
+                std::shared_ptr<Context> const& /*conn_ctx*/) mutable
             -> awaitable<bool>
             {
                 // Move the parsed header into a request<empty_body>. The raw
@@ -927,6 +1087,15 @@ private:
     bool needs_parsed_target_ = false;
     bool needs_parsed_cookies_ = false;
 };
+
+/** Default HTTP session with no per-connection context.
+
+    Equivalent to `basic_http<no_context>`. Existing code that names
+    `boost::taar::session::http` keeps the pre-Phase-0 behaviour: no
+    shared object is created on accept and handlers are not eligible to
+    opt into one.
+ */
+using http = basic_http<>;
 
 } // namespace boost::taar::session
 

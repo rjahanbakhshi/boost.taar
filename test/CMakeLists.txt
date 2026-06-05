@@ -20,6 +20,7 @@ target_sources(
         test_callable_with.cpp
         test_chunk_body_from.cpp
         test_chunked_response.cpp
+        test_connection_context.cpp
         test_constexpr_string.cpp
         test_cookies.cpp
         test_tcp_server.cpp
