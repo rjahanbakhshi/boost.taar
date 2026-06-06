@@ -14,6 +14,8 @@
 #include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/write.hpp>
 #include <boost/beast/http/fields.hpp>
+#include <boost/json/parse.hpp>
+#include <boost/json/value.hpp>
 #include <boost/taar/handler/path_arg_check.hpp>
 #include <boost/taar/matcher/context.hpp>
 #include <boost/taar/matcher/operand.hpp>
@@ -441,7 +443,8 @@ private:
             boost::beast::http::request_header<> const&,
             matcher::context&,
             boost::urls::url_view const&,
-            cookies const&)>;
+            cookies const&,
+            boost::json::value const&)>;
 
     using request_handler_wrapper_type = std::move_only_function<
         awaitable<bool>(
@@ -450,7 +453,8 @@ private:
             boost::beast::flat_buffer&,
             boost::beast::http::request_parser<boost::beast::http::buffer_body>&,
             cancellation_signals&,
-            std::shared_ptr<Context> const&)>;
+            std::shared_ptr<Context> const&,
+            boost::beast::http::request<boost::beast::http::string_body> const*)>;
 
     struct matcher_handler_type
     {
@@ -596,6 +600,7 @@ public:
                 matcher::context context;
                 boost::urls::url_view parsed_target;
                 cookies parsed_cookies;
+                boost::json::value parsed_body;
 
                 if (needs_parsed_target_)
                 {
@@ -611,6 +616,54 @@ public:
                     }
                 }
 
+                // Body cache: when any registered matcher needs the
+                // parsed body, read it upfront via a string_body parser
+                // and attempt to parse as JSON. A parse failure is *not*
+                // an error — `parsed_body` stays null and body-needing
+                // matchers simply do not match. The cached
+                // request<string_body> is later passed to the handler
+                // dispatch path which constructs the handler's request
+                // from it (handlers are restricted at registration to
+                // string_body or empty_body so this conversion is
+                // always sound).
+                boost::optional<http::request<http::string_body>> cached_request;
+                if (needs_parsed_body_)
+                {
+                    http::request_parser<http::string_body> sb_parser {std::move(header_parser)};
+                    sb_parser.body_limit(request_body_limit_);
+                    auto [body_ec, body_sz] = co_await async_read(
+                        stream, buffer, sb_parser);
+
+                    if (body_ec)
+                    {
+                        if (!detail::is_transport_error(body_ec))
+                        {
+                            http::response<http::empty_body> err_response{
+                                detail::select_error_status(body_ec),
+                                sb_parser.get().version()};
+                            err_response.keep_alive(false);
+                            err_response.prepare_payload();
+                            auto [wec, wsz] = co_await http::async_write(
+                                stream, err_response);
+                            (void)wec;
+                            (void)wsz;
+                        }
+                        throw boost::system::system_error{body_ec};
+                    }
+
+                    cached_request.emplace(std::move(sb_parser.get()));
+
+                    boost::system::error_code parse_ec;
+                    auto parsed = boost::json::parse(
+                        cached_request->body(), parse_ec);
+                    if (!parse_ec)
+                    {
+                        parsed_body = std::move(parsed);
+                    }
+                    // else: parsed_body stays default (null) → body-needing
+                    // matchers will simply not match.
+                }
+
                 auto iter = std::ranges::find_if(matcher_handlers_,
                     [&](auto&& matcher_handler) -> bool
                     {
@@ -619,7 +672,8 @@ public:
                             req_header,
                             context,
                             parsed_target,
-                            parsed_cookies);
+                            parsed_cookies,
+                            parsed_body);
                     });
 
                 if (iter != matcher_handlers_.cend())
@@ -630,7 +684,8 @@ public:
                         buffer,
                         header_parser,
                         signals,
-                        conn_ctx))
+                        conn_ctx,
+                        cached_request.has_value() ? &*cached_request : nullptr))
                     {
                         // Handler instructed to close the session.
                         break;
@@ -769,17 +824,19 @@ public:
                 "instantiate basic_http<> with the handler's context type.");
         }
 
-        needs_parsed_target_ |= decltype(operand)::with_parsed_target;
+        needs_parsed_target_  |= decltype(operand)::with_parsed_target;
         needs_parsed_cookies_ |= decltype(operand)::with_parsed_cookies;
+        needs_parsed_body_    |= decltype(operand)::with_parsed_body;
 
         matcher_handlers_.emplace_back(
             [this, operand = std::move(operand)](
                 http::request_header<> const& request,
                 matcher::context& context,
                 boost::urls::url_view const& parsed_target,
-                cookies const& parsed_cookies)
+                cookies const& parsed_cookies,
+                boost::json::value const& parsed_body)
             {
-                return operand(request, context, parsed_target, parsed_cookies);
+                return operand(request, context, parsed_target, parsed_cookies, parsed_body);
             },
             [this, request_handler = std::move(request_handler)](
                 matcher::context const& context,
@@ -787,7 +844,8 @@ public:
                 boost::beast::flat_buffer& buffer,
                 boost::beast::http::request_parser<boost::beast::http::buffer_body>& header_parser,
                 cancellation_signals& signals,
-                std::shared_ptr<Context> const& conn_ctx) mutable
+                std::shared_ptr<Context> const& conn_ctx,
+                boost::beast::http::request<boost::beast::http::string_body> const* cached_request) mutable
             -> awaitable<bool>
             {
                 // The body type is read from whichever of the user
@@ -800,28 +858,74 @@ public:
                 using body_type = request_type::body_type;
                 using result_type = type_traits::callable_result<RequestHandler>;
 
-                http::request_parser<body_type> body_parser {std::move(header_parser)};
-                body_parser.body_limit(request_body_limit_);
-                auto [req_ec, req_sz] = co_await async_read(stream, buffer, body_parser);
-
-                auto version = body_parser.get().version();
-                auto keep_alive = body_parser.get().keep_alive();
-
-                if (req_ec)
+                // Body-cache compatibility check: when the session reads
+                // the body upfront for matcher consumption, the handler
+                // cannot read it again via its own parser. Phase B
+                // restricts handlers to body types we can construct
+                // directly from the cached bytes.
+                if constexpr (decltype(operand)::with_parsed_body)
                 {
-                    if (!detail::is_transport_error(req_ec))
+                    static_assert(
+                        std::is_same_v<body_type, http::string_body> ||
+                        std::is_same_v<body_type, http::empty_body>,
+                        "A matcher in this route requires body caching, but "
+                        "this handler's body type is neither boost::beast::"
+                        "http::string_body nor boost::beast::http::empty_body. "
+                        "Switch the handler's request body type to one of "
+                        "those, or split the route so the matchers that need "
+                        "the body are paired with a string_body / empty_body "
+                        "handler.");
+                }
+
+                // Build the handler's request. When the session pre-read
+                // the body for matcher caching, skip the body_parser and
+                // construct the request directly from the cached
+                // request<string_body>. Otherwise use the standard
+                // async_read path.
+                boost::optional<http::request<body_type>> request_obj;
+                unsigned version;
+                bool keep_alive;
+
+                if (cached_request != nullptr)
+                {
+                    http::request<body_type> built;
+                    built.base() = cached_request->base();
+                    if constexpr (std::is_same_v<body_type, http::string_body>)
                     {
-                        // Protocol error. Send an appropriate error response.
-                        http::response<http::empty_body> err_response{
-                            detail::select_error_status(req_ec), version};
-                        err_response.keep_alive(false);
-                        err_response.prepare_payload();
-                        auto [wec, wsz] = co_await http::async_write(stream, err_response);
-                        (void)wec;
-                        (void)wsz;
+                        built.body() = cached_request->body();
                     }
-                    // Invoke the hard error handler for server-side visibility.
-                    throw boost::system::system_error{req_ec};
+                    // For empty_body, the body is intentionally discarded.
+                    version    = built.version();
+                    keep_alive = built.keep_alive();
+                    request_obj.emplace(std::move(built));
+                }
+                else
+                {
+                    http::request_parser<body_type> body_parser {std::move(header_parser)};
+                    body_parser.body_limit(request_body_limit_);
+                    auto [req_ec, req_sz] = co_await async_read(stream, buffer, body_parser);
+
+                    version    = body_parser.get().version();
+                    keep_alive = body_parser.get().keep_alive();
+
+                    if (req_ec)
+                    {
+                        if (!detail::is_transport_error(req_ec))
+                        {
+                            // Protocol error. Send an appropriate error response.
+                            http::response<http::empty_body> err_response{
+                                detail::select_error_status(req_ec), version};
+                            err_response.keep_alive(false);
+                            err_response.prepare_payload();
+                            auto [wec, wsz] = co_await http::async_write(stream, err_response);
+                            (void)wec;
+                            (void)wsz;
+                        }
+                        // Invoke the hard error handler for server-side visibility.
+                        throw boost::system::system_error{req_ec};
+                    }
+
+                    request_obj.emplace(std::move(body_parser.get()));
                 }
 
                 // Get cancellation slot from current coroutine for request-scoped cancellation
@@ -837,7 +941,7 @@ public:
                         auto generator = detail::invoke_with_optional_context(
                             std::move(request_handler),
                             conn_ctx,
-                            body_parser.get(),
+                            *request_obj,
                             context);
                         co_return co_await detail::write_chunked_response(
                             generator, stream, version, keep_alive, cancellation_slot);
@@ -848,7 +952,7 @@ public:
                         auto generator = detail::invoke_with_optional_context(
                             std::move(request_handler),
                             conn_ctx,
-                            body_parser.get(),
+                            *request_obj,
                             context);
                         co_return co_await detail::write_chunked_response(
                             generator, stream, version, keep_alive, cancellation_slot);
@@ -861,7 +965,7 @@ public:
                             auto generator = co_await detail::invoke_with_optional_context(
                                 std::move(request_handler),
                                 conn_ctx,
-                                body_parser.get(),
+                                *request_obj,
                                 context);
                             co_return co_await detail::write_chunked_response(
                                 generator, stream, version, keep_alive, cancellation_slot);
@@ -872,7 +976,7 @@ public:
                             auto generator = co_await detail::invoke_with_optional_context(
                                 std::move(request_handler),
                                 conn_ctx,
-                                body_parser.get(),
+                                *request_obj,
                                 context);
                             co_return co_await detail::write_chunked_response(
                                 generator, stream, version, keep_alive, cancellation_slot);
@@ -883,7 +987,7 @@ public:
                             auto response = co_await detail::response_from_invoke_with_optional_context(
                                 std::move(request_handler),
                                 conn_ctx,
-                                body_parser.get(),
+                                *request_obj,
                                 context);
 
                             bool keep_alive = response.keep_alive();
@@ -897,7 +1001,7 @@ public:
                         auto response = co_await detail::response_from_invoke_with_optional_context(
                             std::move(request_handler),
                             conn_ctx,
-                            body_parser.get(),
+                            *request_obj,
                             context);
 
                         bool keep_alive = response.keep_alive();
@@ -914,7 +1018,7 @@ public:
                 co_return co_await wrapped_soft_error_handler_(
                     eptr,
                     stream,
-                    body_parser.get(),
+                    *request_obj,
                     signals);
             }
         );
@@ -997,9 +1101,10 @@ public:
                 http::request_header<> const& request,
                 matcher::context& context,
                 boost::urls::url_view const& parsed_target,
-                cookies const& parsed_cookies)
+                cookies const& parsed_cookies,
+                boost::json::value const& parsed_body)
             {
-                return operand(request, context, parsed_target, parsed_cookies);
+                return operand(request, context, parsed_target, parsed_cookies, parsed_body);
             },
             [raw_handler = std::move(raw_handler)](
                 matcher::context const& context,
@@ -1007,7 +1112,8 @@ public:
                 boost::beast::flat_buffer& buffer,
                 boost::beast::http::request_parser<boost::beast::http::buffer_body>& header_parser,
                 cancellation_signals& signals,
-                std::shared_ptr<Context> const& /*conn_ctx*/) mutable
+                std::shared_ptr<Context> const& /*conn_ctx*/,
+                boost::beast::http::request<boost::beast::http::string_body> const* /*cached_request*/) mutable
             -> awaitable<bool>
             {
                 // Move the parsed header into a request<empty_body>. The raw
@@ -1086,6 +1192,7 @@ private:
     boost::optional<std::uint64_t> request_body_limit_ = 1 * 1024 * 1024;
     bool needs_parsed_target_ = false;
     bool needs_parsed_cookies_ = false;
+    bool needs_parsed_body_ = false;
 };
 
 /** Default HTTP session with no per-connection context.

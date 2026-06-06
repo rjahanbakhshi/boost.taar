@@ -27,11 +27,11 @@ BOOST_AUTO_TEST_CASE(test_matcher_cookie)
     taar::cookies parsed_cookies{"name1=value1; blah=42;nr=13"};
     context ctx;
 
-    BOOST_TEST((cookie("name1") == "value1")(req, ctx, {}, parsed_cookies));
-    BOOST_TEST((cookie("blah") == "42")(req, ctx, {}, parsed_cookies));
-    BOOST_TEST((exist(cookie("nr")))(req, ctx, {}, parsed_cookies));
-    BOOST_TEST((cookie("nr") == "13")(req, ctx, {}, parsed_cookies));
-    BOOST_TEST((!exist(cookie("not_exists")))(req, ctx, {}, parsed_cookies));
+    BOOST_TEST((cookie("name1") == "value1")(req, ctx, {}, parsed_cookies, {}));
+    BOOST_TEST((cookie("blah") == "42")(req, ctx, {}, parsed_cookies, {}));
+    BOOST_TEST((exist(cookie("nr")))(req, ctx, {}, parsed_cookies, {}));
+    BOOST_TEST((cookie("nr") == "13")(req, ctx, {}, parsed_cookies, {}));
+    BOOST_TEST((!exist(cookie("not_exists")))(req, ctx, {}, parsed_cookies, {}));
 }
 
 } // namespace

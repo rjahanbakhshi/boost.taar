@@ -72,16 +72,16 @@ BOOST_AUTO_TEST_CASE(test_matcher_operand_free_function)
     context ctx;
 
     operand free_function_operand {free_function};
-    BOOST_TEST(free_function_operand({}, ctx, {}, {}));
-    BOOST_TEST(!(!free_function_operand)({}, ctx, {}, {}));
+    BOOST_TEST(free_function_operand({}, ctx, {}, {}, {}));
+    BOOST_TEST(!(!free_function_operand)({}, ctx, {}, {}, {}));
 
     operand contextual_bool_operand {contextual_bool};
-    BOOST_TEST(!contextual_bool_operand({}, ctx, {}, {}));
-    BOOST_TEST(!(contextual_bool_operand)({}, ctx, {}, {}));
-    BOOST_TEST((!contextual_bool_operand && free_function_operand)({}, ctx, {}, {}));
-    BOOST_TEST(!(contextual_bool_operand && free_function_operand)({}, ctx, {}, {}));
-    BOOST_TEST(!(contextual_bool_operand && !free_function_operand)({}, ctx, {}, {}));
-    BOOST_TEST((contextual_bool_operand || free_function_operand)({}, ctx, {}, {}));
+    BOOST_TEST(!contextual_bool_operand({}, ctx, {}, {}, {}));
+    BOOST_TEST(!(contextual_bool_operand)({}, ctx, {}, {}, {}));
+    BOOST_TEST((!contextual_bool_operand && free_function_operand)({}, ctx, {}, {}, {}));
+    BOOST_TEST(!(contextual_bool_operand && free_function_operand)({}, ctx, {}, {}, {}));
+    BOOST_TEST(!(contextual_bool_operand && !free_function_operand)({}, ctx, {}, {}, {}));
+    BOOST_TEST((contextual_bool_operand || free_function_operand)({}, ctx, {}, {}, {}));
 
     static_assert(!decltype(free_function_operand)::with_parsed_target, "Failed!");
     static_assert(!decltype(contextual_bool_operand)::with_parsed_target, "Failed!");
@@ -151,33 +151,33 @@ BOOST_AUTO_TEST_CASE(test_matcher_operand_free_function_with)
     static_assert(decltype(free_function_target_cookie_operand || free_function_cookie_target_operand)::with_parsed_target, "Failed!");
     static_assert(decltype(free_function_cookie_target_operand || free_function_target_cookie_operand)::with_parsed_target, "Failed!");
 
-    BOOST_TEST(free_function_target_operand({}, ctx, {"/test"}, {}));
-    BOOST_TEST(!free_function_target_operand({}, ctx, {}, {}));
-    BOOST_TEST(!(free_function_target_operand)({}, ctx, {}, {}));
+    BOOST_TEST(free_function_target_operand({}, ctx, {"/test"}, {}, {}));
+    BOOST_TEST(!free_function_target_operand({}, ctx, {}, {}, {}));
+    BOOST_TEST(!(free_function_target_operand)({}, ctx, {}, {}, {}));
 
-    BOOST_TEST(free_function_cookie_operand({}, ctx, {}, cookies{{"name", "value"}}));
-    BOOST_TEST(!free_function_cookie_operand({}, ctx, {}, {}));
-    BOOST_TEST(!(free_function_cookie_operand)({}, ctx, {}, {}));
+    BOOST_TEST(free_function_cookie_operand({}, ctx, {}, cookies{{"name", "value"}}, {}));
+    BOOST_TEST(!free_function_cookie_operand({}, ctx, {}, {}, {}));
+    BOOST_TEST(!(free_function_cookie_operand)({}, ctx, {}, {}, {}));
 
-    BOOST_TEST(free_function_target_cookie_operand({}, ctx, {"/test"}, cookies{{"name", "value"}}));
-    BOOST_TEST(!(free_function_target_cookie_operand({}, ctx, {}, cookies{{"name", "value"}})));
-    BOOST_TEST(!(free_function_target_cookie_operand({}, ctx, {"/test"}, {})));
+    BOOST_TEST(free_function_target_cookie_operand({}, ctx, {"/test"}, cookies{{"name", "value"}}, {}));
+    BOOST_TEST(!(free_function_target_cookie_operand({}, ctx, {}, cookies{{"name", "value"}}, {})));
+    BOOST_TEST(!(free_function_target_cookie_operand({}, ctx, {"/test"}, {}, {})));
 
-    BOOST_TEST(free_function_cookie_target_operand({}, ctx, {"/test"}, cookies{{"name", "value"}}));
-    BOOST_TEST(!(free_function_cookie_target_operand({}, ctx, {}, cookies{{"name", "value"}})));
-    BOOST_TEST(!(free_function_cookie_target_operand({}, ctx, {"/test"}, {})));
+    BOOST_TEST(free_function_cookie_target_operand({}, ctx, {"/test"}, cookies{{"name", "value"}}, {}));
+    BOOST_TEST(!(free_function_cookie_target_operand({}, ctx, {}, cookies{{"name", "value"}}, {})));
+    BOOST_TEST(!(free_function_cookie_target_operand({}, ctx, {"/test"}, {}, {})));
 
-    BOOST_TEST((!free_function_target_operand && free_function_operand)({}, ctx, {}, {}));
-    BOOST_TEST(!(free_function_target_operand && free_function_operand)({}, ctx, {}, {}));
-    BOOST_TEST(!(free_function_target_operand && !free_function_operand)({}, ctx, {}, {}));
-    BOOST_TEST((free_function_target_operand && free_function_operand)({}, ctx, {"/test"}, {}));
-    BOOST_TEST((free_function_target_operand || free_function_operand)({}, ctx, {}, {}));
+    BOOST_TEST((!free_function_target_operand && free_function_operand)({}, ctx, {}, {}, {}));
+    BOOST_TEST(!(free_function_target_operand && free_function_operand)({}, ctx, {}, {}, {}));
+    BOOST_TEST(!(free_function_target_operand && !free_function_operand)({}, ctx, {}, {}, {}));
+    BOOST_TEST((free_function_target_operand && free_function_operand)({}, ctx, {"/test"}, {}, {}));
+    BOOST_TEST((free_function_target_operand || free_function_operand)({}, ctx, {}, {}, {}));
 
-    BOOST_TEST((!free_function_cookie_operand && free_function_operand)({}, ctx, {}, {}));
-    BOOST_TEST(!(free_function_cookie_operand && free_function_operand)({}, ctx, {}, {}));
-    BOOST_TEST(!(free_function_cookie_operand && !free_function_operand)({}, ctx, {}, {}));
-    BOOST_TEST((free_function_cookie_operand && free_function_operand)({}, ctx, {}, cookies{{"name", "value"}}));
-    BOOST_TEST((free_function_cookie_operand || free_function_operand)({}, ctx, {}, {}));
+    BOOST_TEST((!free_function_cookie_operand && free_function_operand)({}, ctx, {}, {}, {}));
+    BOOST_TEST(!(free_function_cookie_operand && free_function_operand)({}, ctx, {}, {}, {}));
+    BOOST_TEST(!(free_function_cookie_operand && !free_function_operand)({}, ctx, {}, {}, {}));
+    BOOST_TEST((free_function_cookie_operand && free_function_operand)({}, ctx, {}, cookies{{"name", "value"}}, {}));
+    BOOST_TEST((free_function_cookie_operand || free_function_operand)({}, ctx, {}, {}, {}));
 }
 
 BOOST_AUTO_TEST_CASE(test_matcher_operand_lambda)
@@ -202,17 +202,17 @@ BOOST_AUTO_TEST_CASE(test_matcher_operand_lambda)
     operand lambda_operand {lambda};
     operand cap_lambda_operand {cap_lambda};
 
-    BOOST_TEST(lambda_operand({}, ctx, {}, {}));
-    BOOST_TEST(!(!lambda_operand)({}, ctx, {}, {}));
-    BOOST_TEST(!cap_lambda_operand({}, ctx, {}, {}));
-    BOOST_TEST((!cap_lambda_operand)({}, ctx, {}, {}));
-    BOOST_TEST((lambda_operand && lambda_operand)({}, ctx, {}, {}));
-    BOOST_TEST(!(cap_lambda_operand && lambda_operand)({}, ctx, {}, {}));
-    BOOST_TEST((!cap_lambda_operand && lambda_operand)({}, ctx, {}, {}));
-    BOOST_TEST((lambda_operand && !cap_lambda_operand)({}, ctx, {}, {}));
-    BOOST_TEST(!(cap_lambda_operand && !lambda_operand)({}, ctx, {}, {}));
-    BOOST_TEST((cap_lambda_operand || lambda_operand)({}, ctx, {}, {}));
-    BOOST_TEST((lambda_operand || cap_lambda_operand)({}, ctx, {}, {}));
+    BOOST_TEST(lambda_operand({}, ctx, {}, {}, {}));
+    BOOST_TEST(!(!lambda_operand)({}, ctx, {}, {}, {}));
+    BOOST_TEST(!cap_lambda_operand({}, ctx, {}, {}, {}));
+    BOOST_TEST((!cap_lambda_operand)({}, ctx, {}, {}, {}));
+    BOOST_TEST((lambda_operand && lambda_operand)({}, ctx, {}, {}, {}));
+    BOOST_TEST(!(cap_lambda_operand && lambda_operand)({}, ctx, {}, {}, {}));
+    BOOST_TEST((!cap_lambda_operand && lambda_operand)({}, ctx, {}, {}, {}));
+    BOOST_TEST((lambda_operand && !cap_lambda_operand)({}, ctx, {}, {}, {}));
+    BOOST_TEST(!(cap_lambda_operand && !lambda_operand)({}, ctx, {}, {}, {}));
+    BOOST_TEST((cap_lambda_operand || lambda_operand)({}, ctx, {}, {}, {}));
+    BOOST_TEST((lambda_operand || cap_lambda_operand)({}, ctx, {}, {}, {}));
 }
 
 BOOST_AUTO_TEST_CASE(test_matcher_operand_implicit)
@@ -230,25 +230,25 @@ BOOST_AUTO_TEST_CASE(test_matcher_operand_implicit)
     operand lambda_operand {lambda};
     operand contextual_bool_operand {contextual_bool};
 
-    BOOST_TEST((!contextual_bool_operand && lambda)({}, ctx, {}, {}));
-    BOOST_TEST((lambda_operand && lambda)({}, ctx, {}, {}));
-    BOOST_TEST(!(contextual_bool_operand && free_function)({}, ctx, {}, {}));
-    BOOST_TEST((lambda_operand && free_function)({}, ctx, {}, {}));
+    BOOST_TEST((!contextual_bool_operand && lambda)({}, ctx, {}, {}, {}));
+    BOOST_TEST((lambda_operand && lambda)({}, ctx, {}, {}, {}));
+    BOOST_TEST(!(contextual_bool_operand && free_function)({}, ctx, {}, {}, {}));
+    BOOST_TEST((lambda_operand && free_function)({}, ctx, {}, {}, {}));
 
-    BOOST_TEST((lambda && !contextual_bool_operand)({}, ctx, {}, {}));
-    BOOST_TEST((lambda && lambda_operand)({}, ctx, {}, {}));
-    BOOST_TEST(!(free_function && contextual_bool_operand)({}, ctx, {}, {}));
-    BOOST_TEST((free_function && lambda_operand)({}, ctx, {}, {}));
+    BOOST_TEST((lambda && !contextual_bool_operand)({}, ctx, {}, {}, {}));
+    BOOST_TEST((lambda && lambda_operand)({}, ctx, {}, {}, {}));
+    BOOST_TEST(!(free_function && contextual_bool_operand)({}, ctx, {}, {}, {}));
+    BOOST_TEST((free_function && lambda_operand)({}, ctx, {}, {}, {}));
 
-    BOOST_TEST((!contextual_bool_operand || lambda)({}, ctx, {}, {}));
-    BOOST_TEST((lambda_operand || lambda)({}, ctx, {}, {}));
-    BOOST_TEST((contextual_bool_operand || free_function)({}, ctx, {}, {}));
-    BOOST_TEST((!lambda_operand || free_function)({}, ctx, {}, {}));
+    BOOST_TEST((!contextual_bool_operand || lambda)({}, ctx, {}, {}, {}));
+    BOOST_TEST((lambda_operand || lambda)({}, ctx, {}, {}, {}));
+    BOOST_TEST((contextual_bool_operand || free_function)({}, ctx, {}, {}, {}));
+    BOOST_TEST((!lambda_operand || free_function)({}, ctx, {}, {}, {}));
 
-    BOOST_TEST((lambda || !contextual_bool_operand)({}, ctx, {}, {}));
-    BOOST_TEST((lambda || lambda_operand)({}, ctx, {}, {}));
-    BOOST_TEST((free_function || contextual_bool_operand)({}, ctx, {}, {}));
-    BOOST_TEST((free_function || !lambda_operand)({}, ctx, {}, {}));
+    BOOST_TEST((lambda || !contextual_bool_operand)({}, ctx, {}, {}, {}));
+    BOOST_TEST((lambda || lambda_operand)({}, ctx, {}, {}, {}));
+    BOOST_TEST((free_function || contextual_bool_operand)({}, ctx, {}, {}, {}));
+    BOOST_TEST((free_function || !lambda_operand)({}, ctx, {}, {}, {}));
 }
 
 } // namespace
