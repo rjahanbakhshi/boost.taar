@@ -77,9 +77,6 @@ struct version_le_constraint {};       ///< `version <= N`
 struct version_gt_constraint {};       ///< `version >  N`
 struct version_ge_constraint {};       ///< `version >= N`
 
-struct jsonrpc_method_eq_constraint {}; ///< `jsonrpc::method == "name"`
-struct jsonrpc_method_ne_constraint {}; ///< `jsonrpc::method != "name"`
-
 // ---- Boolean combinators ---------------------------------------------------
 
 template <typename L, typename R> struct and_ {};   ///< AST node: `L && R`.
@@ -131,12 +128,6 @@ struct version_constraint_value
     unsigned value;
 };
 
-/// Captured value for `jsonrpc_method_eq_constraint` / `jsonrpc_method_ne_constraint`.
-struct jsonrpc_method_constraint_value
-{
-    std::string method;
-};
-
 // ---- Leaf-to-data-type map ------------------------------------------------
 
 /// Trait: the runtime captured-value type associated with leaf tag @a Tag.
@@ -157,8 +148,6 @@ template <> struct data_of<version_lt_constraint>    { using type = version_cons
 template <> struct data_of<version_le_constraint>    { using type = version_constraint_value; };
 template <> struct data_of<version_gt_constraint>    { using type = version_constraint_value; };
 template <> struct data_of<version_ge_constraint>    { using type = version_constraint_value; };
-template <> struct data_of<jsonrpc_method_eq_constraint> { using type = jsonrpc_method_constraint_value; };
-template <> struct data_of<jsonrpc_method_ne_constraint> { using type = jsonrpc_method_constraint_value; };
 
 template <typename Tag> using data_of_t = typename data_of<Tag>::type;
 

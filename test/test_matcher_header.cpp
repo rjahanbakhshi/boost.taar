@@ -27,15 +27,15 @@ BOOST_AUTO_TEST_CASE(test_matcher_header)
     req.set("example", "Example Value");
     context ctx;
 
-    BOOST_TEST((header(field::host) == "example.com")(req, ctx, {}, {}, {}));
-    BOOST_TEST((header("host") == "example.com")(req, ctx, {}, {}, {}));
-    BOOST_TEST((exist(header(field::user_agent)))(req, ctx, {}, {}, {}));
-    BOOST_TEST((header(field::user_agent) == BOOST_BEAST_VERSION_STRING)(req, ctx, {}, {}, {}));
-    BOOST_TEST((exist(header("example")))(req, ctx, {}, {}, {}));
-    BOOST_TEST((header("example") == "Example Value")(req, ctx, {}, {}, {}));
-    BOOST_TEST(!(header("example") == "example value")(req, ctx, {}, {}, {}));
-    BOOST_TEST((!exist(header("not_exists")))(req, ctx, {}, {}, {}));
-    BOOST_TEST((header("not_exists") == "")(req, ctx, {}, {}, {}));
+    BOOST_TEST((header(field::host) == "example.com")(req, ctx, {}, {}));
+    BOOST_TEST((header("host") == "example.com")(req, ctx, {}, {}));
+    BOOST_TEST((exist(header(field::user_agent)))(req, ctx, {}, {}));
+    BOOST_TEST((header(field::user_agent) == BOOST_BEAST_VERSION_STRING)(req, ctx, {}, {}));
+    BOOST_TEST((exist(header("example")))(req, ctx, {}, {}));
+    BOOST_TEST((header("example") == "Example Value")(req, ctx, {}, {}));
+    BOOST_TEST(!(header("example") == "example value")(req, ctx, {}, {}));
+    BOOST_TEST((!exist(header("not_exists")))(req, ctx, {}, {}));
+    BOOST_TEST((header("not_exists") == "")(req, ctx, {}, {}));
 }
 
 } // namespace

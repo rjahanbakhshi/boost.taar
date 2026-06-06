@@ -25,23 +25,23 @@ BOOST_AUTO_TEST_CASE(test_matcher_version)
     http::request<http::string_body> req{http::verb::get, "", 10};
     context ctx;
 
-    BOOST_TEST((version == 10)(req, ctx, {}, {}, {}));
-    BOOST_TEST((10 == version)(req, ctx, {}, {}, {}));
-    BOOST_TEST(!(10 != version)(req, ctx, {}, {}, {}));
-    BOOST_TEST(!(version > 10)(req, ctx, {}, {}, {}));
-    BOOST_TEST(!(10 > version)(req, ctx, {}, {}, {}));
-    BOOST_TEST((version > 9)(req, ctx, {}, {}, {}));
-    BOOST_TEST(!(9 > version)(req, ctx, {}, {}, {}));
-    BOOST_TEST(!(version < 10)(req, ctx, {}, {}, {}));
-    BOOST_TEST(!(10 < version)(req, ctx, {}, {}, {}));
-    BOOST_TEST((version < 11)(req, ctx, {}, {}, {}));
-    BOOST_TEST(!(11 < version)(req, ctx, {}, {}, {}));
-    BOOST_TEST((11 >= version)(req, ctx, {}, {}, {}));
-    BOOST_TEST(!(9 >= version)(req, ctx, {}, {}, {}));
-    BOOST_TEST((10 >= version)(req, ctx, {}, {}, {}));
-    BOOST_TEST((9 <= version)(req, ctx, {}, {}, {}));
-    BOOST_TEST((10 <= version)(req, ctx, {}, {}, {}));
-    BOOST_TEST(!(11 <= version)(req, ctx, {}, {}, {}));
+    BOOST_TEST((version == 10)(req, ctx, {}, {}));
+    BOOST_TEST((10 == version)(req, ctx, {}, {}));
+    BOOST_TEST(!(10 != version)(req, ctx, {}, {}));
+    BOOST_TEST(!(version > 10)(req, ctx, {}, {}));
+    BOOST_TEST(!(10 > version)(req, ctx, {}, {}));
+    BOOST_TEST((version > 9)(req, ctx, {}, {}));
+    BOOST_TEST(!(9 > version)(req, ctx, {}, {}));
+    BOOST_TEST(!(version < 10)(req, ctx, {}, {}));
+    BOOST_TEST(!(10 < version)(req, ctx, {}, {}));
+    BOOST_TEST((version < 11)(req, ctx, {}, {}));
+    BOOST_TEST(!(11 < version)(req, ctx, {}, {}));
+    BOOST_TEST((11 >= version)(req, ctx, {}, {}));
+    BOOST_TEST(!(9 >= version)(req, ctx, {}, {}));
+    BOOST_TEST((10 >= version)(req, ctx, {}, {}));
+    BOOST_TEST((9 <= version)(req, ctx, {}, {}));
+    BOOST_TEST((10 <= version)(req, ctx, {}, {}));
+    BOOST_TEST(!(11 <= version)(req, ctx, {}, {}));
 }
 
 } // namespace
