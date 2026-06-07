@@ -1,0 +1,187 @@
+//
+// Copyright (c) 2022-2024 Reza Jahanbakhshi (reza dot jahanbakhshi at gmail dot com)
+//
+// Distributed under the Boost Software License, Version 1.0. (See accompanying
+// file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
+//
+// Official repository: https://github.com/rjahanbakhshi/boost-taar
+//
+
+#ifndef BOOST_TAAR_HANDLER_CONTEXT_INJECT_HPP
+#define BOOST_TAAR_HANDLER_CONTEXT_INJECT_HPP
+
+#include <boost/taar/type_traits/callable.hpp>
+#include <boost/beast/http/message.hpp>
+#include <cstddef>
+#include <memory>
+#include <tuple>
+#include <type_traits>
+
+namespace boost::taar::handler {
+
+/** The set of contexts in scope for a handler invocation.
+
+    Each element is a `std::shared_ptr` to one context object. The session
+    supplies the per-connection context; wrappers such as `with_session`
+    append keyed contexts; `jsonrpc::endpoint` and `mcp::endpoint` forward
+    whatever they received. Handlers never see this tuple directly: the
+    injection machinery below picks elements out of it by type.
+
+    @tparam Context The context types in scope, in any order.
+*/
+template <typename... Context>
+using contexts = std::tuple<std::shared_ptr<Context>...>;
+
+namespace detail {
+
+inline constexpr std::size_t npos = static_cast<std::size_t>(-1);
+
+template <typename T> struct is_shared_ptr : std::false_type {};
+template <typename T> struct is_shared_ptr<std::shared_ptr<T>> : std::true_type {};
+
+/** The context type a callable parameter asks for, or `void`.
+
+    `C&`, `C const&`, `std::shared_ptr<C>`, and `std::shared_ptr<C> const&`
+    all request `C`. Anything else (values, rvalue references, non-class
+    references) requests nothing and is treated as a regular argument.
+*/
+template <typename Param> struct requested_context { using type = void; };
+
+template <typename C> requires std::is_class_v<C>
+struct requested_context<C&> { using type = std::remove_const_t<C>; };
+
+template <typename C>
+struct requested_context<std::shared_ptr<C>> { using type = std::remove_const_t<C>; };
+
+template <typename C>
+struct requested_context<std::shared_ptr<C>&> { using type = std::remove_const_t<C>; };
+
+template <typename C>
+struct requested_context<std::shared_ptr<C> const&> { using type = std::remove_const_t<C>; };
+
+template <typename Param>
+using requested_context_t = typename requested_context<Param>::type;
+
+/// Index of `std::shared_ptr<C>` within a @ref contexts tuple, or @ref npos.
+template <typename C, typename Contexts> struct context_index;
+
+template <typename C>
+struct context_index<C, std::tuple<>>
+{
+    static constexpr std::size_t value = npos;
+};
+
+template <typename C, typename... Rest>
+struct context_index<C, std::tuple<std::shared_ptr<C>, Rest...>>
+{
+    static constexpr std::size_t value = 0;
+};
+
+template <typename C, typename Head, typename... Rest>
+struct context_index<C, std::tuple<Head, Rest...>>
+{
+private:
+    static constexpr std::size_t tail = context_index<C, std::tuple<Rest...>>::value;
+public:
+    static constexpr std::size_t value = tail == npos ? npos : 1 + tail;
+};
+
+template <typename C, typename Contexts>
+inline constexpr std::size_t context_index_v = context_index<C, Contexts>::value;
+
+/// True if @a Param requests a context type that is present in @a Contexts.
+template <typename Param, typename Contexts>
+inline constexpr bool in_scope =
+    !std::is_void_v<requested_context_t<Param>> &&
+    context_index_v<requested_context_t<Param>, Contexts> != npos;
+
+/// True if @a T is a Beast HTTP request message (any body, any fields).
+template <typename T> struct is_http_request : std::false_type {};
+template <typename Body, typename Fields>
+struct is_http_request<boost::beast::http::message<true, Body, Fields>> : std::true_type {};
+
+template <typename T>
+inline constexpr bool is_http_request_v = is_http_request<std::remove_cvref_t<T>>::value;
+
+template <typename F, std::size_t J, std::size_t N>
+struct request_param_index_impl
+{
+    static constexpr std::size_t value =
+        is_http_request_v<type_traits::callable_arg<F, J>>
+            ? J
+            : request_param_index_impl<F, J + 1, N>::value;
+};
+
+template <typename F, std::size_t N>
+struct request_param_index_impl<F, N, N>
+{
+    static constexpr std::size_t value = npos;
+};
+
+/** Position of the HTTP request parameter in a raw handler's signature.
+
+    Raw handlers are `(contexts..., request, matcher::context)`. Everything
+    before the request parameter is a context request and is injected by
+    type; a leading parameter whose type is not in scope is a compile-time
+    error at the point of injection.
+*/
+template <typename F>
+inline constexpr std::size_t request_param_index =
+    request_param_index_impl<F, 0, type_traits::callable_args_count<F>>::value;
+
+/** Produce the argument for a context parameter of type @a Param.
+
+    Returns the `shared_ptr` itself when the parameter is a shared_ptr, and a
+    reference to the pointee otherwise.
+*/
+template <typename Param, typename Contexts>
+decltype(auto) context_arg(Contexts const& ctxs)
+{
+    using C = requested_context_t<Param>;
+
+    static_assert(
+        !std::is_void_v<C>,
+        "A leading handler parameter is being treated as a context but its "
+        "type is not a context request (T&, T const&, or std::shared_ptr<T>). "
+        "Check that the number of argument providers matches the number of "
+        "non-context parameters of the callable.");
+
+    static_assert(
+        context_index_v<C, Contexts> != npos,
+        "A handler parameter requests a context type that is not in scope "
+        "for this handler. The session provides its connection context; "
+        "with_session adds a keyed context; jsonrpc::endpoint and "
+        "mcp::endpoint forward their template arguments. Instantiate the "
+        "session or endpoint with this context type, or wrap the handler so "
+        "that the type is in scope.");
+
+    constexpr std::size_t idx = context_index_v<C, Contexts>;
+    if constexpr (is_shared_ptr<std::remove_cvref_t<Param>>::value)
+    {
+        return std::get<idx>(ctxs);
+    }
+    else
+    {
+        return *std::get<idx>(ctxs);
+    }
+}
+
+} // namespace detail
+
+/** True if @a Handler follows the context-aware handler protocol.
+
+    Such handlers expose `request_type`, a `context_aware` constant, and an
+    `operator()(Contexts const&, request_type const&, matcher::context const&)`
+    member template. `rest`, `with_session`, `jsonrpc::endpoint::handler()`
+    and `mcp::endpoint::handler()` all produce them.
+*/
+template <typename Handler>
+concept context_aware_handler = requires
+{
+    typename std::remove_cvref_t<Handler>::request_type;
+    requires std::remove_cvref_t<Handler>::context_aware;
+};
+
+} // namespace boost::taar::handler
+
+#endif // BOOST_TAAR_HANDLER_CONTEXT_INJECT_HPP

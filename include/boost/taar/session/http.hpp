@@ -14,6 +14,7 @@
 #include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/write.hpp>
 #include <boost/beast/http/fields.hpp>
+#include <boost/taar/handler/context_inject.hpp>
 #include <boost/taar/handler/path_arg_check.hpp>
 #include <boost/taar/matcher/context.hpp>
 #include <boost/taar/matcher/operand.hpp>
@@ -83,99 +84,126 @@ concept hard_error_handler = requires
     requires std::is_invocable_v<T, std::exception_ptr>;
 };
 
-template <typename T> struct is_shared_ptr_ : std::false_type {};
-template <typename T> struct is_shared_ptr_<std::shared_ptr<T>> : std::true_type {};
+/// The contexts tuple a `basic_http<Context>` hands to its handlers:
+/// empty for `no_context`, otherwise the single connection context.
+template <typename Context>
+using contexts_for = std::conditional_t<
+    std::is_same_v<Context, no_context>,
+    handler::contexts<>,
+    handler::contexts<Context>>;
 
-// std::tuple_element<0, tuple<>> is a hard error, not SFINAE. Gate any
-// arg<0> access behind a partial specialisation that fires only when the
-// handler actually has at least one argument.
-template <typename H, std::size_t N = type_traits::callable_args_count<H>>
-struct advertises_connection_context_impl_
-{
-    static constexpr bool value = false;
-};
-
-template <typename H, std::size_t N>
-    requires (N >= 1)
-struct advertises_connection_context_impl_<H, N>
-{
-    static constexpr bool value = is_shared_ptr_<
-        std::remove_cvref_t<type_traits::callable_arg<H, 0>>>::value;
-};
-
-/** True if @a H's first parameter is a `std::shared_ptr` of *some* type.
-
-    Used to detect that a handler is opting into a connection context so the
-    session can either inject one (when the type matches) or fail with a
-    clear `static_assert` (when it does not).
- */
+// Raw handlers are `(contexts..., request, matcher::context)`. Everything
+// before the request parameter is a context request injected by type from
+// the contexts tuple.
 template <typename H>
-inline constexpr bool advertises_connection_context =
-    advertises_connection_context_impl_<H>::value;
+inline constexpr std::size_t raw_request_index = handler::detail::request_param_index<H>;
 
-template <typename H, typename Context, std::size_t N = type_traits::callable_args_count<H>>
-struct takes_connection_context_impl_
+template <typename H, typename Contexts>
+struct handler_request_type
 {
-    static constexpr bool value = false;
+    static_assert(
+        raw_request_index<H> != handler::detail::npos,
+        "A raw request handler must take an HTTP request parameter "
+        "(boost::beast::http::request<Body> const&) followed by "
+        "boost::taar::matcher::context const&. Leading context parameters "
+        "are allowed before the request.");
+    using type = std::remove_cvref_t<type_traits::callable_arg<H, raw_request_index<H>>>;
 };
 
-template <typename H, typename Context, std::size_t N>
-    requires (N >= 1)
-struct takes_connection_context_impl_<H, Context, N>
+template <handler::context_aware_handler H, typename Contexts>
+struct handler_request_type<H, Contexts>
 {
-    static constexpr bool value = std::is_same_v<
-        std::remove_cvref_t<type_traits::callable_arg<H, 0>>,
-        std::shared_ptr<Context>>;
+    using type = typename H::request_type;
 };
 
-/** True if @a H's first parameter is `std::shared_ptr<Context>` exactly.
+template <typename H, typename Contexts>
+using handler_request_t = typename handler_request_type<H, Contexts>::type;
 
-    This is the trait `register_request_handler` consults to choose between
-    the two-argument and three-argument invocation paths.
- */
-template <typename H, typename Context>
-inline constexpr bool takes_connection_context =
-    takes_connection_context_impl_<H, Context>::value;
-
-/// Invoke @a h with @a conn_ctx threaded as a leading arg when it opts in.
-template <typename H, typename Context, typename Request>
-decltype(auto) invoke_with_optional_context(
+template <typename H, typename Contexts, std::size_t... Js, typename Request>
+decltype(auto) invoke_raw_handler(
     H&& h,
-    std::shared_ptr<Context> const& conn_ctx,
+    Contexts const& ctxs,
+    std::index_sequence<Js...>,
     Request&& request,
     matcher::context const& mctx)
 {
-    if constexpr (takes_connection_context<std::remove_cvref_t<H>, Context>)
-    {
-        return std::invoke(
-            std::forward<H>(h), conn_ctx, std::forward<Request>(request), mctx);
-    }
-    else
-    {
-        return std::invoke(
-            std::forward<H>(h), std::forward<Request>(request), mctx);
-    }
+    return std::invoke(
+        std::forward<H>(h),
+        handler::detail::context_arg<
+            type_traits::callable_arg<std::remove_cvref_t<H>, Js>>(ctxs)...,
+        std::forward<Request>(request),
+        mctx);
 }
 
-/// `response_from_invoke` variant that threads @a conn_ctx when @a h opts in.
-template <typename H, typename Context, typename Request>
-decltype(auto) response_from_invoke_with_optional_context(
+/// Invoke @a h with the contexts in @a ctxs injected. Returns whatever the
+/// handler returns (a value, an awaitable, or a generator).
+template <typename H, typename Contexts, typename Request>
+decltype(auto) invoke_handler(
     H&& h,
-    std::shared_ptr<Context> const& conn_ctx,
+    Contexts const& ctxs,
     Request&& request,
     matcher::context const& mctx)
 {
-    if constexpr (takes_connection_context<std::remove_cvref_t<H>, Context>)
+    using HT = std::remove_cvref_t<H>;
+    if constexpr (handler::context_aware_handler<HT>)
     {
-        return response_from_invoke(
-            std::forward<H>(h), conn_ctx, std::forward<Request>(request), mctx);
+        return std::invoke(std::forward<H>(h), ctxs, std::forward<Request>(request), mctx);
     }
     else
     {
-        return response_from_invoke(
-            std::forward<H>(h), std::forward<Request>(request), mctx);
+        return invoke_raw_handler(
+            std::forward<H>(h), ctxs,
+            std::make_index_sequence<raw_request_index<HT>>{},
+            std::forward<Request>(request), mctx);
     }
 }
+
+template <typename H, typename Contexts, std::size_t... Js, typename Request>
+decltype(auto) response_from_invoke_raw_handler(
+    H&& h,
+    Contexts const& ctxs,
+    std::index_sequence<Js...>,
+    Request&& request,
+    matcher::context const& mctx)
+{
+    return response_from_invoke(
+        std::forward<H>(h),
+        handler::detail::context_arg<
+            type_traits::callable_arg<std::remove_cvref_t<H>, Js>>(ctxs)...,
+        std::forward<Request>(request),
+        mctx);
+}
+
+/// `response_from_invoke` with the contexts in @a ctxs injected.
+template <typename H, typename Contexts, typename Request>
+decltype(auto) response_from_invoke_handler(
+    H&& h,
+    Contexts const& ctxs,
+    Request&& request,
+    matcher::context const& mctx)
+{
+    using HT = std::remove_cvref_t<H>;
+    if constexpr (handler::context_aware_handler<HT>)
+    {
+        return response_from_invoke(
+            std::forward<H>(h), ctxs, std::forward<Request>(request), mctx);
+    }
+    else
+    {
+        return response_from_invoke_raw_handler(
+            std::forward<H>(h), ctxs,
+            std::make_index_sequence<raw_request_index<HT>>{},
+            std::forward<Request>(request), mctx);
+    }
+}
+
+/// What `invoke_handler` returns for @a H given @a Contexts.
+template <typename H, typename Contexts>
+using handler_result_t = decltype(invoke_handler(
+    std::declval<H&>(),
+    std::declval<Contexts const&>(),
+    std::declval<handler_request_t<H, Contexts> const&>(),
+    std::declval<matcher::context const&>()));
 
 template <typename StreamType>
 auto async_write(
@@ -450,7 +478,7 @@ private:
             boost::beast::flat_buffer&,
             boost::beast::http::request_parser<boost::beast::http::buffer_body>&,
             cancellation_signals&,
-            std::shared_ptr<Context> const&)>;
+            detail::contexts_for<Context> const&)>;
 
     struct matcher_handler_type
     {
@@ -548,14 +576,11 @@ public:
 
         // Per-connection context. Created once on accept and carried
         // across every keep-alive request on this connection. For the
-        // `no_context` specialisation the pointer stays empty and the
-        // dispatcher's `takes_connection_context` check never selects the
-        // context-aware branch, so behaviour is identical to a session
-        // with no context plumbing.
-        std::shared_ptr<Context> conn_ctx;
+        // `no_context` specialisation the tuple is empty.
+        detail::contexts_for<Context> conn_ctx;
         if constexpr (!std::is_same_v<Context, no_context>)
         {
-            conn_ctx = std::make_shared<Context>();
+            std::get<0>(conn_ctx) = std::make_shared<Context>();
         }
 
         try
@@ -757,18 +782,6 @@ public:
         // the handler does not expose path_arg_names().
         handler::validate_path_args_against_target(operand, request_handler);
 
-        // If the handler opts into a connection context, the type must
-        // match the session's. Diagnose early with a clear message.
-        if constexpr (detail::advertises_connection_context<RequestHandler>)
-        {
-            static_assert(
-                detail::takes_connection_context<RequestHandler, Context>,
-                "Handler advertises a std::shared_ptr<...> first parameter "
-                "whose type does not match the session's Context. Either "
-                "switch the handler to use the session's context type or "
-                "instantiate basic_http<> with the handler's context type.");
-        }
-
         needs_parsed_target_ |= decltype(operand)::with_parsed_target;
         needs_parsed_cookies_ |= decltype(operand)::with_parsed_cookies;
 
@@ -787,18 +800,13 @@ public:
                 boost::beast::flat_buffer& buffer,
                 boost::beast::http::request_parser<boost::beast::http::buffer_body>& header_parser,
                 cancellation_signals& signals,
-                std::shared_ptr<Context> const& conn_ctx) mutable
+                detail::contexts_for<Context> const& conn_ctx) mutable
             -> awaitable<bool>
             {
-                // The body type is read from whichever of the user
-                // handler's parameters carries the request: with a
-                // connection context that's index 1, otherwise index 0.
-                constexpr std::size_t request_index =
-                    detail::takes_connection_context<RequestHandler, Context> ? 1 : 0;
-                using request_type = std::remove_cvref_t<
-                    type_traits::callable_arg<RequestHandler, request_index>>;
+                using contexts_type = detail::contexts_for<Context>;
+                using request_type = detail::handler_request_t<RequestHandler, contexts_type>;
                 using body_type = request_type::body_type;
-                using result_type = type_traits::callable_result<RequestHandler>;
+                using result_type = detail::handler_result_t<RequestHandler, contexts_type>;
 
                 http::request_parser<body_type> body_parser {std::move(header_parser)};
                 body_parser.body_limit(request_body_limit_);
@@ -834,7 +842,7 @@ public:
                     if constexpr (is_chunked_response<result_type>)
                     {
                         // Sync handler returning chunked_response<T>
-                        auto generator = detail::invoke_with_optional_context(
+                        auto generator = detail::invoke_handler(
                             std::move(request_handler),
                             conn_ctx,
                             body_parser.get(),
@@ -845,7 +853,7 @@ public:
                     else if constexpr (is_async_generator<result_type>)
                     {
                         // Sync handler returning async_generator<T>
-                        auto generator = detail::invoke_with_optional_context(
+                        auto generator = detail::invoke_handler(
                             std::move(request_handler),
                             conn_ctx,
                             body_parser.get(),
@@ -858,7 +866,7 @@ public:
                         if constexpr (is_chunked_response<typename result_type::value_type>)
                         {
                             // Async handler returning awaitable<chunked_response<T>>
-                            auto generator = co_await detail::invoke_with_optional_context(
+                            auto generator = co_await detail::invoke_handler(
                                 std::move(request_handler),
                                 conn_ctx,
                                 body_parser.get(),
@@ -869,7 +877,7 @@ public:
                         else if constexpr (is_async_generator<typename result_type::value_type>)
                         {
                             // Async handler returning awaitable<async_generator<T>>
-                            auto generator = co_await detail::invoke_with_optional_context(
+                            auto generator = co_await detail::invoke_handler(
                                 std::move(request_handler),
                                 conn_ctx,
                                 body_parser.get(),
@@ -880,7 +888,7 @@ public:
                         else
                         {
                             // Existing awaitable path
-                            auto response = co_await detail::response_from_invoke_with_optional_context(
+                            auto response = co_await detail::response_from_invoke_handler(
                                 std::move(request_handler),
                                 conn_ctx,
                                 body_parser.get(),
@@ -894,7 +902,7 @@ public:
                     else
                     {
                         // Existing path: response_from_invoke -> async_write
-                        auto response = co_await detail::response_from_invoke_with_optional_context(
+                        auto response = co_await detail::response_from_invoke_handler(
                             std::move(request_handler),
                             conn_ctx,
                             body_parser.get(),
@@ -1007,7 +1015,7 @@ public:
                 boost::beast::flat_buffer& buffer,
                 boost::beast::http::request_parser<boost::beast::http::buffer_body>& header_parser,
                 cancellation_signals& signals,
-                std::shared_ptr<Context> const& /*conn_ctx*/) mutable
+                detail::contexts_for<Context> const& /*conn_ctx*/) mutable
             -> awaitable<bool>
             {
                 // Move the parsed header into a request<empty_body>. The raw

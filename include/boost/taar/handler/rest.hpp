@@ -10,6 +10,7 @@
 #ifndef BOOST_TAAR_HANDLER_REST_HPP
 #define BOOST_TAAR_HANDLER_REST_HPP
 
+#include <boost/taar/handler/context_inject.hpp>
 #include <boost/taar/handler/rest_arg.hpp>
 #include <boost/taar/matcher/context.hpp>
 #include <boost/taar/core/member_function_of.hpp>
@@ -25,7 +26,6 @@
 #include <boost/beast/http/field.hpp>
 #include <boost/beast/http/string_body.hpp>
 #include <boost/beast/http/message.hpp>
-#include <memory>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -68,51 +68,7 @@ struct common_requests_type<>
 template <typename... T>
 using common_requests_type_t = typename common_requests_type<T...>::type;
 
-template <typename T> struct is_shared_ptr_ : std::false_type {};
-template <typename T> struct is_shared_ptr_<std::shared_ptr<T>> : std::true_type {};
-
-// std::tuple_element<0, tuple<>> is a hard error, not SFINAE, so we
-// can't query arg<0> directly inside a concept for a zero-arg
-// callable. Gate the arg<0> access behind a partial specialisation
-// that's only instantiated when the callable actually has at least
-// one argument.
-template <typename CallableType, std::size_t N = type_traits::callable_args_count<CallableType>>
-struct takes_leading_shared_ptr_impl_
-{
-    static constexpr bool value = false;
-};
-
-template <typename CallableType, std::size_t N>
-    requires (N >= 1)
-struct takes_leading_shared_ptr_impl_<CallableType, N>
-{
-    static constexpr bool value = is_shared_ptr_<
-        std::remove_cvref_t<type_traits::callable_arg<CallableType, 0>>>::value;
-};
-
-/// True if @a CallableType's first parameter is a `std::shared_ptr<...>`.
-///
-/// `rest_for_callable` consults this to decide whether to build a
-/// context-aware handler. The element type of that shared_ptr is the
-/// per-connection context the handler expects.
-template <typename CallableType>
-inline constexpr bool takes_leading_shared_ptr =
-    takes_leading_shared_ptr_impl_<CallableType>::value;
-
-template <typename CallableType>
-struct leading_context_type
-{
-    using type = typename std::remove_cvref_t<
-        type_traits::callable_arg<CallableType, 0>>::element_type;
-};
-
-template <typename CallableType>
-using leading_context_t = typename leading_context_type<CallableType>::type;
-
-/// True if @a T is a `path_arg` or a `with_default<path_arg, …>`.
-/// Phrased as a concept so the conjunction short-circuits at constraint
-/// evaluation: types that are not `with_default` specialisations never
-/// hit `typename T::arg_provider_type`.
+/// True if @a T is a `path_arg` or a `with_default<path_arg, ...>`.
 template <typename T>
 concept is_path_arg_provider =
     std::is_same_v<std::remove_cvref_t<T>, path_arg> ||
@@ -139,122 +95,82 @@ auto collect_path_arg_names(ProvidersTupleType const& providers)
     return result;
 }
 
+// The first `ContextCount` parameters of the callable must each request a
+// context (T&, T const&, shared_ptr<T>). Checked at rest() so the error
+// points at the registration site, not at the first request.
+template <typename CallableType, std::size_t... CtxIs>
+constexpr bool leading_params_are_contexts(std::index_sequence<CtxIs...>)
+{
+    return (!std::is_void_v<requested_context_t<type_traits::callable_arg<CallableType, CtxIs>>> && ...);
+}
+
+// The awaitable a handler produces, computed from the callable's own
+// parameter types so that no declaration depends on the contexts tuple
+// (context lookup failures must stay inside the call operator's body,
+// where they are real errors, not inside overload resolution).
+template <typename Callable, typename... Bound, std::size_t... Js>
+auto rest_result_type_helper(std::index_sequence<Js...>)
+    -> decltype(response_from_invoke(
+        std::declval<Bound&>()...,
+        std::declval<type_traits::callable_arg<Callable, Js>>()...));
+
 template <
     typename CallableType,
     typename ProvidersTupleType,
     typename RequestType,
-    typename IndexSeq>
+    typename CtxSeq,
+    typename ArgSeq>
 struct rest_handler;
 
 template <
     typename CallableType,
     typename ProvidersTupleType,
     typename RequestType,
-    std::size_t... Indexes>
-struct rest_handler<CallableType, ProvidersTupleType, RequestType, std::index_sequence<Indexes...>>
+    std::size_t... CtxIs,
+    std::size_t... ArgIs>
+struct rest_handler<
+    CallableType,
+    ProvidersTupleType,
+    RequestType,
+    std::index_sequence<CtxIs...>,
+    std::index_sequence<ArgIs...>>
 {
-    // Storage decays function types to function pointers. Introspection
-    // (`callable_arg`) uses the original type so a free function and its
-    // pointer report the same arguments.
+    static constexpr bool context_aware = true;
+    static constexpr std::size_t context_count = sizeof...(CtxIs);
+
+    using request_type = RequestType;
     using callable_storage = std::decay_t<CallableType>;
+    using result_type = decltype(rest_result_type_helper<CallableType, callable_storage>(
+        std::make_index_sequence<context_count + sizeof...(ArgIs)>{}));
 
     callable_storage callable_;
     ProvidersTupleType arg_providers_tuple_;
 
-    auto operator()(RequestType const& request, matcher::context const& context)
-        -> decltype(response_from_invoke(
-            std::declval<callable_storage&>(),
-            get_rest_arg<
-                type_traits::callable_arg<CallableType, Indexes>,
-                std::tuple_element_t<Indexes, ProvidersTupleType>
-            >(
-                std::declval<std::tuple_element_t<Indexes, ProvidersTupleType>&>(),
-                Indexes,
-                request,
-                context)...))
-    {
-        co_return co_await response_from_invoke(
-            callable_,
-            get_rest_arg<
-                type_traits::callable_arg<CallableType, Indexes>,
-                std::tuple_element_t<Indexes, ProvidersTupleType>
-            >(std::get<Indexes>(arg_providers_tuple_), Indexes, request, context)...
-        );
-    }
-
-    /// Names of every `path_arg` (and `with_default<path_arg, …>`) provider
-    /// declared on this handler, in declaration order. Used by the
-    /// registration-time cross-check against the matcher's target template.
-    auto path_arg_names() const -> std::vector<std::string>
-    {
-        return collect_path_arg_names(arg_providers_tuple_);
-    }
-};
-
-/** rest_handler variant that injects a per-connection context.
-
-    Built when the user callable's first parameter is
-    `std::shared_ptr<Context>`. The struct's call operator accepts that
-    pointer ahead of the parsed request and forwards it as the first
-    argument to the inner callable; the remaining arguments are still
-    drawn from the providers tuple at index 1..N.
-
-    The session's @ref boost::taar::session::basic_http calls the
-    three-argument `operator()` only when its own `Context` template
-    parameter matches @a Context — the same `takes_connection_context`
-    concept it uses to detect plain raw-callable handlers picks up this
-    overload.
- */
-template <
-    typename Context,
-    typename CallableType,
-    typename ProvidersTupleType,
-    typename RequestType,
-    typename IndexSeq>
-struct rest_handler_with_context;
-
-template <
-    typename Context,
-    typename CallableType,
-    typename ProvidersTupleType,
-    typename RequestType,
-    std::size_t... Indexes>
-struct rest_handler_with_context<Context, CallableType, ProvidersTupleType, RequestType, std::index_sequence<Indexes...>>
-{
-    using callable_storage = std::decay_t<CallableType>;
-
-    callable_storage callable_;
-    ProvidersTupleType arg_providers_tuple_;
-
-    // The first argument of the wrapped callable is the connection
-    // context, so providers correspond to callable arguments at index
-    // Indexes + 1.
-    auto operator()(
-        std::shared_ptr<Context> const& conn_ctx,
-        RequestType const& request,
+    template <typename Contexts>
+    result_type operator()(
+        Contexts const& ctxs,
+        request_type const& request,
         matcher::context const& context)
-        -> decltype(response_from_invoke(
-            std::declval<callable_storage&>(),
-            std::declval<std::shared_ptr<Context> const&>(),
-            get_rest_arg<
-                type_traits::callable_arg<CallableType, Indexes + 1>,
-                std::tuple_element_t<Indexes, ProvidersTupleType>
-            >(
-                std::declval<std::tuple_element_t<Indexes, ProvidersTupleType>&>(),
-                Indexes,
-                request,
-                context)...))
     {
         co_return co_await response_from_invoke(
             callable_,
-            conn_ctx,
+            context_arg<type_traits::callable_arg<CallableType, CtxIs>>(ctxs)...,
             get_rest_arg<
-                type_traits::callable_arg<CallableType, Indexes + 1>,
-                std::tuple_element_t<Indexes, ProvidersTupleType>
-            >(std::get<Indexes>(arg_providers_tuple_), Indexes, request, context)...
-        );
+                type_traits::callable_arg<CallableType, context_count + ArgIs>,
+                std::tuple_element_t<ArgIs, ProvidersTupleType>
+            >(std::get<ArgIs>(arg_providers_tuple_), ArgIs, request, context)...);
     }
 
+    /// Invoke with no contexts in scope. Convenient for unit tests and for
+    /// handlers whose callable takes no context parameters.
+    result_type operator()(request_type const& request, matcher::context const& context)
+        requires (context_count == 0)
+    {
+        return (*this)(contexts<>{}, request, context);
+    }
+
+    /// Names of every `path_arg` (and `with_default<path_arg, ...>`) provider
+    /// declared on this handler, in declaration order.
     auto path_arg_names() const -> std::vector<std::string>
     {
         return collect_path_arg_names(arg_providers_tuple_);
@@ -266,7 +182,8 @@ template <
     typename ObjectType,
     typename ProvidersTupleType,
     typename RequestType,
-    typename IndexSeq>
+    typename CtxSeq,
+    typename ArgSeq>
 struct rest_memfn_handler;
 
 template <
@@ -274,90 +191,48 @@ template <
     typename ObjectType,
     typename ProvidersTupleType,
     typename RequestType,
-    std::size_t... Indexes>
-struct rest_memfn_handler<MemFnType, ObjectType, ProvidersTupleType, RequestType, std::index_sequence<Indexes...>>
+    std::size_t... CtxIs,
+    std::size_t... ArgIs>
+struct rest_memfn_handler<
+    MemFnType,
+    ObjectType,
+    ProvidersTupleType,
+    RequestType,
+    std::index_sequence<CtxIs...>,
+    std::index_sequence<ArgIs...>>
 {
+    static constexpr bool context_aware = true;
+    static constexpr std::size_t context_count = sizeof...(CtxIs);
+
+    using request_type = RequestType;
+    using memfn_type = std::remove_reference_t<MemFnType>;
+    using result_type = decltype(rest_result_type_helper<memfn_type, MemFnType, ObjectType>(
+        std::make_index_sequence<context_count + sizeof...(ArgIs)>{}));
+
     MemFnType memfn_;
     ObjectType object_;
     ProvidersTupleType arg_providers_tuple_;
 
-    auto operator()(RequestType const& request, matcher::context const& context)
-        -> decltype(response_from_invoke(
-            std::declval<MemFnType&>(),
-            std::declval<ObjectType&>(),
-            get_rest_arg<
-                type_traits::callable_arg<std::remove_reference_t<MemFnType>, Indexes>,
-                std::tuple_element_t<Indexes, ProvidersTupleType>
-            >(
-                std::declval<std::tuple_element_t<Indexes, ProvidersTupleType>&>(),
-                Indexes,
-                request,
-                context)...))
-    {
-        co_return co_await response_from_invoke(
-            memfn_,
-            object_,
-            get_rest_arg<
-                type_traits::callable_arg<std::remove_reference_t<MemFnType>, Indexes>,
-                std::tuple_element_t<Indexes, ProvidersTupleType>
-            >(std::get<Indexes>(arg_providers_tuple_), Indexes, request, context)...
-        );
-    }
-
-    auto path_arg_names() const -> std::vector<std::string>
-    {
-        return collect_path_arg_names(arg_providers_tuple_);
-    }
-};
-
-template <
-    typename Context,
-    typename MemFnType,
-    typename ObjectType,
-    typename ProvidersTupleType,
-    typename RequestType,
-    typename IndexSeq>
-struct rest_memfn_handler_with_context;
-
-template <
-    typename Context,
-    typename MemFnType,
-    typename ObjectType,
-    typename ProvidersTupleType,
-    typename RequestType,
-    std::size_t... Indexes>
-struct rest_memfn_handler_with_context<Context, MemFnType, ObjectType, ProvidersTupleType, RequestType, std::index_sequence<Indexes...>>
-{
-    MemFnType memfn_;
-    ObjectType object_;
-    ProvidersTupleType arg_providers_tuple_;
-
-    auto operator()(
-        std::shared_ptr<Context> const& conn_ctx,
-        RequestType const& request,
+    template <typename Contexts>
+    result_type operator()(
+        Contexts const& ctxs,
+        request_type const& request,
         matcher::context const& context)
-        -> decltype(response_from_invoke(
-            std::declval<MemFnType&>(),
-            std::declval<ObjectType&>(),
-            std::declval<std::shared_ptr<Context> const&>(),
-            get_rest_arg<
-                type_traits::callable_arg<std::remove_reference_t<MemFnType>, Indexes + 1>,
-                std::tuple_element_t<Indexes, ProvidersTupleType>
-            >(
-                std::declval<std::tuple_element_t<Indexes, ProvidersTupleType>&>(),
-                Indexes,
-                request,
-                context)...))
     {
         co_return co_await response_from_invoke(
             memfn_,
             object_,
-            conn_ctx,
+            context_arg<type_traits::callable_arg<memfn_type, CtxIs>>(ctxs)...,
             get_rest_arg<
-                type_traits::callable_arg<std::remove_reference_t<MemFnType>, Indexes + 1>,
-                std::tuple_element_t<Indexes, ProvidersTupleType>
-            >(std::get<Indexes>(arg_providers_tuple_), Indexes, request, context)...
-        );
+                type_traits::callable_arg<memfn_type, context_count + ArgIs>,
+                std::tuple_element_t<ArgIs, ProvidersTupleType>
+            >(std::get<ArgIs>(arg_providers_tuple_), ArgIs, request, context)...);
+    }
+
+    result_type operator()(request_type const& request, matcher::context const& context)
+        requires (context_count == 0)
+    {
+        return (*this)(contexts<>{}, request, context);
     }
 
     auto path_arg_names() const -> std::vector<std::string>
@@ -366,68 +241,49 @@ struct rest_memfn_handler_with_context<Context, MemFnType, ObjectType, Providers
     }
 };
 
-template <
-    typename CallableType,
-    std::size_t... Indexes,
-    typename... ArgProvidersType>
+template <typename CallableType, typename... ArgProvidersType>
 inline auto rest_for_callable(
     CallableType&& callable,
-    std::index_sequence<Indexes...>,
     ArgProvidersType... arg_providers)
 {
     using noref_fn_type = std::remove_cvref_t<CallableType>;
     using request_type = detail::common_requests_type_t<ArgProvidersType...>;
     using arg_providers_tuple_t = std::tuple<ArgProvidersType...>;
 
-    if constexpr (takes_leading_shared_ptr<noref_fn_type>)
-    {
-        static_assert(
-            type_traits::callable_args_count<noref_fn_type> == sizeof...(ArgProvidersType) + 1,
-            "The user callable takes a leading std::shared_ptr<Context>; "
-            "the number of REST arg providers must equal the number of "
-            "remaining callable arguments.");
+    constexpr std::size_t arg_count = type_traits::callable_args_count<noref_fn_type>;
+    constexpr std::size_t provider_count = sizeof...(ArgProvidersType);
 
-        using context_type = leading_context_t<noref_fn_type>;
+    static_assert(
+        arg_count >= provider_count,
+        "More REST argument providers than callable parameters.");
 
-        return rest_handler_with_context<
-            context_type,
-            noref_fn_type,
-            arg_providers_tuple_t,
-            request_type,
-            std::index_sequence<Indexes...>
-        >{
-            std::forward<CallableType>(callable),
-            arg_providers_tuple_t {std::move(arg_providers)...}
-        };
-    }
-    else
-    {
-        static_assert(
-            type_traits::callable_args_count<noref_fn_type> == sizeof...(ArgProvidersType),
-            "The number of REST arguments providers must be equal to number of "
-            "callable arguments.");
+    constexpr std::size_t context_count = arg_count - provider_count;
+    using ctx_seq = std::make_index_sequence<context_count>;
+    using arg_seq = std::make_index_sequence<provider_count>;
 
-        return rest_handler<
-            noref_fn_type,
-            arg_providers_tuple_t,
-            request_type,
-            std::index_sequence<Indexes...>
-        >{
-            std::forward<CallableType>(callable),
-            arg_providers_tuple_t {std::move(arg_providers)...}
-        };
-    }
+    static_assert(
+        leading_params_are_contexts<noref_fn_type>(ctx_seq{}),
+        "The number of REST argument providers must equal the number of "
+        "callable parameters, except for leading context parameters "
+        "(T&, T const&, or std::shared_ptr<T>) which are injected by the "
+        "session.");
+
+    return rest_handler<
+        noref_fn_type,
+        arg_providers_tuple_t,
+        request_type,
+        ctx_seq,
+        arg_seq
+    >{
+        std::forward<CallableType>(callable),
+        arg_providers_tuple_t {std::move(arg_providers)...}
+    };
 }
 
-template <
-    typename MemFnType,
-    typename ObjectType,
-    std::size_t... Indexes,
-    typename... ArgProvidersType>
+template <typename MemFnType, typename ObjectType, typename... ArgProvidersType>
 inline auto rest_for_memfn(
     MemFnType memfn,
     ObjectType&& object,
-    std::index_sequence<Indexes...>,
     ArgProvidersType... arg_providers)
 {
     using noref_fn_type = std::remove_cvref_t<MemFnType>;
@@ -435,48 +291,36 @@ inline auto rest_for_memfn(
     using arg_providers_tuple_t = std::tuple<ArgProvidersType...>;
     using object_storage = std::remove_cvref_t<ObjectType>;
 
-    if constexpr (takes_leading_shared_ptr<noref_fn_type>)
-    {
-        static_assert(
-            type_traits::callable_args_count<noref_fn_type> == sizeof...(ArgProvidersType) + 1,
-            "The member function takes a leading std::shared_ptr<Context>; "
-            "the number of REST arg providers must equal the number of "
-            "remaining callable arguments.");
+    constexpr std::size_t arg_count = type_traits::callable_args_count<noref_fn_type>;
+    constexpr std::size_t provider_count = sizeof...(ArgProvidersType);
 
-        using context_type = leading_context_t<noref_fn_type>;
+    static_assert(
+        arg_count >= provider_count,
+        "More REST argument providers than member function parameters.");
 
-        return rest_memfn_handler_with_context<
-            context_type,
-            MemFnType,
-            object_storage,
-            arg_providers_tuple_t,
-            request_type,
-            std::index_sequence<Indexes...>
-        >{
-            memfn,
-            std::forward<ObjectType>(object),
-            arg_providers_tuple_t {std::move(arg_providers)...}
-        };
-    }
-    else
-    {
-        static_assert(
-            type_traits::callable_args_count<noref_fn_type> == sizeof...(ArgProvidersType),
-            "The number of REST arguments providers must be equal to number of "
-            "callable arguments.");
+    constexpr std::size_t context_count = arg_count - provider_count;
+    using ctx_seq = std::make_index_sequence<context_count>;
+    using arg_seq = std::make_index_sequence<provider_count>;
 
-        return rest_memfn_handler<
-            MemFnType,
-            object_storage,
-            arg_providers_tuple_t,
-            request_type,
-            std::index_sequence<Indexes...>
-        >{
-            memfn,
-            std::forward<ObjectType>(object),
-            arg_providers_tuple_t {std::move(arg_providers)...}
-        };
-    }
+    static_assert(
+        leading_params_are_contexts<noref_fn_type>(ctx_seq{}),
+        "The number of REST argument providers must equal the number of "
+        "member function parameters, except for leading context parameters "
+        "(T&, T const&, or std::shared_ptr<T>) which are injected by the "
+        "session.");
+
+    return rest_memfn_handler<
+        MemFnType,
+        object_storage,
+        arg_providers_tuple_t,
+        request_type,
+        ctx_seq,
+        arg_seq
+    >{
+        memfn,
+        std::forward<ObjectType>(object),
+        arg_providers_tuple_t {std::move(arg_providers)...}
+    };
 }
 
 } // namespace detail
@@ -484,7 +328,7 @@ inline auto rest_for_memfn(
 /** Adapt an arbitrary callable into an HTTP request handler.
 
     `rest` wraps @a callable into a handler suitable for
-    @ref boost::taar::session::http::register_request_handler. Each
+    @ref boost::taar::session::basic_http::register_request_handler. Each
     @a arg_provider is responsible for producing one argument of @a callable
     from the incoming request:
 
@@ -495,34 +339,27 @@ inline auto rest_for_memfn(
     @li @ref string_body_arg, @ref json_body_arg, and
         @ref url_encoded_form_data_arg read and decode the request body.
 
-    The number of providers must equal the number of arguments of
-    @a callable (enforced with `static_assert`). Each provider's request
-    type is unified with the others into the request type passed to the
-    handler; the @ref boost::taar::type_traits::super_type machinery picks
-    the most specific request type all providers agree on.
+    Leading parameters of @a callable whose type is `T&`, `T const&`, or
+    `std::shared_ptr<T>` for a context type `T` in scope are injected by the
+    session instead of coming from a provider: the per-connection context of
+    a `basic_http<T>`, or a keyed context added by `with_session`. The
+    number of providers must therefore equal the number of remaining
+    parameters. Asking for a context type that is not in scope fails to
+    compile at the registration site.
 
     The return value of @a callable is converted to an HTTP response with
-    `boost::taar::response_from`, which means user-defined return types
-    work as long as they have a `tag_invoke` overload for
-    @ref boost::taar::response_from_tag.
-
-    The returned handler exposes a `path_arg_names()` accessor that lists
-    every `path_arg` (and `with_default<path_arg, …>`) provider in
-    declaration order. The session uses this list at registration time to
-    cross-check against the matcher's target template, so typos like
-    `path_arg("ud")` against `target == "/users/{id}"` fail at server
-    startup rather than at the first request.
+    `boost::taar::response_from`; user-defined return types work as long as
+    they have a `tag_invoke` overload for @ref boost::taar::response_from_tag.
 
     @code
-    using boost::taar::matcher::method;
-    using boost::taar::matcher::target;
-    namespace http  = boost::beast::http;
-    namespace taar  = boost::taar;
+    struct conn_stats { int requests = 0; };
+
+    taar::session::basic_http<conn_stats> session;
 
     session.register_request_handler(
         method == http::verb::get && target == "/users/{id}",
         taar::handler::rest(
-            [](int id) { return load_user(id); },
+            [](conn_stats& stats, int id) { ++stats.requests; return load_user(id); },
             taar::handler::path_arg("id")));
     @endcode
 */
@@ -534,7 +371,6 @@ inline decltype(auto) rest(
 {
     return detail::rest_for_callable(
         std::forward<CallableType>(callable),
-        std::index_sequence_for<ArgProvidersType...>{},
         std::move(arg_providers)...);
 }
 
@@ -549,7 +385,6 @@ inline decltype(auto) rest(
     return detail::rest_for_memfn(
         memfn,
         std::forward<ObjectType>(object),
-        std::index_sequence_for<ArgProvidersType...>{},
         std::move(arg_providers)...);
 }
 
