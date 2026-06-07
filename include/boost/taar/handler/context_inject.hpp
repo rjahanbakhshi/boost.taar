@@ -10,12 +10,16 @@
 #ifndef BOOST_TAAR_HANDLER_CONTEXT_INJECT_HPP
 #define BOOST_TAAR_HANDLER_CONTEXT_INJECT_HPP
 
+#include <boost/taar/core/response_from.hpp>
+#include <boost/taar/matcher/context.hpp>
 #include <boost/taar/type_traits/callable.hpp>
 #include <boost/beast/http/message.hpp>
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <tuple>
 #include <type_traits>
+#include <utility>
 
 namespace boost::taar::handler {
 
@@ -181,6 +185,128 @@ concept context_aware_handler = requires
     typename std::remove_cvref_t<Handler>::request_type;
     requires std::remove_cvref_t<Handler>::context_aware;
 };
+
+namespace detail {
+
+template <typename H>
+struct request_type_of_impl
+{
+    static_assert(
+        request_param_index<H> != npos,
+        "A raw request handler must take an HTTP request parameter "
+        "(boost::beast::http::request<Body> const&) followed by "
+        "boost::taar::matcher::context const&. Leading context parameters "
+        "are allowed before the request.");
+    using type = std::remove_cvref_t<type_traits::callable_arg<H, request_param_index<H>>>;
+};
+
+template <context_aware_handler H>
+struct request_type_of_impl<H>
+{
+    using type = typename std::remove_cvref_t<H>::request_type;
+};
+
+/// The HTTP request type a handler (raw or context-aware) consumes.
+template <typename H>
+using request_type_of = typename request_type_of_impl<std::remove_cvref_t<H>>::type;
+
+template <typename H, typename Contexts, std::size_t... Js, typename Request>
+decltype(auto) invoke_raw_handler(
+    H&& h,
+    Contexts const& ctxs,
+    std::index_sequence<Js...>,
+    Request&& request,
+    matcher::context const& mctx)
+{
+    return std::invoke(
+        std::forward<H>(h),
+        context_arg<type_traits::callable_arg<std::remove_cvref_t<H>, Js>>(ctxs)...,
+        std::forward<Request>(request),
+        mctx);
+}
+
+/** Invoke @a h with the contexts in @a ctxs injected.
+
+    Returns whatever the handler returns: a value, an awaitable, or a
+    generator. Context-aware handlers receive the tuple; raw handlers get
+    their leading context parameters filled by type.
+*/
+template <typename H, typename Contexts, typename Request>
+decltype(auto) invoke_handler(
+    H&& h,
+    Contexts const& ctxs,
+    Request&& request,
+    matcher::context const& mctx)
+{
+    using HT = std::remove_cvref_t<H>;
+    if constexpr (context_aware_handler<HT>)
+    {
+        return std::invoke(std::forward<H>(h), ctxs, std::forward<Request>(request), mctx);
+    }
+    else
+    {
+        return invoke_raw_handler(
+            std::forward<H>(h), ctxs,
+            std::make_index_sequence<request_param_index<HT>>{},
+            std::forward<Request>(request), mctx);
+    }
+}
+
+template <typename H, typename Contexts, std::size_t... Js, typename Request>
+decltype(auto) response_from_invoke_raw_handler(
+    H&& h,
+    Contexts const& ctxs,
+    std::index_sequence<Js...>,
+    Request&& request,
+    matcher::context const& mctx)
+{
+    return response_from_invoke(
+        std::forward<H>(h),
+        context_arg<type_traits::callable_arg<std::remove_cvref_t<H>, Js>>(ctxs)...,
+        std::forward<Request>(request),
+        mctx);
+}
+
+/// `response_from_invoke` with the contexts in @a ctxs injected.
+template <typename H, typename Contexts, typename Request>
+decltype(auto) response_from_invoke_handler(
+    H&& h,
+    Contexts const& ctxs,
+    Request&& request,
+    matcher::context const& mctx)
+{
+    using HT = std::remove_cvref_t<H>;
+    if constexpr (context_aware_handler<HT>)
+    {
+        return response_from_invoke(
+            std::forward<H>(h), ctxs, std::forward<Request>(request), mctx);
+    }
+    else
+    {
+        return response_from_invoke_raw_handler(
+            std::forward<H>(h), ctxs,
+            std::make_index_sequence<request_param_index<HT>>{},
+            std::forward<Request>(request), mctx);
+    }
+}
+
+/// What `invoke_handler` returns for @a H given @a Contexts.
+template <typename H, typename Contexts>
+using handler_result_t = decltype(invoke_handler(
+    std::declval<H&>(),
+    std::declval<Contexts const&>(),
+    std::declval<request_type_of<H> const&>(),
+    std::declval<matcher::context const&>()));
+
+/// The response type produced by awaiting `response_from_invoke_handler`.
+template <typename H, typename Contexts>
+using handler_response_t = typename std::remove_cvref_t<decltype(response_from_invoke_handler(
+    std::declval<H&>(),
+    std::declval<Contexts const&>(),
+    std::declval<request_type_of<H> const&>(),
+    std::declval<matcher::context const&>()))>::value_type;
+
+} // namespace detail
 
 } // namespace boost::taar::handler
 

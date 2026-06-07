@@ -29,6 +29,7 @@ target_sources(
         include/boost/taar/core/chunked_response.hpp
         include/boost/taar/core/chunked_response_meta.hpp
         include/boost/taar/core/constexpr_string.hpp
+        include/boost/taar/core/context_store.hpp
         include/boost/taar/core/cookies.hpp
         include/boost/taar/core/error.hpp
         include/boost/taar/core/form_kvp.hpp
@@ -49,6 +50,8 @@ target_sources(
         include/boost/taar/handler/rest_arg.hpp
         include/boost/taar/handler/rest_arg_cast.hpp
         include/boost/taar/handler/rest_arg_cast_tag.hpp
+        include/boost/taar/handler/session_key.hpp
+        include/boost/taar/handler/with_session.hpp
         include/boost/taar/jsonrpc/envelope.hpp
         include/boost/taar/jsonrpc/error.hpp
         include/boost/taar/jsonrpc/response.hpp

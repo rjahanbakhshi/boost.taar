@@ -1,0 +1,122 @@
+//
+// Copyright (c) 2022-2024 Reza Jahanbakhshi (reza dot jahanbakhshi at gmail dot com)
+//
+// Distributed under the Boost Software License, Version 1.0. (See accompanying
+// file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
+//
+// Official repository: https://github.com/rjahanbakhshi/boost-taar
+//
+
+#ifndef BOOST_TAAR_HANDLER_SESSION_KEY_HPP
+#define BOOST_TAAR_HANDLER_SESSION_KEY_HPP
+
+#include <boost/taar/core/cookies.hpp>
+#include <boost/beast/http/field.hpp>
+#include <boost/beast/http/message.hpp>
+#include <optional>
+#include <string>
+#include <utility>
+
+namespace boost::taar::handler {
+
+/// How @ref with_session treats a request whose key is absent or unknown.
+enum class session_policy
+{
+    /// Mint a new key, create the entry, and tell the client the key in the response.
+    create_if_missing,
+    /// Reply 401 Unauthorized without running the inner handler.
+    require,
+};
+
+/** Key extractors for @ref with_session.
+
+    An extractor reads the session key out of a request and, when a key was
+    minted, writes it into the response so the client can present it next
+    time.
+*/
+namespace session_key {
+
+/** Session key carried in a cookie.
+
+    `extract` scans every `Cookie` header for @a name. `attach` adds a
+    `Set-Cookie` header with the given attributes. The default attributes
+    are `Path=/; HttpOnly; SameSite=Lax`; add `Secure` when serving over
+    TLS.
+*/
+struct cookie
+{
+    explicit cookie(
+        std::string name,
+        std::string attributes = "Path=/; HttpOnly; SameSite=Lax")
+        : name {std::move(name)}
+        , attributes {std::move(attributes)}
+    {}
+
+    std::string name;
+    std::string attributes;
+
+    std::optional<std::string> extract(
+        boost::beast::http::request_header<> const& request) const
+    {
+        cookies parsed;
+        auto r = request.equal_range(boost::beast::http::field::cookie);
+        for (; r.first != r.second; ++r.first)
+        {
+            parse_cookies(r.first->value(), parsed);
+        }
+        auto it = parsed.find(name);
+        if (it == parsed.end())
+        {
+            return std::nullopt;
+        }
+        return it->second;
+    }
+
+    template <typename Body, typename Fields>
+    void attach(
+        boost::beast::http::response<Body, Fields>& response,
+        std::string const& key) const
+    {
+        std::string value = name + "=" + key;
+        if (!attributes.empty())
+        {
+            value += "; " + attributes;
+        }
+        response.insert(boost::beast::http::field::set_cookie, value);
+    }
+};
+
+/** Session key carried in a request header, echoed in the same response header. */
+struct header
+{
+    explicit header(std::string name)
+        : name {std::move(name)}
+    {}
+
+    std::string name;
+
+    std::optional<std::string> extract(
+        boost::beast::http::request_header<> const& request) const
+    {
+        auto it = request.find(name);
+        if (it == request.end())
+        {
+            return std::nullopt;
+        }
+        return std::string {it->value()};
+    }
+
+    template <typename Body, typename Fields>
+    void attach(
+        boost::beast::http::response<Body, Fields>& response,
+        std::string const& key) const
+    {
+        response.set(name, key);
+    }
+};
+
+} // namespace session_key
+
+} // namespace boost::taar::handler
+
+#endif // BOOST_TAAR_HANDLER_SESSION_KEY_HPP

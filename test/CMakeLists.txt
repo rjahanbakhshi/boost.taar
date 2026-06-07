@@ -15,6 +15,7 @@ target_sources(
         type_traits/test_callable.cpp
         type_traits/test_super_type.cpp
         type_traits/test_specialization_of.cpp
+        e2e.hpp
         test.cpp
         test_async_generator.cpp
         test_callable_with.cpp
@@ -22,8 +23,9 @@ target_sources(
         test_chunked_response.cpp
         test_connection_context.cpp
         test_constexpr_string.cpp
+        test_context_store.cpp
         test_cookies.cpp
-        test_tcp_server.cpp
+        test_e2e_context.cpp
         test_http_session.cpp
         test_is_http_response.cpp
         test_jsonrpc.cpp
@@ -43,7 +45,9 @@ target_sources(
         test_rest_arg.cpp
         test_rest_arg_cast_builtin.cpp
         test_rest_arg_cast_user.cpp
+        test_tcp_server.cpp
         test_template_parser.cpp
+        test_with_session.cpp
         to_response.h
 )
 

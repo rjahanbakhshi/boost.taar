@@ -92,118 +92,11 @@ using contexts_for = std::conditional_t<
     handler::contexts<>,
     handler::contexts<Context>>;
 
-// Raw handlers are `(contexts..., request, matcher::context)`. Everything
-// before the request parameter is a context request injected by type from
-// the contexts tuple.
-template <typename H>
-inline constexpr std::size_t raw_request_index = handler::detail::request_param_index<H>;
+template <typename H, typename Contexts>
+using handler_request_t = handler::detail::request_type_of<H>;
 
 template <typename H, typename Contexts>
-struct handler_request_type
-{
-    static_assert(
-        raw_request_index<H> != handler::detail::npos,
-        "A raw request handler must take an HTTP request parameter "
-        "(boost::beast::http::request<Body> const&) followed by "
-        "boost::taar::matcher::context const&. Leading context parameters "
-        "are allowed before the request.");
-    using type = std::remove_cvref_t<type_traits::callable_arg<H, raw_request_index<H>>>;
-};
-
-template <handler::context_aware_handler H, typename Contexts>
-struct handler_request_type<H, Contexts>
-{
-    using type = typename H::request_type;
-};
-
-template <typename H, typename Contexts>
-using handler_request_t = typename handler_request_type<H, Contexts>::type;
-
-template <typename H, typename Contexts, std::size_t... Js, typename Request>
-decltype(auto) invoke_raw_handler(
-    H&& h,
-    Contexts const& ctxs,
-    std::index_sequence<Js...>,
-    Request&& request,
-    matcher::context const& mctx)
-{
-    return std::invoke(
-        std::forward<H>(h),
-        handler::detail::context_arg<
-            type_traits::callable_arg<std::remove_cvref_t<H>, Js>>(ctxs)...,
-        std::forward<Request>(request),
-        mctx);
-}
-
-/// Invoke @a h with the contexts in @a ctxs injected. Returns whatever the
-/// handler returns (a value, an awaitable, or a generator).
-template <typename H, typename Contexts, typename Request>
-decltype(auto) invoke_handler(
-    H&& h,
-    Contexts const& ctxs,
-    Request&& request,
-    matcher::context const& mctx)
-{
-    using HT = std::remove_cvref_t<H>;
-    if constexpr (handler::context_aware_handler<HT>)
-    {
-        return std::invoke(std::forward<H>(h), ctxs, std::forward<Request>(request), mctx);
-    }
-    else
-    {
-        return invoke_raw_handler(
-            std::forward<H>(h), ctxs,
-            std::make_index_sequence<raw_request_index<HT>>{},
-            std::forward<Request>(request), mctx);
-    }
-}
-
-template <typename H, typename Contexts, std::size_t... Js, typename Request>
-decltype(auto) response_from_invoke_raw_handler(
-    H&& h,
-    Contexts const& ctxs,
-    std::index_sequence<Js...>,
-    Request&& request,
-    matcher::context const& mctx)
-{
-    return response_from_invoke(
-        std::forward<H>(h),
-        handler::detail::context_arg<
-            type_traits::callable_arg<std::remove_cvref_t<H>, Js>>(ctxs)...,
-        std::forward<Request>(request),
-        mctx);
-}
-
-/// `response_from_invoke` with the contexts in @a ctxs injected.
-template <typename H, typename Contexts, typename Request>
-decltype(auto) response_from_invoke_handler(
-    H&& h,
-    Contexts const& ctxs,
-    Request&& request,
-    matcher::context const& mctx)
-{
-    using HT = std::remove_cvref_t<H>;
-    if constexpr (handler::context_aware_handler<HT>)
-    {
-        return response_from_invoke(
-            std::forward<H>(h), ctxs, std::forward<Request>(request), mctx);
-    }
-    else
-    {
-        return response_from_invoke_raw_handler(
-            std::forward<H>(h), ctxs,
-            std::make_index_sequence<raw_request_index<HT>>{},
-            std::forward<Request>(request), mctx);
-    }
-}
-
-/// What `invoke_handler` returns for @a H given @a Contexts.
-template <typename H, typename Contexts>
-using handler_result_t = decltype(invoke_handler(
-    std::declval<H&>(),
-    std::declval<Contexts const&>(),
-    std::declval<handler_request_t<H, Contexts> const&>(),
-    std::declval<matcher::context const&>()));
+using handler_result_t = handler::detail::handler_result_t<H, Contexts>;
 
 template <typename StreamType>
 auto async_write(
@@ -842,7 +735,7 @@ public:
                     if constexpr (is_chunked_response<result_type>)
                     {
                         // Sync handler returning chunked_response<T>
-                        auto generator = detail::invoke_handler(
+                        auto generator = handler::detail::invoke_handler(
                             std::move(request_handler),
                             conn_ctx,
                             body_parser.get(),
@@ -853,7 +746,7 @@ public:
                     else if constexpr (is_async_generator<result_type>)
                     {
                         // Sync handler returning async_generator<T>
-                        auto generator = detail::invoke_handler(
+                        auto generator = handler::detail::invoke_handler(
                             std::move(request_handler),
                             conn_ctx,
                             body_parser.get(),
@@ -866,7 +759,7 @@ public:
                         if constexpr (is_chunked_response<typename result_type::value_type>)
                         {
                             // Async handler returning awaitable<chunked_response<T>>
-                            auto generator = co_await detail::invoke_handler(
+                            auto generator = co_await handler::detail::invoke_handler(
                                 std::move(request_handler),
                                 conn_ctx,
                                 body_parser.get(),
@@ -877,7 +770,7 @@ public:
                         else if constexpr (is_async_generator<typename result_type::value_type>)
                         {
                             // Async handler returning awaitable<async_generator<T>>
-                            auto generator = co_await detail::invoke_handler(
+                            auto generator = co_await handler::detail::invoke_handler(
                                 std::move(request_handler),
                                 conn_ctx,
                                 body_parser.get(),
@@ -888,7 +781,7 @@ public:
                         else
                         {
                             // Existing awaitable path
-                            auto response = co_await detail::response_from_invoke_handler(
+                            auto response = co_await handler::detail::response_from_invoke_handler(
                                 std::move(request_handler),
                                 conn_ctx,
                                 body_parser.get(),
@@ -902,7 +795,7 @@ public:
                     else
                     {
                         // Existing path: response_from_invoke -> async_write
-                        auto response = co_await detail::response_from_invoke_handler(
+                        auto response = co_await handler::detail::response_from_invoke_handler(
                             std::move(request_handler),
                             conn_ctx,
                             body_parser.get(),
