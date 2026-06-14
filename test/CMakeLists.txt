@@ -26,9 +26,11 @@ target_sources(
         test_context_store.cpp
         test_cookies.cpp
         test_e2e_context.cpp
+        test_e2e_jsonrpc.cpp
         test_http_session.cpp
         test_is_http_response.cpp
         test_jsonrpc.cpp
+        test_jsonrpc_endpoint.cpp
         test_matcher_cookie.cpp
         test_matcher_header.cpp
         test_matcher_metadata.cpp

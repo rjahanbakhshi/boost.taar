@@ -38,6 +38,7 @@ target_sources(
         include/boost/taar/core/is_awaitable.hpp
         include/boost/taar/core/is_chunked_response.hpp
         include/boost/taar/core/is_http_response.hpp
+        include/boost/taar/core/json_schema.hpp
         include/boost/taar/core/member_function_of.hpp
         include/boost/taar/core/rebind_executor.hpp
         include/boost/taar/core/response_builder.hpp
@@ -52,6 +53,8 @@ target_sources(
         include/boost/taar/handler/rest_arg_cast_tag.hpp
         include/boost/taar/handler/session_key.hpp
         include/boost/taar/handler/with_session.hpp
+        include/boost/taar/jsonrpc/arg.hpp
+        include/boost/taar/jsonrpc/endpoint.hpp
         include/boost/taar/jsonrpc/envelope.hpp
         include/boost/taar/jsonrpc/error.hpp
         include/boost/taar/jsonrpc/response.hpp
