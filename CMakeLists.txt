@@ -54,6 +54,7 @@ target_sources(
         include/boost/taar/handler/session_key.hpp
         include/boost/taar/handler/with_session.hpp
         include/boost/taar/jsonrpc/arg.hpp
+        include/boost/taar/jsonrpc/bind.hpp
         include/boost/taar/jsonrpc/endpoint.hpp
         include/boost/taar/jsonrpc/envelope.hpp
         include/boost/taar/jsonrpc/error.hpp
