@@ -20,6 +20,8 @@
 #include <boost/beast/http/message.hpp>
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/string_body.hpp>
+#include <boost/json/array.hpp>
+#include <boost/json/object.hpp>
 #include <boost/json/serialize.hpp>
 #include <boost/json/value.hpp>
 #include <span>
@@ -115,6 +117,30 @@ inline auto tag_invoke(
 inline auto tag_invoke(
     response_from_built_in_tag<boost::json::value>,
     boost::json::value const& value)
+{
+    namespace http = boost::beast::http;
+    http::response<http::string_body> response {http::status::ok, 11};
+    response.set(boost::beast::http::field::content_type, "application/json");
+    response.body() = boost::json::serialize(value);
+    response.prepare_payload();
+    return response;
+}
+
+inline auto tag_invoke(
+    response_from_built_in_tag<boost::json::object>,
+    boost::json::object const& value)
+{
+    namespace http = boost::beast::http;
+    http::response<http::string_body> response {http::status::ok, 11};
+    response.set(boost::beast::http::field::content_type, "application/json");
+    response.body() = boost::json::serialize(value);
+    response.prepare_payload();
+    return response;
+}
+
+inline auto tag_invoke(
+    response_from_built_in_tag<boost::json::array>,
+    boost::json::array const& value)
 {
     namespace http = boost::beast::http;
     http::response<http::string_body> response {http::status::ok, 11};

@@ -26,6 +26,7 @@
 #include <string>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace boost::taar {
 namespace detail {
@@ -359,6 +360,38 @@ public:
             auto e = emplace(key, std::forward<Args>(args)...);
             return {std::move(key), std::move(e)};
         }
+    }
+
+    /** Look up @a key without refreshing its activity or sweeping.
+
+        For server-initiated work (pushing a notification to a session)
+        that must not keep an otherwise idle entry alive. Expired entries
+        are reported as unknown.
+    */
+    entry_ptr peek(Key const& key) const
+    {
+        auto const now = now_();
+        std::lock_guard<std::mutex> const g {mutex_};
+        auto it = entries_.find(key);
+        if (it == entries_.end() || expired(*it->second, now))
+        {
+            return nullptr;
+        }
+        return it->second;
+    }
+
+    /// Keys of all live entries, in no particular order.
+    std::vector<Key> keys() const
+    {
+        auto const now = now_();
+        std::lock_guard<std::mutex> const g {mutex_};
+        std::vector<Key> out;
+        out.reserve(entries_.size());
+        for (auto const& [k, e] : entries_)
+        {
+            if (!expired(*e, now)) out.push_back(k);
+        }
+        return out;
     }
 
     /// Remove @a key. Returns true if an entry was removed.

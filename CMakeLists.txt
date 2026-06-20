@@ -22,6 +22,7 @@ target_sources(
     ${PROJECT_NAME}
     PUBLIC FILE_SET HEADERS BASE_DIRS include FILES
         include/boost/taar/core/async_generator.hpp
+        include/boost/taar/core/async_channel.hpp
         include/boost/taar/core/awaitable.hpp
         include/boost/taar/core/cancellation_signals.hpp
         include/boost/taar/core/chunk_body_from.hpp

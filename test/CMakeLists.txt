@@ -17,6 +17,7 @@ target_sources(
         type_traits/test_specialization_of.cpp
         e2e.hpp
         test.cpp
+        test_async_channel.cpp
         test_async_generator.cpp
         test_callable_with.cpp
         test_chunk_body_from.cpp
