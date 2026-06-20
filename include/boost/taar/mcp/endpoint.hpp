@@ -1,0 +1,939 @@
+//
+// Copyright (c) 2022-2024 Reza Jahanbakhshi (reza dot jahanbakhshi at gmail dot com)
+//
+// Distributed under the Boost Software License, Version 1.0. (See accompanying
+// file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
+//
+// Official repository: https://github.com/rjahanbakhshi/boost-taar
+//
+
+#ifndef BOOST_TAAR_MCP_ENDPOINT_HPP
+#define BOOST_TAAR_MCP_ENDPOINT_HPP
+
+#include <boost/taar/core/awaitable.hpp>
+#include <boost/taar/core/context_store.hpp>
+#include <boost/taar/core/error.hpp>
+#include <boost/taar/core/json_schema.hpp>
+#include <boost/taar/handler/context_inject.hpp>
+#include <boost/taar/jsonrpc/bind.hpp>
+#include <boost/taar/jsonrpc/endpoint.hpp>
+#include <boost/taar/jsonrpc/envelope.hpp>
+#include <boost/taar/jsonrpc/error.hpp>
+#include <boost/taar/jsonrpc/response.hpp>
+#include <boost/taar/matcher/context.hpp>
+#include <boost/taar/mcp/arg.hpp>
+#include <boost/beast/http/field.hpp>
+#include <boost/beast/http/message.hpp>
+#include <boost/beast/http/status.hpp>
+#include <boost/beast/http/string_body.hpp>
+#include <boost/beast/http/verb.hpp>
+#include <boost/json/array.hpp>
+#include <boost/json/object.hpp>
+#include <boost/json/parse.hpp>
+#include <boost/json/serialize.hpp>
+#include <boost/json/value.hpp>
+#include <boost/system/system_error.hpp>
+#include <array>
+#include <chrono>
+#include <exception>
+#include <functional>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <tuple>
+#include <type_traits>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+namespace boost::taar::mcp {
+
+/// Session type for an endpoint without per-session state (no `Mcp-Session-Id`).
+struct stateless {};
+
+/// Static information the server reports in `initialize`, plus session options.
+struct server_info
+{
+    std::string name;
+    std::string version;
+    std::string instructions {};
+    std::chrono::steady_clock::duration session_idle_timeout = std::chrono::minutes {30};
+};
+
+/// The client's self-description from `initialize`.
+struct client_info
+{
+    std::string name;
+    std::string version;
+};
+
+/// Parsed `initialize` parameters handed to the @ref endpoint::on_initialize hook.
+struct initialize_params
+{
+    std::string protocol_version;
+    boost::json::value capabilities;
+    client_info client;
+};
+
+/// Protocol revisions this implementation can speak, newest first.
+inline constexpr std::array<std::string_view, 3> supported_protocol_versions {
+    "2025-11-25", "2025-06-18", "2025-03-26"};
+
+inline constexpr std::string_view latest_protocol_version = supported_protocol_versions[0];
+
+inline bool is_supported_protocol_version(std::string_view v) noexcept
+{
+    for (auto s : supported_protocol_versions)
+    {
+        if (s == v) return true;
+    }
+    return false;
+}
+
+/// JSON-RPC error code MCP assigns to an unknown resource URI.
+inline constexpr int resource_not_found_code = -32002;
+
+/// Registration-time description of a tool, for `tools/list`.
+struct tool_info
+{
+    std::string name;
+    std::string description;
+    std::vector<param_info> params;
+};
+
+/// Registration-time description of a resource, for `resources/list`.
+struct resource_info
+{
+    std::string uri;            ///< Fixed URI or URI template.
+    std::string mime_type;
+    std::string description;
+    bool is_template = false;
+    std::vector<param_info> params;
+};
+
+/// Maps an exception from a tool callable to the `isError` text, or `nullopt` for a protocol error.
+using tool_error_handler = std::function<std::optional<std::string>(std::exception_ptr)>;
+
+/** Default tool error mapping: argument and JSON-RPC-category failures stay
+    JSON-RPC errors; everything else becomes an `isError: true` result with
+    the exception's message as text.
+*/
+inline std::optional<std::string> default_tool_error_handler(std::exception_ptr e)
+{
+    try
+    {
+        std::rethrow_exception(e);
+    }
+    catch (boost::system::system_error const& x)
+    {
+        if (x.code().category() == taar::error_category() ||
+            x.code().category() == jsonrpc::error_category())
+        {
+            return std::nullopt;
+        }
+        return std::string {x.what()};
+    }
+    catch (std::exception const& x)
+    {
+        return std::string {x.what()};
+    }
+    catch (...)
+    {
+        return std::string {"unknown error"};
+    }
+}
+
+namespace detail {
+
+template <typename Session>
+struct session_store
+{
+    using type = context_store<std::string, Session>;
+    type store;
+    explicit session_store(std::chrono::steady_clock::duration idle) : store {idle} {}
+};
+
+template <>
+struct session_store<stateless>
+{
+    explicit session_store(std::chrono::steady_clock::duration) {}
+};
+
+inline std::string text_of(boost::json::value const& v)
+{
+    if (v.is_string()) return std::string {v.as_string()};
+    if (v.is_null()) return {};
+    return boost::json::serialize(v);
+}
+
+} // namespace detail
+
+/** An MCP (Model Context Protocol) server endpoint over Streamable HTTP.
+
+    Built on @ref jsonrpc::endpoint. Register tools and resources, then
+    register @ref handler() on a session route for `POST` (and `DELETE` in
+    stateful mode). The endpoint implements the protocol's lifecycle
+    (`initialize`, `notifications/initialized`, `ping`), discovery
+    (`tools/list`, `resources/list`, `resources/templates/list`) and the
+    `tools/call` / `resources/read` dispatch, plus the HTTP-level rules of
+    the transport (`Mcp-Session-Id`, `MCP-Protocol-Version`, `Origin`).
+    Custom JSON-RPC methods can be added through @ref rpc().
+
+    @tparam Session  Per-session state type. @ref stateless (the default)
+                     disables sessions: no `Mcp-Session-Id` header is issued
+                     or required. Any other type enables stateful mode: a
+                     session is created on `initialize`, identified by
+                     `Mcp-Session-Id`, serialised (one call at a time), and
+                     removed by `DELETE` or after the idle timeout.
+    @tparam Context  Context types forwarded from the HTTP session (the
+                     connection context, keyed contexts from wrappers).
+                     Tool and resource callables may request any of these
+                     and, in stateful mode, the `Session` type.
+
+    @code
+    taar::mcp::endpoint<calc_session, conn_stats> mcp {
+        {.name = "calc-server", .version = "1.0.0"}};
+    mcp.tool("add", "Add two integers", &add, mcp_arg("a"), mcp_arg("b"));
+    mcp.resource("calc://history/last", "text/plain", "Most recent result", &last);
+    session.register_request_handler(target == "/mcp", mcp.handler());
+    @endcode
+
+    Behaviour notes:
+    @li Protocol version: the client's requested version is echoed when
+        supported, otherwise the newest supported version is offered.
+        A request carrying an unsupported `MCP-Protocol-Version` header is
+        rejected with 400.
+    @li JSON-RPC batches are not accepted on this transport (-32600).
+    @li A JSON-RPC response or notification posted by the client is
+        acknowledged with 202 and no body.
+    @li Tool callables that throw produce an `isError: true` result; see
+        @ref set_tool_error_handler. Argument errors and unknown tools are
+        JSON-RPC errors (-32602).
+    @li `GET` (server-to-client stream) is answered 405 until streaming is
+        enabled on the endpoint.
+*/
+template <typename Session = stateless, typename... Context>
+class endpoint
+{
+public:
+    static constexpr bool stateful = !std::is_same_v<Session, stateless>;
+
+    using incoming_contexts = handler::contexts<Context...>;
+    using contexts_type = std::conditional_t<stateful,
+        handler::contexts<Context..., Session>,
+        handler::contexts<Context...>>;
+    using rpc_type = std::conditional_t<stateful,
+        jsonrpc::endpoint<Context..., Session>,
+        jsonrpc::endpoint<Context...>>;
+    using request_type = boost::beast::http::request<boost::beast::http::string_body>;
+    using response_type = boost::beast::http::response<boost::beast::http::string_body>;
+
+    explicit endpoint(server_info info)
+        : info_ {std::move(info)}
+        , sessions_ {info_.session_idle_timeout}
+    {}
+
+    endpoint(endpoint const&) = delete;
+    endpoint& operator=(endpoint const&) = delete;
+
+    /// Register a tool. Leading context parameters are injected; the rest come from @ref mcp_arg providers.
+    template <typename Callable, typename... Providers>
+    endpoint& tool(std::string name, std::string description, Callable&& callable, Providers... providers)
+    {
+        if (tools_.contains(name))
+        {
+            throw std::logic_error {"mcp::endpoint: tool already registered: " + name};
+        }
+        auto bound = jsonrpc::detail::bind_method<tool_call, contexts_type>(
+            std::forward<Callable>(callable), std::move(providers)...);
+        tool_order_.push_back(name);
+        tools_.emplace(name, tool_entry {
+            tool_info {name, std::move(description), std::move(bound.params)},
+            std::move(bound.invoke)});
+        return *this;
+    }
+
+    /// Register a resource by fixed URI or URI template (`{name}` placeholders bound with @ref uri_arg).
+    template <typename Callable, typename... Providers>
+    endpoint& resource(
+        std::string uri,
+        std::string mime_type,
+        std::string description,
+        Callable&& callable,
+        Providers... providers)
+    {
+        for (auto const& r : resources_)
+        {
+            if (r.info.uri == uri)
+            {
+                throw std::logic_error {"mcp::endpoint: resource already registered: " + uri};
+            }
+        }
+        auto bound = jsonrpc::detail::bind_method<resource_call, contexts_type>(
+            std::forward<Callable>(callable), std::move(providers)...);
+        resources_.push_back(resource_entry {
+            resource_info {uri, std::move(mime_type), std::move(description), is_uri_template(uri), std::move(bound.params)},
+            std::move(bound.invoke)});
+        return *this;
+    }
+
+    /** Hook run on every `initialize`.
+
+        In stateful mode the callable is `(Session&, initialize_params const&)`
+        and runs on the freshly created session; if it throws, the session
+        is discarded and the client receives an error. In stateless mode it
+        is `(initialize_params const&)`.
+    */
+    template <typename F>
+    endpoint& on_initialize(F f)
+    {
+        if constexpr (stateful)
+        {
+            static_assert(std::is_invocable_v<F&, Session&, initialize_params const&>,
+                "on_initialize for a stateful endpoint takes (Session&, initialize_params const&).");
+            on_initialize_ = [f = std::move(f)](contexts_type const& ctxs, initialize_params const& p) mutable
+            {
+                f(*std::get<sizeof...(Context)>(ctxs), p);
+            };
+        }
+        else
+        {
+            static_assert(std::is_invocable_v<F&, initialize_params const&>,
+                "on_initialize for a stateless endpoint takes (initialize_params const&).");
+            on_initialize_ = [f = std::move(f)](contexts_type const&, initialize_params const& p) mutable
+            {
+                f(p);
+            };
+        }
+        return *this;
+    }
+
+    /// Replace how tool exceptions are reported. See @ref default_tool_error_handler.
+    void set_tool_error_handler(tool_error_handler h)
+    {
+        tool_error_ = std::move(h);
+    }
+
+    /// Install an `Origin` validator. Requests whose `Origin` fails it get 403.
+    void set_origin_validator(std::function<bool(std::string_view)> v)
+    {
+        origin_validator_ = std::move(v);
+    }
+
+    /// The underlying JSON-RPC endpoint, for custom methods and the error mapper.
+    rpc_type& rpc() noexcept { return rpc_; }
+    rpc_type const& rpc() const noexcept { return rpc_; }
+
+    server_info const& info() const noexcept { return info_; }
+
+    std::vector<tool_info> tools() const
+    {
+        std::vector<tool_info> out;
+        for (auto const& name : tool_order_) out.push_back(tools_.at(name).info);
+        return out;
+    }
+
+    std::vector<resource_info> resources() const
+    {
+        std::vector<resource_info> out;
+        for (auto const& r : resources_) out.push_back(r.info);
+        return out;
+    }
+
+    /// Number of live sessions (stateful mode).
+    std::size_t session_count() const requires stateful
+    {
+        return sessions_.store.size();
+    }
+
+    /// Remove idle sessions now (stateful mode). Also runs opportunistically on access.
+    std::size_t sweep_sessions() requires stateful
+    {
+        return sessions_.store.sweep();
+    }
+
+    /// The HTTP handler for the MCP route (`POST`, and `DELETE` in stateful mode).
+    class handler_type
+    {
+    public:
+        static constexpr bool context_aware = true;
+        using request_type = endpoint::request_type;
+
+        explicit handler_type(endpoint* self) : self_ {self} {}
+
+        template <typename Contexts>
+        awaitable<response_type> operator()(
+            Contexts const& ctxs,
+            request_type const& request,
+            matcher::context const& mctx)
+        {
+            co_return co_await self_->handle(
+                jsonrpc::detail::select_contexts<incoming_contexts>(ctxs), request, mctx);
+        }
+
+    private:
+        endpoint* self_;
+    };
+
+    /// Returns the handler to register. The endpoint must outlive the session.
+    handler_type handler()
+    {
+        return handler_type {this};
+    }
+
+    /// Handle one HTTP request addressed to the MCP route.
+    awaitable<response_type> handle(
+        incoming_contexts const& incoming,
+        request_type const& request,
+        matcher::context const& mctx)
+    {
+        namespace http = boost::beast::http;
+
+        if (origin_validator_)
+        {
+            auto origin = request.find(http::field::origin);
+            if (origin != request.end() && !origin_validator_(origin->value()))
+            {
+                co_return plain(request, http::status::forbidden, "Origin not allowed");
+            }
+        }
+
+        switch (request.method())
+        {
+        case http::verb::post:
+            co_return co_await handle_post(incoming, request, mctx);
+
+        case http::verb::delete_:
+            if constexpr (stateful)
+            {
+                auto sid = request.find("Mcp-Session-Id");
+                if (sid == request.end())
+                {
+                    co_return plain(request, http::status::bad_request, "Missing Mcp-Session-Id");
+                }
+                if (!sessions_.store.erase(std::string {sid->value()}))
+                {
+                    co_return plain(request, http::status::not_found, "Unknown or expired session");
+                }
+                co_return plain(request, http::status::ok, "");
+            }
+            else
+            {
+                co_return method_not_allowed(request);
+            }
+
+        default:
+            co_return method_not_allowed(request);
+        }
+    }
+
+private:
+    struct tool_entry
+    {
+        tool_info info;
+        std::move_only_function<awaitable<boost::json::value>(
+            contexts_type const&, tool_call const&, matcher::context const&)> invoke;
+    };
+
+    struct resource_entry
+    {
+        resource_info info;
+        std::move_only_function<awaitable<boost::json::value>(
+            contexts_type const&, resource_call const&, matcher::context const&)> invoke;
+    };
+
+    static response_type plain(request_type const& request, boost::beast::http::status status, std::string body)
+    {
+        namespace http = boost::beast::http;
+        response_type response {status, request.version()};
+        if (!body.empty())
+        {
+            response.set(http::field::content_type, "text/plain");
+            response.body() = std::move(body);
+        }
+        response.keep_alive(request.keep_alive());
+        response.prepare_payload();
+        return response;
+    }
+
+    static response_type method_not_allowed(request_type const& request)
+    {
+        namespace http = boost::beast::http;
+        auto response = plain(request, http::status::method_not_allowed, "");
+        response.set(http::field::allow, stateful ? "POST, DELETE" : "POST");
+        return response;
+    }
+
+    static boost::json::value error_envelope(boost::json::value id, int code, std::string message)
+    {
+        return jsonrpc::make_error_response(std::move(id), code, std::move(message));
+    }
+
+    static boost::json::value error_envelope(boost::json::value id, jsonrpc::error code)
+    {
+        return jsonrpc::make_error_response(std::move(id), code, jsonrpc::message_for(code));
+    }
+
+    awaitable<response_type> handle_post(
+        incoming_contexts const& incoming,
+        request_type const& request,
+        matcher::context const& mctx)
+    {
+        namespace http = boost::beast::http;
+
+        auto version_header = request.find("MCP-Protocol-Version");
+        if (version_header != request.end() && !is_supported_protocol_version(version_header->value()))
+        {
+            co_return plain(request, http::status::bad_request, "Unsupported MCP-Protocol-Version");
+        }
+
+        boost::system::error_code ec;
+        auto body = boost::json::parse(request.body(), ec);
+        if (ec)
+        {
+            co_return rpc_type::to_http(request,
+                error_envelope(boost::json::value {nullptr}, jsonrpc::error::parse_error));
+        }
+
+        if (body.is_array())
+        {
+            co_return rpc_type::to_http(request, error_envelope(
+                boost::json::value {nullptr},
+                static_cast<int>(jsonrpc::error::invalid_request),
+                "Batch requests are not supported by this transport"));
+        }
+
+        if (auto const* obj = body.if_object();
+            obj != nullptr && !obj->contains("method") && (obj->contains("result") || obj->contains("error")))
+        {
+            // A JSON-RPC response from the client (to a server request).
+            co_return rpc_type::to_http(request, std::nullopt);
+        }
+
+        auto env = jsonrpc::parse_envelope(body);
+        if (env.has_error())
+        {
+            co_return rpc_type::to_http(request,
+                error_envelope(rpc_type::recoverable_id(body), jsonrpc::error::invalid_request));
+        }
+
+        if (env->method == "initialize")
+        {
+            co_return co_await handle_initialize(incoming, env.value(), request, mctx);
+        }
+
+        if constexpr (stateful)
+        {
+            auto sid = request.find("Mcp-Session-Id");
+            if (sid == request.end())
+            {
+                co_return plain(request, http::status::bad_request, "Missing Mcp-Session-Id");
+            }
+            auto entry = sessions_.store.find(std::string {sid->value()});
+            if (!entry)
+            {
+                co_return plain(request, http::status::not_found, "Unknown or expired session");
+            }
+            auto guard = co_await sessions_.store.lock(entry);
+            auto ctxs = std::tuple_cat(incoming, std::make_tuple(entry->context()));
+            auto out = co_await dispatch(ctxs, env.value(), request, mctx);
+            co_return rpc_type::to_http(request, std::move(out));
+        }
+        else
+        {
+            auto out = co_await dispatch(incoming, env.value(), request, mctx);
+            co_return rpc_type::to_http(request, std::move(out));
+        }
+    }
+
+    static initialize_params parse_initialize(jsonrpc::envelope const& env)
+    {
+        initialize_params p;
+        p.protocol_version = std::string {latest_protocol_version};
+        if (env.params.has_value())
+        {
+            if (auto const* obj = env.params->if_object())
+            {
+                if (auto const* v = obj->if_contains("protocolVersion"); v && v->is_string())
+                {
+                    p.protocol_version = std::string {v->as_string()};
+                }
+                if (auto const* c = obj->if_contains("capabilities"))
+                {
+                    p.capabilities = *c;
+                }
+                if (auto const* ci = obj->if_contains("clientInfo"); ci && ci->is_object())
+                {
+                    if (auto const* n = ci->as_object().if_contains("name"); n && n->is_string())
+                    {
+                        p.client.name = std::string {n->as_string()};
+                    }
+                    if (auto const* v = ci->as_object().if_contains("version"); v && v->is_string())
+                    {
+                        p.client.version = std::string {v->as_string()};
+                    }
+                }
+            }
+        }
+        return p;
+    }
+
+    boost::json::object initialize_result(std::string_view negotiated) const
+    {
+        boost::json::object capabilities;
+        capabilities["tools"] = boost::json::object {};
+        capabilities["resources"] = boost::json::object {};
+
+        boost::json::object server;
+        server["name"] = info_.name;
+        server["version"] = info_.version;
+
+        boost::json::object result;
+        result["protocolVersion"] = negotiated;
+        result["capabilities"] = std::move(capabilities);
+        result["serverInfo"] = std::move(server);
+        if (!info_.instructions.empty())
+        {
+            result["instructions"] = info_.instructions;
+        }
+        return result;
+    }
+
+    awaitable<response_type> handle_initialize(
+        incoming_contexts const& incoming,
+        jsonrpc::envelope const& env,
+        request_type const& request,
+        matcher::context const& mctx)
+    {
+        (void)mctx;
+        auto const id = env.id.value_or(boost::json::value {nullptr});
+        auto params = parse_initialize(env);
+        auto const negotiated = is_supported_protocol_version(params.protocol_version)
+            ? std::string_view {params.protocol_version}
+            : latest_protocol_version;
+
+        if constexpr (stateful)
+        {
+            auto [sid, entry] = sessions_.store.create();
+            std::exception_ptr failure;
+            {
+                auto guard = co_await sessions_.store.lock(entry);
+                if (on_initialize_)
+                {
+                    try
+                    {
+                        on_initialize_(std::tuple_cat(incoming, std::make_tuple(entry->context())), params);
+                    }
+                    catch (...)
+                    {
+                        failure = std::current_exception();
+                    }
+                }
+            }
+            if (failure)
+            {
+                sessions_.store.erase(sid);
+                auto info = rpc_.map_exception(failure);
+                co_return rpc_type::to_http(request, jsonrpc::make_error_response(
+                    id, info.code, std::move(info.message), std::move(info.data)));
+            }
+
+            std::optional<boost::json::value> out;
+            if (!jsonrpc::is_notification(env))
+            {
+                out = jsonrpc::make_response(id, initialize_result(negotiated));
+            }
+            auto response = rpc_type::to_http(request, std::move(out));
+            response.set("Mcp-Session-Id", sid);
+            co_return response;
+        }
+        else
+        {
+            if (on_initialize_)
+            {
+                try
+                {
+                    on_initialize_(incoming, params);
+                }
+                catch (...)
+                {
+                    auto info = rpc_.map_exception(std::current_exception());
+                    co_return rpc_type::to_http(request, jsonrpc::make_error_response(
+                        id, info.code, std::move(info.message), std::move(info.data)));
+                }
+            }
+            std::optional<boost::json::value> out;
+            if (!jsonrpc::is_notification(env))
+            {
+                out = jsonrpc::make_response(id, initialize_result(negotiated));
+            }
+            co_return rpc_type::to_http(request, std::move(out));
+        }
+    }
+
+    awaitable<std::optional<boost::json::value>> dispatch(
+        contexts_type const& ctxs,
+        jsonrpc::envelope const& env,
+        request_type const& request,
+        matcher::context const& mctx)
+    {
+        auto const id = env.id.value_or(boost::json::value {nullptr});
+        std::optional<boost::json::value> out;
+
+        if (env.method.starts_with("notifications/"))
+        {
+            co_return std::nullopt;
+        }
+        else if (env.method == "ping")
+        {
+            out = jsonrpc::make_response(id, boost::json::object {});
+        }
+        else if (env.method == "tools/list")
+        {
+            out = jsonrpc::make_response(id, list_tools());
+        }
+        else if (env.method == "tools/call")
+        {
+            out = co_await call_tool(ctxs, env, request, mctx);
+        }
+        else if (env.method == "resources/list")
+        {
+            out = jsonrpc::make_response(id, list_resources(false));
+        }
+        else if (env.method == "resources/templates/list")
+        {
+            out = jsonrpc::make_response(id, list_resources(true));
+        }
+        else if (env.method == "resources/read")
+        {
+            out = co_await read_resource(ctxs, env, request, mctx);
+        }
+        else
+        {
+            co_return co_await rpc_.dispatch(ctxs, env, request, mctx);
+        }
+
+        if (jsonrpc::is_notification(env)) co_return std::nullopt;
+        co_return out;
+    }
+
+    boost::json::object list_tools() const
+    {
+        boost::json::array tools;
+        for (auto const& name : tool_order_)
+        {
+            auto const& info = tools_.at(name).info;
+            boost::json::object t;
+            t["name"] = info.name;
+            t["description"] = info.description;
+            t["inputSchema"] = object_schema(info.params);
+            tools.push_back(std::move(t));
+        }
+        boost::json::object result;
+        result["tools"] = std::move(tools);
+        return result;
+    }
+
+    boost::json::object list_resources(bool templates) const
+    {
+        boost::json::array items;
+        for (auto const& r : resources_)
+        {
+            if (r.info.is_template != templates) continue;
+            boost::json::object item;
+            item[templates ? "uriTemplate" : "uri"] = r.info.uri;
+            item["name"] = r.info.uri;
+            item["mimeType"] = r.info.mime_type;
+            if (!r.info.description.empty()) item["description"] = r.info.description;
+            items.push_back(std::move(item));
+        }
+        boost::json::object result;
+        result[templates ? "resourceTemplates" : "resources"] = std::move(items);
+        return result;
+    }
+
+    static boost::json::object tool_result(boost::json::value const& v)
+    {
+        boost::json::array content;
+        if (!v.is_null())
+        {
+            boost::json::object text;
+            text["type"] = "text";
+            text["text"] = detail::text_of(v);
+            content.push_back(std::move(text));
+        }
+        boost::json::object result;
+        result["content"] = std::move(content);
+        if (v.is_object())
+        {
+            result["structuredContent"] = v;
+        }
+        else if (!v.is_null())
+        {
+            boost::json::object wrapped;
+            wrapped["result"] = v;
+            result["structuredContent"] = std::move(wrapped);
+        }
+        result["isError"] = false;
+        return result;
+    }
+
+    awaitable<boost::json::value> call_tool(
+        contexts_type const& ctxs,
+        jsonrpc::envelope const& env,
+        request_type const& request,
+        matcher::context const& mctx)
+    {
+        auto const id = env.id.value_or(boost::json::value {nullptr});
+
+        boost::json::object const* params = env.params ? env.params->if_object() : nullptr;
+        boost::json::value const* name = params ? params->if_contains("name") : nullptr;
+        if (name == nullptr || !name->is_string())
+        {
+            co_return error_envelope(id, static_cast<int>(jsonrpc::error::invalid_params), "tools/call requires params.name");
+        }
+
+        auto it = tools_.find(std::string {name->as_string()});
+        if (it == tools_.end())
+        {
+            co_return error_envelope(id, static_cast<int>(jsonrpc::error::invalid_params),
+                "Unknown tool: " + std::string {name->as_string()});
+        }
+
+        boost::json::object const empty;
+        boost::json::object const* arguments = &empty;
+        if (auto const* a = params->if_contains("arguments"))
+        {
+            if (!a->is_object())
+            {
+                co_return error_envelope(id, static_cast<int>(jsonrpc::error::invalid_params), "params.arguments must be an object");
+            }
+            arguments = &a->as_object();
+        }
+
+        std::exception_ptr failure;
+        boost::json::value value;
+        try
+        {
+            value = co_await it->second.invoke(ctxs, tool_call {env, *arguments, request}, mctx);
+        }
+        catch (...)
+        {
+            failure = std::current_exception();
+        }
+
+        if (failure)
+        {
+            if (auto text = map_tool_error(failure))
+            {
+                boost::json::object content_item;
+                content_item["type"] = "text";
+                content_item["text"] = *text;
+                boost::json::object result;
+                result["content"] = boost::json::array {std::move(content_item)};
+                result["isError"] = true;
+                co_return jsonrpc::make_response(id, std::move(result));
+            }
+            auto info = rpc_.map_exception(failure);
+            co_return jsonrpc::make_error_response(id, info.code, std::move(info.message), std::move(info.data));
+        }
+
+        co_return jsonrpc::make_response(id, tool_result(value));
+    }
+
+    std::optional<std::string> map_tool_error(std::exception_ptr e) const
+    {
+        try
+        {
+            return tool_error_(e);
+        }
+        catch (...)
+        {
+            return default_tool_error_handler(e);
+        }
+    }
+
+    awaitable<boost::json::value> read_resource(
+        contexts_type const& ctxs,
+        jsonrpc::envelope const& env,
+        request_type const& request,
+        matcher::context const& mctx)
+    {
+        auto const id = env.id.value_or(boost::json::value {nullptr});
+
+        boost::json::object const* params = env.params ? env.params->if_object() : nullptr;
+        boost::json::value const* uri_value = params ? params->if_contains("uri") : nullptr;
+        if (uri_value == nullptr || !uri_value->is_string())
+        {
+            co_return error_envelope(id, static_cast<int>(jsonrpc::error::invalid_params), "resources/read requires params.uri");
+        }
+        std::string const uri {uri_value->as_string()};
+
+        resource_entry* match = nullptr;
+        std::unordered_map<std::string, std::string> args;
+        for (auto& r : resources_)
+        {
+            if (!r.info.is_template && r.info.uri == uri)
+            {
+                match = &r;
+                break;
+            }
+        }
+        if (match == nullptr)
+        {
+            for (auto& r : resources_)
+            {
+                if (!r.info.is_template) continue;
+                if (auto captured = match_uri_template(r.info.uri, uri))
+                {
+                    match = &r;
+                    args = std::move(*captured);
+                    break;
+                }
+            }
+        }
+        if (match == nullptr)
+        {
+            co_return error_envelope(id, resource_not_found_code, "Resource not found: " + uri);
+        }
+
+        std::exception_ptr failure;
+        boost::json::value value;
+        try
+        {
+            value = co_await match->invoke(ctxs, resource_call {env, uri, args, request}, mctx);
+        }
+        catch (...)
+        {
+            failure = std::current_exception();
+        }
+        if (failure)
+        {
+            auto info = rpc_.map_exception(failure);
+            co_return jsonrpc::make_error_response(id, info.code, std::move(info.message), std::move(info.data));
+        }
+
+        boost::json::object item;
+        item["uri"] = uri;
+        item["mimeType"] = match->info.mime_type;
+        item["text"] = detail::text_of(value);
+        boost::json::object result;
+        result["contents"] = boost::json::array {std::move(item)};
+        co_return jsonrpc::make_response(id, std::move(result));
+    }
+
+    server_info info_;
+    detail::session_store<Session> sessions_;
+    rpc_type rpc_;
+    std::unordered_map<std::string, tool_entry> tools_;
+    std::vector<std::string> tool_order_;
+    std::vector<resource_entry> resources_;
+    std::move_only_function<void(contexts_type const&, initialize_params const&)> on_initialize_;
+    tool_error_handler tool_error_ = default_tool_error_handler;
+    std::function<bool(std::string_view)> origin_validator_;
+};
+
+} // namespace boost::taar::mcp
+
+#endif // BOOST_TAAR_MCP_ENDPOINT_HPP

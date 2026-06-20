@@ -27,6 +27,7 @@ target_sources(
         test_cookies.cpp
         test_e2e_context.cpp
         test_e2e_jsonrpc.cpp
+        test_e2e_mcp.cpp
         test_http_session.cpp
         test_is_http_response.cpp
         test_jsonrpc.cpp
@@ -38,6 +39,7 @@ target_sources(
         test_matcher_operand.cpp
         test_matcher_target.cpp
         test_matcher_version.cpp
+        test_mcp_endpoint.cpp
         test_member_function_of.cpp
         test_path_arg_check.cpp
         test_response_builder.cpp

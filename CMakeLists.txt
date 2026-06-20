@@ -71,6 +71,8 @@ target_sources(
         include/boost/taar/matcher/target.hpp
         include/boost/taar/matcher/template_parser.hpp
         include/boost/taar/matcher/version.hpp
+        include/boost/taar/mcp/arg.hpp
+        include/boost/taar/mcp/endpoint.hpp
         include/boost/taar/server/tcp.hpp
         include/boost/taar/session/http.hpp
         include/boost/taar/type_traits/always_false.hpp
