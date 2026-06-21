@@ -10,6 +10,7 @@
 #include "e2e.hpp"
 #include <boost/taar/session/http.hpp>
 #include <boost/taar/mcp/endpoint.hpp>
+#include <boost/taar/matcher/method.hpp>
 #include <boost/taar/matcher/target.hpp>
 #include <boost/json/parse.hpp>
 #include <boost/test/unit_test.hpp>
@@ -80,6 +81,83 @@ BOOST_AUTO_TEST_CASE(test_e2e_mcp_stateful_session_across_connections)
         BOOST_TEST(d[1].result() == http::status::ok);
         BOOST_TEST(d[2].result() == http::status::not_found);
         BOOST_TEST(endpoint.session_count() == 0u);
+    });
+}
+
+/// Reads from an open SSE response until @a needle shows up in the body.
+taar::awaitable<void> read_until(
+    taar::rebind_executor<net::ip::tcp::socket>& socket,
+    boost::beast::flat_buffer& buffer,
+    http::response_parser<http::string_body>& parser,
+    std::string_view needle)
+{
+    while (parser.get().body().find(needle) == std::string::npos && !parser.is_done())
+    {
+        auto [ec, n] = co_await http::async_read_some(socket, buffer, parser);
+        if (ec) throw boost::system::system_error {ec};
+    }
+}
+
+BOOST_AUTO_TEST_CASE(test_e2e_mcp_event_stream)
+{
+    using taar::matcher::method;
+
+    net::io_context io;
+    taar::session::http session;
+
+    mcp::endpoint<calc_session> endpoint {{.name = "calc-server", .version = "1.0.0"}};
+    endpoint.tool("fire", "Notify every client", [&]
+    {
+        endpoint.broadcast("notifications/resources/updated", json::object {{"uri", "calc://history/last"}});
+    });
+    session.register_request_handler(method == http::verb::get && target == "/mcp", endpoint.stream_handler());
+    session.register_request_handler(target == "/mcp", endpoint.handler());
+
+    e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
+    {
+        auto init = e2e::make_request(http::verb::post, "/mcp",
+            R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}})");
+        auto a = co_await e2e::send_all(port, {init});
+        std::string sid {a[0]["Mcp-Session-Id"]};
+
+        // Open the stream on its own connection.
+        taar::rebind_executor<net::ip::tcp::socket> socket {co_await net::this_coro::executor};
+        co_await socket.async_connect({net::ip::address_v4::loopback(), port});
+        http::request<http::empty_body> get {http::verb::get, "/mcp", 11};
+        get.set(http::field::host, "localhost");
+        get.set(http::field::accept, "text/event-stream");
+        get.set("Mcp-Session-Id", sid);
+        co_await http::async_write(socket, get);
+
+        boost::beast::flat_buffer buffer;
+        http::response_parser<http::string_body> parser;
+        parser.body_limit(boost::none);
+        co_await http::async_read_header(socket, buffer, parser);
+        BOOST_TEST(parser.get().result() == http::status::ok);
+        BOOST_TEST(parser.get()[http::field::content_type] == "text/event-stream");
+        BOOST_TEST(parser.get().chunked());
+        co_await read_until(socket, buffer, parser, ": connected\n\n");
+
+        // A tool call on another connection pushes a notification into the stream.
+        auto fire = e2e::make_request(http::verb::post, "/mcp",
+            R"({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"fire"}})");
+        fire.set("Mcp-Session-Id", sid);
+        auto b = co_await e2e::send_all(port, {fire});
+        BOOST_TEST(b[0].result() == http::status::ok);
+        co_await read_until(socket, buffer, parser, "event: message\ndata: ");
+        BOOST_TEST(parser.get().body().find("notifications/resources/updated") != std::string::npos);
+
+        // Deleting the session ends the stream cleanly (final chunk, parser done).
+        auto del = e2e::make_request(http::verb::delete_, "/mcp");
+        del.set("Mcp-Session-Id", sid);
+        auto c = co_await e2e::send_all(port, {del});
+        BOOST_TEST(c[0].result() == http::status::ok);
+        while (!parser.is_done())
+        {
+            auto [ec, n] = co_await http::async_read_some(socket, buffer, parser);
+            if (ec) throw boost::system::system_error {ec};
+        }
+        BOOST_TEST(parser.is_done());
     });
 }
 

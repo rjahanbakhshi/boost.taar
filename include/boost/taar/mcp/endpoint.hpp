@@ -10,7 +10,10 @@
 #ifndef BOOST_TAAR_MCP_ENDPOINT_HPP
 #define BOOST_TAAR_MCP_ENDPOINT_HPP
 
+#include <boost/taar/core/async_channel.hpp>
 #include <boost/taar/core/awaitable.hpp>
+#include <boost/taar/core/chunked_response.hpp>
+#include <boost/taar/core/chunked_response_meta.hpp>
 #include <boost/taar/core/context_store.hpp>
 #include <boost/taar/core/error.hpp>
 #include <boost/taar/core/json_schema.hpp>
@@ -22,6 +25,7 @@
 #include <boost/taar/jsonrpc/response.hpp>
 #include <boost/taar/matcher/context.hpp>
 #include <boost/taar/mcp/arg.hpp>
+#include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/field.hpp>
 #include <boost/beast/http/message.hpp>
 #include <boost/beast/http/status.hpp>
@@ -34,6 +38,7 @@
 #include <boost/json/value.hpp>
 #include <boost/system/system_error.hpp>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <exception>
 #include <functional>
@@ -146,12 +151,32 @@ inline std::optional<std::string> default_tool_error_handler(std::exception_ptr 
 
 namespace detail {
 
+/// Per-session bookkeeping stored next to the user's Session object.
+template <typename Session>
+struct session_slot
+{
+    Session session {};
+    std::shared_ptr<async_channel<std::string>> mailbox = std::make_shared<async_channel<std::string>>();
+    std::shared_ptr<std::atomic<bool>> stream_attached = std::make_shared<std::atomic<bool>>(false);
+
+    ~session_slot()
+    {
+        // Ends any open event stream once the session is gone.
+        mailbox->close();
+    }
+};
+
 template <typename Session>
 struct session_store
 {
-    using type = context_store<std::string, Session>;
+    using type = context_store<std::string, session_slot<Session>>;
     type store;
     explicit session_store(std::chrono::steady_clock::duration idle) : store {idle} {}
+
+    static std::shared_ptr<Session> session_of(typename type::entry_ptr const& e)
+    {
+        return std::shared_ptr<Session> {e->context(), &e->context()->session};
+    }
 };
 
 template <>
@@ -210,8 +235,10 @@ inline std::string text_of(boost::json::value const& v)
     @li Tool callables that throw produce an `isError: true` result; see
         @ref set_tool_error_handler. Argument errors and unknown tools are
         JSON-RPC errors (-32602).
-    @li `GET` (server-to-client stream) is answered 405 until streaming is
-        enabled on the endpoint.
+    @li `GET` opens the server-to-client event stream (stateful mode only)
+        when @ref stream_handler is registered for it; otherwise 405.
+        Messages queued with @ref notify or @ref broadcast are delivered
+        as SSE `message` events on that stream.
 */
 template <typename Session = stateless, typename... Context>
 class endpoint
@@ -351,6 +378,80 @@ public:
     std::size_t sweep_sessions() requires stateful
     {
         return sessions_.store.sweep();
+    }
+
+    /** Queue a JSON-RPC notification for one session's event stream (stateful mode).
+
+        Delivered when the client has a `GET` stream open; otherwise held
+        until it opens one or the session ends. Does not refresh the
+        session's idle timer.
+
+        @returns false if the session is unknown or expired.
+    */
+    bool notify(std::string const& session_id, std::string_view method, boost::json::value params = {})
+        requires stateful
+    {
+        auto e = sessions_.store.peek(session_id);
+        if (!e) return false;
+        return e->context()->mailbox->push(notification(method, std::move(params)));
+    }
+
+    /// Queue a notification for every live session (stateful mode). Returns the number queued.
+    std::size_t broadcast(std::string_view method, boost::json::value params = {})
+        requires stateful
+    {
+        auto const text = notification(method, std::move(params));
+        std::size_t n = 0;
+        for (auto const& key : sessions_.store.keys())
+        {
+            if (auto e = sessions_.store.peek(key); e && e->context()->mailbox->push(text)) ++n;
+        }
+        return n;
+    }
+
+    /** The HTTP handler for the `GET` event stream (stateful mode).
+
+        Register it on the same route as @ref handler for `GET`:
+        @code
+        session.register_request_handler(method == http::verb::get && target == "/mcp", mcp.stream_handler());
+        session.register_request_handler(target == "/mcp", mcp.handler());
+        @endcode
+        The response is `text/event-stream`; one stream per session (a
+        second `GET` while one is open is answered 409). The stream ends
+        when the session is deleted or expires.
+    */
+    auto stream_handler() requires stateful
+    {
+        return [this](
+            boost::beast::http::request<boost::beast::http::empty_body> const& request,
+            matcher::context const&) -> chunked_response<std::string>
+        {
+            namespace http = boost::beast::http;
+            if (origin_validator_)
+            {
+                auto origin = request.find(http::field::origin);
+                if (origin != request.end() && !origin_validator_(origin->value()))
+                {
+                    return plain_stream(http::status::forbidden, "Origin not allowed");
+                }
+            }
+            auto sid = request.find("Mcp-Session-Id");
+            if (sid == request.end())
+            {
+                return plain_stream(http::status::bad_request, "Missing Mcp-Session-Id");
+            }
+            auto entry = sessions_.store.find(std::string {sid->value()});
+            if (!entry)
+            {
+                return plain_stream(http::status::not_found, "Unknown or expired session");
+            }
+            auto& slot = *entry->context();
+            if (slot.stream_attached->exchange(true))
+            {
+                return plain_stream(http::status::conflict, "A stream is already open for this session");
+            }
+            return event_stream(slot.mailbox, slot.stream_attached);
+        };
     }
 
     /// The HTTP handler for the MCP route (`POST`, and `DELETE` in stateful mode).
@@ -536,7 +637,7 @@ private:
                 co_return plain(request, http::status::not_found, "Unknown or expired session");
             }
             auto guard = co_await sessions_.store.lock(entry);
-            auto ctxs = std::tuple_cat(incoming, std::make_tuple(entry->context()));
+            auto ctxs = std::tuple_cat(incoming, std::make_tuple(sessions_.session_of(entry)));
             auto out = co_await dispatch(ctxs, env.value(), request, mctx);
             co_return rpc_type::to_http(request, std::move(out));
         }
@@ -623,7 +724,7 @@ private:
                 {
                     try
                     {
-                        on_initialize_(std::tuple_cat(incoming, std::make_tuple(entry->context())), params);
+                        on_initialize_(std::tuple_cat(incoming, std::make_tuple(sessions_.session_of(entry))), params);
                     }
                     catch (...)
                     {
@@ -921,6 +1022,45 @@ private:
         boost::json::object result;
         result["contents"] = boost::json::array {std::move(item)};
         co_return jsonrpc::make_response(id, std::move(result));
+    }
+
+    static std::string notification(std::string_view method, boost::json::value params)
+    {
+        boost::json::object msg;
+        msg["jsonrpc"] = "2.0";
+        msg["method"] = method;
+        if (!params.is_null()) msg["params"] = std::move(params);
+        return boost::json::serialize(msg);
+    }
+
+    static chunked_response<std::string> plain_stream(boost::beast::http::status status, std::string text)
+    {
+        co_yield set_status(status);
+        co_yield set_header(boost::beast::http::field::content_type, "text/plain");
+        co_yield std::move(text);
+    }
+
+    struct attached_guard
+    {
+        std::shared_ptr<std::atomic<bool>> flag;
+        ~attached_guard() { if (flag) flag->store(false); }
+    };
+
+    static chunked_response<std::string> event_stream(
+        std::shared_ptr<async_channel<std::string>> mailbox,
+        std::shared_ptr<std::atomic<bool>> attached)
+    {
+        attached_guard const guard {std::move(attached)};
+        co_yield set_header(boost::beast::http::field::content_type, "text/event-stream");
+        co_yield set_header(boost::beast::http::field::cache_control, "no-cache");
+        co_yield std::string {": connected\n\n"};
+        for (;;)
+        {
+            auto msg = co_await mailbox->async_receive(
+                boost::asio::use_awaitable_t<boost::asio::io_context::executor_type> {});
+            if (!msg) break;
+            co_yield "event: message\ndata: " + *msg + "\n\n";
+        }
     }
 
     server_info info_;
