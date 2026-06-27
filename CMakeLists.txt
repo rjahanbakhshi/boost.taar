@@ -52,6 +52,7 @@ target_sources(
         include/boost/taar/handler/rest_arg.hpp
         include/boost/taar/handler/rest_arg_cast.hpp
         include/boost/taar/handler/rest_arg_cast_tag.hpp
+        include/boost/taar/handler/rest_param.hpp
         include/boost/taar/handler/session_key.hpp
         include/boost/taar/handler/with_session.hpp
         include/boost/taar/jsonrpc/arg.hpp
@@ -74,6 +75,7 @@ target_sources(
         include/boost/taar/matcher/version.hpp
         include/boost/taar/mcp/arg.hpp
         include/boost/taar/mcp/endpoint.hpp
+        include/boost/taar/openapi/generator.hpp
         include/boost/taar/server/tcp.hpp
         include/boost/taar/session/http.hpp
         include/boost/taar/type_traits/always_false.hpp

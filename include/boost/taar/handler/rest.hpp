@@ -12,6 +12,7 @@
 
 #include <boost/taar/handler/context_inject.hpp>
 #include <boost/taar/handler/rest_arg.hpp>
+#include <boost/taar/handler/rest_param.hpp>
 #include <boost/taar/matcher/context.hpp>
 #include <boost/taar/core/member_function_of.hpp>
 #include <boost/taar/core/response_from.hpp>
@@ -140,6 +141,8 @@ struct rest_handler<
 
     using request_type = RequestType;
     using callable_storage = std::decay_t<CallableType>;
+    /// What the wrapped callable returns, before conversion to an HTTP response.
+    using callable_result_type = type_traits::callable_result<CallableType>;
     using result_type = decltype(rest_result_type_helper<CallableType, callable_storage>(
         std::make_index_sequence<context_count + sizeof...(ArgIs)>{}));
 
@@ -175,6 +178,13 @@ struct rest_handler<
     {
         return collect_path_arg_names(arg_providers_tuple_);
     }
+
+    /// Description of every provider-fed parameter, for documentation generators.
+    auto params() const -> std::vector<rest_param_info>
+    {
+        return {describe_rest_param<type_traits::callable_arg<CallableType, context_count + ArgIs>>(
+            std::get<ArgIs>(arg_providers_tuple_))...};
+    }
 };
 
 template <
@@ -206,6 +216,7 @@ struct rest_memfn_handler<
 
     using request_type = RequestType;
     using memfn_type = std::remove_reference_t<MemFnType>;
+    using callable_result_type = type_traits::callable_result<memfn_type>;
     using result_type = decltype(rest_result_type_helper<memfn_type, MemFnType, ObjectType>(
         std::make_index_sequence<context_count + sizeof...(ArgIs)>{}));
 
@@ -238,6 +249,12 @@ struct rest_memfn_handler<
     auto path_arg_names() const -> std::vector<std::string>
     {
         return collect_path_arg_names(arg_providers_tuple_);
+    }
+
+    auto params() const -> std::vector<rest_param_info>
+    {
+        return {describe_rest_param<type_traits::callable_arg<memfn_type, context_count + ArgIs>>(
+            std::get<ArgIs>(arg_providers_tuple_))...};
     }
 };
 

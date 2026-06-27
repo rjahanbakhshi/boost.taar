@@ -42,6 +42,7 @@ target_sources(
         test_matcher_version.cpp
         test_mcp_endpoint.cpp
         test_mcp_stream.cpp
+        test_openapi.cpp
         test_member_function_of.cpp
         test_path_arg_check.cpp
         test_response_builder.cpp

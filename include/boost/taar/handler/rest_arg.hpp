@@ -43,6 +43,9 @@
 #include <exception>
 
 namespace boost::taar::handler {
+
+struct description;
+
 namespace detail {
 
 template <typename ArgProviderType>
@@ -105,7 +108,42 @@ std::string arg_provider_name(ArgProviderType&& ap)
         return "";
 }
 
+template <typename ArgProviderType>
+std::string arg_provider_description(ArgProviderType const& ap)
+{
+    if constexpr (requires { { ap.description() } -> std::convertible_to<std::string>; })
+        return ap.description();
+    else
+        return "";
+}
+
+template <typename Option>
+void apply_body_arg_option(
+    std::unordered_set<std::string>& content_types,
+    std::string& description_text,
+    Option&& option)
+{
+    if constexpr (std::same_as<std::remove_cvref_t<Option>, handler::description>)
+        description_text = std::forward<Option>(option).text;
+    else
+        content_types.emplace(std::forward<Option>(option));
+}
+
 } // namespace detail
+
+/** Human-readable description for a body argument provider.
+
+    Body providers take content types as positional strings, so their
+    description is passed through this tag instead:
+    `json_body_arg(description {"The user to create"})`. Named providers
+    (`path_arg`, `query_arg`, `header_arg`, `cookie_arg`) accept the
+    description as a plain trailing string. Descriptions feed generated
+    documentation such as OpenAPI.
+*/
+struct description
+{
+    std::string text;
+};
 
 /** Wrap an argument provider with a fallback value.
 
@@ -140,6 +178,11 @@ struct with_default
     std::string name() const
     {
         return arg_provider_.name();
+    }
+
+    std::string description() const
+    {
+        return detail::arg_provider_description(arg_provider_);
     }
 
     decltype(auto) operator()(
@@ -272,13 +315,19 @@ auto get_rest_arg(
 */
 struct path_arg
 {
-    path_arg(std::string path_key)
+    path_arg(std::string path_key, std::string description = {})
         : path_key_ {std::move(path_key)}
+        , description_ {std::move(description)}
     {}
 
     std::string const& name() const
     {
         return path_key_;
+    }
+
+    std::string const& description() const
+    {
+        return description_;
     }
 
     boost::system::result<std::string> operator()(
@@ -294,6 +343,7 @@ struct path_arg
     }
 
     std::string path_key_;
+    std::string description_;
 };
 
 /** Argument provider that reads a URL query parameter.
@@ -315,9 +365,23 @@ struct query_arg
         , ic_ {std::move(ic)}
     {}
 
+    query_arg(
+            std::string query_key,
+            std::string description,
+            boost::urls::ignore_case_param ic = {})
+        : query_key_ {std::move(query_key)}
+        , ic_ {std::move(ic)}
+        , description_ {std::move(description)}
+    {}
+
     std::string const& name() const
     {
         return query_key_;
+    }
+
+    std::string const& description() const
+    {
+        return description_;
     }
 
     boost::system::result<std::string> operator()(
@@ -348,6 +412,7 @@ struct query_arg
 
     std::string query_key_;
     boost::urls::ignore_case_param ic_;
+    std::string description_;
 };
 
 /** Argument provider that reads a request header.
@@ -359,13 +424,20 @@ struct query_arg
 */
 struct header_arg
 {
-    header_arg(std::string header_name)
+    header_arg(std::string header_name, std::string description = {})
         : header_ {std::move(header_name)}
+        , description_ {std::move(description)}
     {}
 
-    header_arg(boost::beast::http::field field)
+    header_arg(boost::beast::http::field field, std::string description = {})
         : header_ {field}
+        , description_ {std::move(description)}
     {}
+
+    std::string const& description() const
+    {
+        return description_;
+    }
 
     std::string name() const
     {
@@ -420,6 +492,7 @@ struct header_arg
     }
 
     std::variant<boost::beast::http::field, std::string> header_;
+    std::string description_;
 };
 
 /** Argument provider that reads a cookie value by name.
@@ -430,13 +503,19 @@ struct header_arg
 */
 struct cookie_arg
 {
-    cookie_arg(std::string name)
+    cookie_arg(std::string name, std::string description = {})
         : name_ {std::move(name)}
+        , description_ {std::move(description)}
     {}
 
     std::string const& name() const
     {
         return name_;
+    }
+
+    std::string const& description() const
+    {
+        return description_;
     }
 
     boost::system::result<std::string> operator()(
@@ -460,6 +539,7 @@ struct cookie_arg
     }
 
     std::string name_;
+    std::string description_;
 };
 
 /// Tag type accepted by body providers to disable the content-type check.
@@ -476,23 +556,35 @@ constexpr all_content_types_t all_content_types {};
 */
 struct string_body_arg
 {
-    template <type_traits::string_like... T>
-    string_body_arg(T&&... content_types)
-        : content_types_ {std::forward<T>(content_types)...}
+    template <typename... T>
+    requires ((type_traits::string_like<T> || std::same_as<std::remove_cvref_t<T>, description>) && ...)
+    string_body_arg(T&&... args)
     {
-        if constexpr (sizeof...(T) == 0)
+        (detail::apply_body_arg_option(content_types_, description_, std::forward<T>(args)), ...);
+        if (content_types_.empty())
         {
             content_types_.emplace("text/plain");
         }
     }
+
+    string_body_arg(all_content_types_t, description d = {})
+        : description_ {std::move(d.text)}
+    {}
 
     std::string name() const
     {
         return "string_body";
     }
 
-    string_body_arg(all_content_types_t)
-    {}
+    std::string const& description() const
+    {
+        return description_;
+    }
+
+    std::unordered_set<std::string> const& content_types() const
+    {
+        return content_types_;
+    }
 
     boost::system::result<std::string> operator()(
         boost::beast::http::request<boost::beast::http::string_body> const& request,
@@ -514,6 +606,7 @@ struct string_body_arg
     }
 
     std::unordered_set<std::string> content_types_;
+    std::string description_;
 };
 
 /** Argument provider that parses the request body as a JSON value.
@@ -525,23 +618,35 @@ struct string_body_arg
 */
 struct json_body_arg
 {
-    template <type_traits::string_like... T>
-    json_body_arg(T&&... content_types)
-        : content_types_ {std::forward<T>(content_types)...}
+    template <typename... T>
+    requires ((type_traits::string_like<T> || std::same_as<std::remove_cvref_t<T>, description>) && ...)
+    json_body_arg(T&&... args)
     {
-        if constexpr (sizeof...(T) == 0)
+        (detail::apply_body_arg_option(content_types_, description_, std::forward<T>(args)), ...);
+        if (content_types_.empty())
         {
             content_types_.emplace("application/json");
         }
     }
+
+    json_body_arg(all_content_types_t, description d = {})
+        : description_ {std::move(d.text)}
+    {}
 
     std::string name() const
     {
         return "json_body";
     }
 
-    json_body_arg(all_content_types_t)
-    {}
+    std::string const& description() const
+    {
+        return description_;
+    }
+
+    std::unordered_set<std::string> const& content_types() const
+    {
+        return content_types_;
+    }
 
     boost::system::result<boost::json::value> operator()(
         boost::beast::http::request<boost::beast::http::string_body> const& request,
@@ -569,6 +674,7 @@ struct json_body_arg
     }
 
     std::unordered_set<std::string> content_types_;
+    std::string description_;
 };
 
 /** Argument provider that parses an `application/x-www-form-urlencoded` body.
@@ -579,23 +685,35 @@ struct json_body_arg
 */
 struct url_encoded_form_data_arg
 {
-    template <type_traits::string_like... T>
-    url_encoded_form_data_arg(T&&... content_types)
-        : content_types_ {std::forward<T>(content_types)...}
+    template <typename... T>
+    requires ((type_traits::string_like<T> || std::same_as<std::remove_cvref_t<T>, description>) && ...)
+    url_encoded_form_data_arg(T&&... args)
     {
-        if constexpr (sizeof...(T) == 0)
+        (detail::apply_body_arg_option(content_types_, description_, std::forward<T>(args)), ...);
+        if (content_types_.empty())
         {
             content_types_.emplace("application/x-www-form-urlencoded");
         }
     }
+
+    url_encoded_form_data_arg(all_content_types_t, description d = {})
+        : description_ {std::move(d.text)}
+    {}
 
     std::string name() const
     {
         return "url_encoded_form_data";
     }
 
-    url_encoded_form_data_arg(all_content_types_t)
-    {}
+    std::string const& description() const
+    {
+        return description_;
+    }
+
+    std::unordered_set<std::string> const& content_types() const
+    {
+        return content_types_;
+    }
 
     boost::system::result<form_kvp> operator()(
         boost::beast::http::request<boost::beast::http::string_body> const& request,
@@ -633,6 +751,7 @@ struct url_encoded_form_data_arg
     }
 
     std::unordered_set<std::string> content_types_;
+    std::string description_;
 };
 
 /** Argument provider that returns the request target as a `std::string`.

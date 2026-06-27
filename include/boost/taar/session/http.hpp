@@ -148,6 +148,16 @@ inline bool is_transport_error(boost::system::error_code const& ec)
            ec == http_err::error::end_of_stream;
 }
 
+/// A callable invoked at registration with the route's operand and handler.
+template <typename Observer, typename MatcherType, typename Handler>
+concept registration_observer = requires(
+    Observer&& observer,
+    decltype(matcher::operand {std::declval<MatcherType>()}) const& operand,
+    Handler const& handler)
+{
+    std::forward<Observer>(observer)(operand, handler);
+};
+
 inline boost::beast::http::status select_error_status(boost::system::error_code const& ec)
 {
     namespace http_err = boost::beast::http;
@@ -819,6 +829,37 @@ public:
                     signals);
             }
         );
+    }
+
+    /** Register a handler and notify registration observers.
+
+        Each trailing @a observer is invoked once, at registration time,
+        with `(matcher::operand const&, RequestHandler const&)`, before the
+        route is installed. Documentation generators use this to record
+        the route's matcher metadata and the handler's parameters:
+
+        @code
+        session.register_request_handler(
+            method == http::verb::get && target == "/users/{id}",
+            taar::handler::rest(&get_user, taar::handler::path_arg("id")),
+            openapi.describe("Fetch a user"));
+        @endcode
+    */
+    template <typename MatcherType, typename RequestHandler, typename FirstObserver, typename... Observers> requires(
+        matcher::is_matcher<std::decay_t<MatcherType>> &&
+        std::is_move_constructible_v<std::decay_t<RequestHandler>> &&
+        detail::registration_observer<FirstObserver, MatcherType, RequestHandler> &&
+        (detail::registration_observer<Observers, MatcherType, RequestHandler> && ...))
+    auto register_request_handler(
+        MatcherType&& matcher,
+        RequestHandler request_handler,
+        FirstObserver&& first_observer,
+        Observers&&... observers)
+    {
+        matcher::operand operand {std::forward<MatcherType>(matcher)};
+        std::forward<FirstObserver>(first_observer)(std::as_const(operand), std::as_const(request_handler));
+        (std::forward<Observers>(observers)(std::as_const(operand), std::as_const(request_handler)), ...);
+        return register_request_handler(std::move(operand), std::move(request_handler));
     }
 
     /// Convenience overload that binds a non-const member-function pointer to @a object.

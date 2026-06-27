@@ -15,6 +15,7 @@
 #include <boost/taar/core/is_http_response.hpp>
 #include <boost/taar/handler/context_inject.hpp>
 #include <boost/taar/handler/path_arg_check.hpp>
+#include <boost/taar/handler/rest_param.hpp>
 #include <boost/taar/handler/session_key.hpp>
 #include <boost/taar/matcher/context.hpp>
 #include <boost/beast/http/message.hpp>
@@ -132,6 +133,15 @@ struct with_session_handler
         requires has_path_arg_names<Inner>
     {
         return inner_.path_arg_names();
+    }
+
+    /// The wrapped handler, for documentation generators that introspect it.
+    using inner_type = Inner;
+
+    auto params() const -> std::vector<rest_param_info>
+        requires has_rest_params<Inner>
+    {
+        return inner_.params();
     }
 };
 
