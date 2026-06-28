@@ -493,6 +493,12 @@ private:
         }
 
         json::array parameters;
+        auto type_schema = [](param_info const& info)
+        {
+            json::object schema;
+            if (!info.json_type.empty()) schema["type"] = info.json_type;
+            return schema;
+        };
         auto add_param = [&](std::string const& name, std::string_view in, bool required,
                              std::string const& description, json::object schema)
         {
@@ -530,17 +536,17 @@ private:
                 bool greedy = std::ranges::any_of(rec.path_params, [&](auto const& pp) { return pp.name == p.info.name && pp.greedy; });
                 add_param(p.info.name, "path", true,
                     !p.info.description.empty() ? p.info.description : (greedy ? std::string {"Matches the remainder of the path"} : std::string {}),
-                    param_schema(p.info));
+                    type_schema(p.info));
                 break;
             }
             case param_location::query:
-                add_param(p.info.name, "query", p.info.required, p.info.description, param_schema(p.info));
+                add_param(p.info.name, "query", p.info.required, p.info.description, type_schema(p.info));
                 break;
             case param_location::header:
-                add_param(p.info.name, "header", p.info.required, p.info.description, param_schema(p.info));
+                add_param(p.info.name, "header", p.info.required, p.info.description, type_schema(p.info));
                 break;
             case param_location::cookie:
-                add_param(p.info.name, "cookie", p.info.required, p.info.description, param_schema(p.info));
+                add_param(p.info.name, "cookie", p.info.required, p.info.description, type_schema(p.info));
                 break;
             case param_location::body:
             {
