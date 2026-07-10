@@ -9,6 +9,33 @@
 
 [heading Unreleased]
 
+* Contexts: `session::basic_http<Context>` creates one context object per
+  connection; `handler::rest` callables request it (and any other context
+  in scope) through leading `T&`, `T const&` or `shared_ptr<T>` parameters.
+* `core::context_store`: thread-safe keyed store with idle expiry,
+  per-entry asynchronous locking and minted keys.
+  `handler::with_session` binds a store to a cookie or header and injects
+  the keyed context into the wrapped handler.
+* JSON-RPC 2.0: `jsonrpc::endpoint<Context...>` with named parameters
+  (`rpc_arg`), batches, notifications, standard error codes and a
+  replaceable error mapper.
+* MCP: `mcp::endpoint<Session, Context...>` over Streamable HTTP with
+  tools, resources, URI templates, sessions, protocol version negotiation,
+  Origin validation, and a server-to-client event stream (`stream_handler`,
+  `notify`, `broadcast`).
+* OpenAPI: `openapi::generator` renders an OpenAPI 3.1 document from routes
+  registered with `describe(...)`; inexpressible matchers are rejected at
+  compile time. `register_request_handler` accepts trailing registration
+  observers.
+* Argument providers accept descriptions; `rest` handlers expose `params()`.
+  `response_from` accepts `boost::json::object` and `boost::json::array`.
+* `core::async_channel`: executor-agnostic asynchronous queue used for
+  server-push streams.
+* Matcher metadata: every matcher expression carries a compile-time
+  description of its constraints and captured values.
+* Examples reorganised around use cases (hello, REST CRUD with OpenAPI,
+  connection state, cookie sessions, streaming, proxy, WebSocket, JSON-RPC,
+  MCP).
 * Initial release preparation. Headers relocated to
   `include/boost/taar/` to match the Boost modular layout.
 * Added `build.jam`, `meta/libraries.json`, and a `doc/` directory built on

@@ -35,7 +35,10 @@ path-constant INCLUDES : ../include ;
 local doxygen-inputs =
     [ glob $(INCLUDES)/boost/taar/core/*.hpp ]
     [ glob $(INCLUDES)/boost/taar/handler/*.hpp ]
+    [ glob $(INCLUDES)/boost/taar/jsonrpc/*.hpp ]
     [ glob $(INCLUDES)/boost/taar/matcher/*.hpp ]
+    [ glob $(INCLUDES)/boost/taar/mcp/*.hpp ]
+    [ glob $(INCLUDES)/boost/taar/openapi/*.hpp ]
     [ glob $(INCLUDES)/boost/taar/server/*.hpp ]
     [ glob $(INCLUDES)/boost/taar/session/*.hpp ]
     [ glob $(INCLUDES)/boost/taar/type_traits/*.hpp ]

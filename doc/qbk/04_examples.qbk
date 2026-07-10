@@ -7,31 +7,49 @@
 
 [section:examples Examples]
 
-The `examples/` directory contains complete, buildable programs that
-exercise the most common use cases. The CMake target name matches the file
-name minus the extension, e.g. `cmake --build build --target http_server`.
+The `examples/` directory contains complete, buildable programs, one per
+common use case. The CMake target name matches the file name minus the
+extension (`cmake --build build --target rest_crud_server`), and
+`cmake --build build --target examples` builds them all. Each file starts
+with the `curl` commands that exercise it.
 
 [table Examples shipped with the library
 [[Example][What it shows]]
-[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/awaitable_server.cpp awaitable_server.cpp]]
- [Plain HTTP server with a handful of REST endpoints, demonstrating
- `path_arg`, `query_arg`, and a JSON-returning handler.]]
-[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/chunked_server.cpp chunked_server.cpp]]
- [HTTP server that streams a chunked response from an async generator,
- useful for progress reporting or server-sent events.]]
+[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/hello_server.cpp hello_server.cpp]]
+ [The smallest complete server: two REST routes, a path argument, a query
+ argument with a default, and graceful shutdown on `SIGINT`.]]
+[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/rest_crud_server.cpp rest_crud_server.cpp]]
+ [A JSON REST API: CRUD routes over an in-memory store, typed request
+ bodies via `boost::describe`, a domain exception mapped to 404 by a soft
+ error handler, and an OpenAPI 3.1 document generated from the routes.]]
 [[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/htdocs_server.cpp htdocs_server.cpp]]
- [Serving a directory of static files with correct content types via
- `taar::handler::htdocs`.]]
-[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/mixed_server.cpp mixed_server.cpp]]
- [Combination of REST handlers and a fallback static-file handler on the
- same session.]]
-[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/response_stream.cpp response_stream.cpp]]
- [Building a streaming response by hand, without the REST adapter.]]
+ [Serving a directory of static files with `handler::htdocs` on a
+ multi-threaded `io_context`.]]
+[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/connection_state_server.cpp connection_state_server.cpp]]
+ [Per-connection state with `basic_http<conn_state>`: handlers receive
+ the connection's object by reference and use it for counting and a quota.]]
+[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/cookie_session_server.cpp cookie_session_server.cpp]]
+ [Cookie-keyed sessions with `context_store` and `with_session`: login,
+ logout, `create_if_missing` versus `require`, and idle expiry.]]
+[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/streaming_server.cpp streaming_server.cpp]]
+ [Chunked responses: server-sent events from a timer, a JSON stream from an
+ `async_generator`, and files streamed from disk with spliced generators.]]
+[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/proxy_server.cpp proxy_server.cpp]]
+ [Asynchronous handlers: a coroutine that fetches an upstream URL with
+ Beast and returns the response, plus a timer-based delay route.]]
 [[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/websocket_server.cpp websocket_server.cpp]]
- [Protocol upgrade to WebSocket via `register_raw_handler`.]]
+ [Protocol upgrade to WebSocket via `register_raw_handler`, with an echo
+ loop.]]
+[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/jsonrpc_server.cpp jsonrpc_server.cpp]]
+ [A JSON-RPC 2.0 calculator: named parameters, batches, notifications, a
+ custom error mapper, and per-client state through `with_session`.]]
+[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/mcp_server.cpp mcp_server.cpp]]
+ [An MCP server over Streamable HTTP: tools with generated input schemas,
+ resources and URI templates, per-session state, server-to-client
+ notifications over the event stream, and Origin validation.]]
 ]
 
-Each example is small enough to be read top-to-bottom in one sitting. They
-are the recommended starting point for a new application.
+Start with `hello_server.cpp`, then the example closest to what you are
+building.
 
 [endsect]

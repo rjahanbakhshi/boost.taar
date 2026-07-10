@@ -19,7 +19,8 @@ and again:
 * [link boost_taar.quickstart.hello A Hello World HTTP Server]: a
   complete program serving a single GET endpoint.
 * [link boost_taar.quickstart.tour A Whirlwind Tour]: stock responses,
-  JSON, path arguments, static files, and hand-written handlers.
+  JSON, path arguments, static files, hand-written handlers, per-connection
+  and per-session state, JSON-RPC, MCP, OpenAPI, and graceful shutdown.
 
 [section:requirements Requirements]
 
@@ -138,13 +139,13 @@ type and the `co_return` change.
 [heading Serving static files]
 
     http_session.register_request_handler(
-        method == http::verb::get && target == "/{*}",
+        method == http::verb::get && target == "/{*path}",
         taar::handler::htdocs {document_root});
 
 [heading Custom handler]
 
     http_session.register_request_handler(
-        method == http::verb::put && target == "/special/{*}",
+        method == http::verb::put && target == "/special/{*path}",
         [](http::request<http::empty_body> const& request,
            taar::matcher::context const& context)
             -> http::message_generator
@@ -153,10 +154,104 @@ type and the `co_return` change.
                 http::status::ok, request.version()};
             res.set(http::field::content_type, "text/plain");
             res.keep_alive(request.keep_alive());
-            res.body() = "Special path is: " + context.path_args.at("*");
+            res.body() = "Special path is: " + context.path_args.at("path");
             res.prepare_payload();
             return res;
         });
+
+[heading Per-connection state]
+
+Give the session a context type and ask for it in a handler. One object
+is created per TCP connection and shared by every request on it:
+
+    struct conn_state { int requests = 0; };
+
+    taar::session::basic_http<conn_state> http_session;
+    http_session.register_request_handler(
+        method == http::verb::get && target == "/stats",
+        taar::handler::rest([](conn_state& c)
+        {
+            return boost::json::value {{"requests", ++c.requests}};
+        }));
+
+[heading Cookie sessions]
+
+Keyed state lives in a `context_store`; `with_session` resolves the key
+from a cookie (or header), creates the entry when allowed, locks it for
+the request and injects it:
+
+    struct user_session { int visits = 0; };
+    taar::context_store<std::string, user_session> sessions {std::chrono::minutes {30}};
+
+    http_session.register_request_handler(
+        method == http::verb::get && target == "/",
+        taar::handler::with_session(
+            sessions,
+            taar::handler::session_key::cookie {"sid"},
+            taar::handler::session_policy::create_if_missing,
+            taar::handler::rest([](user_session& s) { return ++s.visits; })));
+
+With `session_policy::require` a request without a valid key is answered
+`401` before the handler runs.
+
+[heading JSON-RPC 2.0]
+
+An endpoint owns a registry of methods and hands you one handler for one
+route. Batches, notifications and error codes are handled for you:
+
+    taar::jsonrpc::endpoint<> rpc;
+    rpc.method("add", [](int a, int b) { return a + b; },
+        taar::jsonrpc::rpc_arg("a"), taar::jsonrpc::rpc_arg("b"));
+
+    http_session.register_request_handler(
+        method == http::verb::post && target == "/rpc", rpc.handler());
+
+[heading MCP]
+
+An MCP endpoint composes a JSON-RPC endpoint and adds the protocol's
+lifecycle, tools, resources and sessions. The tool's `inputSchema` is
+derived from the callable's parameter types:
+
+    struct notes { std::vector<std::string> items; };
+    taar::mcp::endpoint<notes> mcp {{.name = "notes", .version = "1.0.0"}};
+    mcp.tool("notes/add", "Append a note",
+        [](notes& n, std::string text) { n.items.push_back(text); },
+        taar::mcp::mcp_arg("text", "The note"));
+
+    http_session.register_request_handler(
+        method == http::verb::get && target == "/mcp", mcp.stream_handler());
+    http_session.register_request_handler(target == "/mcp", mcp.handler());
+
+[heading OpenAPI]
+
+Describe routes as you register them and serve the generated document:
+
+    taar::openapi::generator openapi {{.title = "Demo", .version = "1.0.0"}};
+
+    http_session.register_request_handler(
+        method == http::verb::get && target == "/api/sum/{a}/{b}",
+        taar::handler::rest([](int a, int b) { return a + b; },
+            taar::handler::path_arg("a", "First addend"),
+            taar::handler::path_arg("b", "Second addend")),
+        openapi.describe("Add two numbers"));
+
+    http_session.register_request_handler(
+        method == http::verb::get && target == "/openapi.json", openapi.handler());
+
+[heading Graceful shutdown]
+
+Emit the cancellation signals from a signal handler instead of stopping
+the `io_context`: the acceptor stops, in-flight requests complete, idle
+connections close, and `io.run()` returns:
+
+    taar::cancellation_signals signals;
+    boost::asio::signal_set os_signals {io, SIGINT, SIGTERM};
+    os_signals.async_wait([&](auto, auto) { signals.emit(); });
+
+    boost::asio::co_spawn(
+        io,
+        taar::server::tcp("0.0.0.0", "8080", http_session, signals),
+        boost::asio::bind_cancellation_slot(signals.slot(), taar::ignore_and_rethrow));
 
 [endsect]
 

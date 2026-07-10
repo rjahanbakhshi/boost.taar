@@ -11,14 +11,14 @@ Boost.Taar is a portable, header-only C++23 library that provides building
 blocks for writing HTTP servers on top of __Asio__, __Beast__,
 __Url__, and __Json__.
 
-The library is organised around four ideas:
+The HTTP layer is organised around four ideas:
 
 * A [link boost_taar.intro.matchers /matcher DSL/] for selecting which
   handler should serve a given HTTP request.
 * A [link boost_taar.intro.handlers /handler/] family that adapts ordinary
-  callables into HTTP message generators, with automatic argument
-  extraction from path templates, query parameters, headers, cookies, and
-  message bodies.
+  callables into HTTP responders, with automatic argument extraction
+  from path templates, query parameters, headers, cookies, and message
+  bodies, and automatic injection of per-connection or per-session state.
 * An [link boost_taar.intro.session HTTP session coroutine] that owns the
   request/response lifecycle for one connection, dispatching to registered
   matcher + handler pairs and reporting soft and hard errors through
@@ -26,6 +26,11 @@ The library is organised around four ideas:
 * A [link boost_taar.intro.server TCP server coroutine] that accepts
   connections and spawns an HTTP session per connection, integrated with
   Asio's cancellation machinery.
+
+On top of that transport sit three optional
+[link boost_taar.intro.layers protocol layers] that reuse the same
+callables and the same state objects: a JSON-RPC 2.0 endpoint, a Model
+Context Protocol (MCP) server endpoint, and an OpenAPI document generator.
 
 The library is header-only and does not require linking against a Taar
 binary. It does depend on the compiled Boost libraries that __Asio__,
@@ -40,6 +45,10 @@ boolean operators (`&&`, `||`, `!`) and with relational operators
 
     method == http::verb::get && target == "/api/sum/{a}/{b}"
 
+Every matcher also carries a compile-time description of the constraints
+it imposes, which is what lets the OpenAPI generator document a route
+without re-parsing the expression.
+
 [endsect]
 
 [section:handlers Handlers]
@@ -49,15 +58,35 @@ with two adapters:
 
 * `taar::handler::rest` wraps a plain callable. Arguments declared on the
   callable are produced by /argument providers/ such as `path_arg`,
-  `query_arg`, `header_arg`, `cookie_arg`, and `body_arg`. The return
-  value of the callable is converted into an HTTP response via the
+  `query_arg`, `header_arg`, `cookie_arg`, `string_body_arg`,
+  `json_body_arg` and `url_encoded_form_data_arg`. The return value of
+  the callable is converted into an HTTP response via the
   `tag_invoke`-based `response_from` extension point, so user-defined
   return types are supported out of the box.
 * `taar::handler::htdocs` serves static documents from a root directory,
   with content-type inferred from the file extension.
 
 You can also supply a hand-written callable with the signature
-`(request, context) -> http::message_generator`.
+`(request, context) -> http::message_generator`, or one returning a
+`chunked_response` / `async_generator` for streaming.
+
+[heading Contexts]
+
+A callable may start with parameters of the form `T&`, `T const&` or
+`std::shared_ptr<T>` where `T` is a /context type in scope/. Those
+parameters are not fed by argument providers; the library injects the
+matching object:
+
+* the /connection context/ of a `taar::session::basic_http<T>`, one
+  object per TCP connection, shared by every request on it;
+* a /keyed context/ added by `taar::handler::with_session`, looked up in
+  a `taar::context_store` by a cookie or header value, with idle expiry
+  and per-key serialisation;
+* in the MCP layer, the /session/ object identified by `Mcp-Session-Id`.
+
+Asking for a type that is not in scope is a compile-time error at the
+registration site, so a handler cannot silently run without the state it
+expects.
 
 [endsect]
 
@@ -75,6 +104,10 @@ response) from /hard errors/ (connection-level problems that take the
 connection down). Both have pluggable handlers, defaulting to sane
 behaviour.
 
+`register_request_handler` accepts trailing /registration observers/,
+callables invoked once with the route's matcher metadata and handler.
+This is how `openapi::generator::describe` learns about a route.
+
 [endsect]
 
 [section:server Servers]
@@ -82,6 +115,32 @@ behaviour.
 The `taar::server::tcp` coroutine binds, listens, and accepts connections,
 spawning one HTTP session per connection. It integrates with Asio
 cancellation signals so a single signal can shut down the whole server.
+
+[endsect]
+
+[section:layers Protocol layers]
+
+Each layer is an ordinary object you own. It keeps its own registry of
+callables and hands you a handler to register on one HTTP route.
+
+* `taar::jsonrpc::endpoint<Context...>` implements JSON-RPC 2.0 on a
+  single `POST` route: named parameters bound with `rpc_arg`, batches,
+  notifications (answered `202`), the standard error codes, and a
+  replaceable mapping from exceptions to error objects.
+* `taar::mcp::endpoint<Session, Context...>` implements the Model Context
+  Protocol over Streamable HTTP by composing a JSON-RPC endpoint: tools
+  with input schemas derived from parameter types, resources and URI
+  templates, the `initialize` lifecycle, sessions identified by
+  `Mcp-Session-Id`, and a server-to-client event stream fed by
+  `notify` and `broadcast`.
+* `taar::openapi::generator` records REST routes at registration time and
+  renders an OpenAPI 3.1 document from the matcher metadata, the argument
+  providers and the callable's return type.
+
+The same domain function can serve all three surfaces; each layer maps
+its arguments and its exceptions natively, so domain code stays
+protocol-agnostic. See [link boost_taar.design.layers the design notes]
+for the rationale.
 
 [endsect]
 

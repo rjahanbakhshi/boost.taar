@@ -24,6 +24,15 @@ reference documentation alone.
 * [link boost_taar.design.async The asynchronous model]: how
   coroutines thread through the session, the handlers, and streaming
   responses.
+* [link boost_taar.design.layers Layers, not a framework]: how REST,
+  JSON-RPC, MCP and OpenAPI sit on one HTTP transport.
+* [link boost_taar.design.contexts Contexts and keyed state]: the three
+  scopes of state a handler can ask for, and how `context_store` keeps
+  them safe.
+* [link boost_taar.design.errors Error mapping per surface]: why domain
+  code throws plain exceptions and each layer maps them.
+* [link boost_taar.design.protocols Protocol decisions]: the choices made
+  where JSON-RPC, MCP and OpenAPI leave room.
 
 [section:why_header_only Why header-only?]
 
@@ -60,10 +69,12 @@ something that takes the connection down: a peer disconnect mid-read, a
 write that fails because the socket is closed.
 
 Both have pluggable handlers installed on a session via
-`set_soft_error_handler` and `set_hard_error_handler`. The defaults are
-chosen so that you can build a useful service without overriding either:
-soft errors become 400/404/415 responses with a short text body, and hard
-errors are logged via the session's error reporter.
+`set_soft_error_handler` and `set_hard_error_handler`. The default soft
+handler answers library argument errors with `400` and a short text body
+and rethrows everything else, which then reaches the hard error handler
+and closes the connection. Applications that throw their own exceptions
+from handlers install a soft error handler that maps them (see
+`examples/rest_crud_server.cpp`).
 
 [endsect]
 
@@ -82,6 +93,13 @@ This is the same technique that __Boost_Spirit__, __Boost_Hana__, and
 __Boost_Proto__ rely on. The cost is that diagnostics for an ill-formed
 matcher are longer than they would be with a runtime API; the benefit is
 that route dispatch is a flat sequence of `if`s with no virtual calls.
+
+The same expression also builds a type-level description of itself: the
+`metadata_type` of the resulting operand is an AST of leaf tags joined by
+`and_`, `or_` and `not_`, and the operand stores what each leaf captured
+(the verb, the path template, the header value). That is the only
+information the OpenAPI generator uses, so matching logic and
+documentation can never disagree.
 
 [endsect]
 
@@ -133,6 +151,11 @@ additionally lets the producer set the HTTP status and headers (by
 chunk goes on the wire. The session drives the generator and writes each
 yielded value using HTTP chunked transfer-encoding.
 
+Server-push streams that wait for events produced elsewhere (the MCP
+event stream, a chat room) read from a `taar::async_channel<T>`: any
+thread pushes, the generator `co_await`s `async_receive`, and `close()`
+ends the stream.
+
 [heading Cancellation]
 
 Shutdown is cooperative. A `taar::cancellation_signals` pool hands a
@@ -140,6 +163,141 @@ cancellation slot to every spawned coroutine; emitting on the pool
 (typically from a `SIGINT`/`SIGTERM` handler) unwinds the acceptor and
 the in-flight sessions cleanly, and the cancellation propagates into a
 streaming generator's pending `co_await`.
+
+[endsect]
+
+[section:layers Layers, not a framework]
+
+The HTTP session, the matchers and `handler::rest` form the transport and
+REST layer. JSON-RPC, MCP and OpenAPI are separate objects layered on top
+of it rather than modes of the session:
+
+* each layer is user-owned and keeps its own registry, so a program can
+  have several JSON-RPC endpoints or none;
+* each layer hands the session an ordinary handler for one route, so
+  routing, keep-alive, limits, contexts and error handling are shared;
+* MCP composes a JSON-RPC endpoint instead of re-implementing it, and
+  custom MCP methods are plain JSON-RPC methods;
+* REST has no registry object of its own: routes are registered directly
+  on the session, and the OpenAPI generator observes those registrations.
+
+The binding machinery is shared too. `jsonrpc::detail::bind_method`
+turns a callable plus argument providers into an invoker and a parameter
+description; `handler::rest`, JSON-RPC methods, MCP tools and MCP
+resources all use the same context-injection rules and the same
+`rest_arg_cast` conversions, which is what lets one `int add(calc&, int,
+int)` serve all three surfaces unchanged.
+
+[endsect]
+
+[section:contexts Contexts and keyed state]
+
+A handler can ask for state in three scopes by declaring leading
+parameters:
+
+* /connection/: `basic_http<T>` constructs one `T` when a connection is
+  accepted and destroys it when the connection closes. Keep-alive makes
+  this the natural home for per-client counters and caches.
+* /keyed/: a `context_store<Key, T>` holds one `T` per key with idle
+  expiry; `with_session` resolves the key from a cookie or header
+  (minting one when allowed), locks the entry for the duration of the
+  request and injects the `T`. The MCP endpoint uses the same store for
+  its sessions keyed by `Mcp-Session-Id`.
+* /none/: handlers without context parameters work in every scope.
+
+Contexts are matched by type, in any order, so adding a context parameter
+never shifts the argument providers. `T&` and `T const&` are preferred;
+`std::shared_ptr<T>` is accepted for handlers that need to retain the
+object beyond the request.
+
+`context_store` is designed around three facts: requests for the same key
+may arrive concurrently on different connections and threads, so each
+entry has an asynchronous lock that serialises them while requests for
+different keys run in parallel; entries must disappear when clients go
+away without telling us, so every access touches a timestamp and sweeps
+expired entries opportunistically (no background timer); and a locked or
+in-flight entry must never be swept. Keys minted by the store are 128
+random bits as hexadecimal, safe in cookies and headers. Set-Cookie uses
+`Path=/; HttpOnly; SameSite=Lax` by default and never sets an expiry: the
+store's idle timeout is the session lifetime.
+
+[endsect]
+
+[section:errors Error mapping per surface]
+
+Domain code throws plain exceptions and knows nothing about HTTP, JSON-RPC
+or MCP. Each layer maps exceptions where they cross into its protocol, with
+a default and a hook:
+
+[table
+[[Surface][Default][Hook]]
+[[REST][library argument errors -> `400`; others close the connection]
+ [`set_soft_error_handler`]]
+[[JSON-RPC][argument errors -> `-32602` with the detail in `data`; unknown
+ method -> `-32601`; other exceptions -> `-32603` with `what()`]
+ [`set_error_mapper`]]
+[[MCP tools][argument errors -> `-32602`; other exceptions -> a result with
+ `isError: true` and `what()` as text]
+ [`set_tool_error_handler`, then the JSON-RPC mapper]]
+]
+
+A throwing mapper falls back to the default, so an error in error handling
+cannot take a connection down.
+
+[endsect]
+
+[section:protocols Protocol decisions]
+
+Where the specifications leave room, Taar makes these choices:
+
+[heading JSON-RPC 2.0]
+
+* Every JSON response, including error objects, is HTTP `200`. Only
+  notifications (and all-notification batches) answer `202` with an empty
+  body.
+* Batches are processed element by element; one failure never aborts its
+  siblings. An empty batch is a single `-32600` object. An invalid element
+  is answered with `-32600` and its `id` if that was a string, number or
+  null.
+* Parameters are named; a positional array is `-32602`. Unknown parameters
+  are ignored. `std::optional<T>` and `with_default` make a parameter
+  optional. Method names are case-sensitive; registering a name twice
+  throws at startup.
+
+[heading MCP]
+
+* Supported protocol revisions are `2025-11-25`, `2025-06-18` and
+  `2025-03-26`. A request for a supported version is echoed; anything else
+  is answered with the newest supported version, as the specification asks.
+  A request carrying an unsupported `MCP-Protocol-Version` header is `400`.
+* Stateful endpoints mint `Mcp-Session-Id` on `initialize`; later requests
+  without it are `400`, with an unknown or expired id `404`, and `DELETE`
+  ends the session. Stateless endpoints issue and require no id.
+* JSON-RPC batches are rejected (`-32600`), following the current
+  transport. A JSON-RPC response or notification posted by the client is
+  acknowledged with `202`.
+* `tools/call` renders scalar results as text and wraps them as
+  `structuredContent: {"result": ...}`; object results are passed through
+  as `structuredContent`; `void` yields an empty `content` array. Unknown
+  tools and bad arguments are `-32602`; an unknown resource is `-32002`.
+* The `GET` event stream is one per session (`409` for a second), fed by
+  `notify`/`broadcast`; messages queued before a stream opens are kept.
+  Deleting or sweeping the session ends the stream. `notify` does not
+  refresh the session's idle timer.
+
+[heading OpenAPI]
+
+* A route is expressible when its matcher is a conjunction of exactly one
+  `target == ...` and at least one `method == ...` (several may be joined
+  with `||`), plus optional header, cookie and version constraints.
+  Negation, `!=` and `||` over paths are rejected at compile time rather
+  than documented approximately.
+* Header and cookie constraints become required parameters with a `const`
+  schema. Path placeholders not bound by a `path_arg` are still declared;
+  a greedy `{*name}` renders as `{name}` with a note.
+* The response schema is derived from the callable's return type when the
+  built-in conversions apply; a hand-written `http::response` documents
+  only a generic `200`. Per-operation `responses` override the default.
 
 [endsect]
 

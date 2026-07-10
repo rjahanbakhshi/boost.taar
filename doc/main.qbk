@@ -57,6 +57,12 @@ The library is organised around four ideas:
 * a [link boost_taar.intro.server TCP server coroutine] that accepts
   connections and dispatches them to the session.
 
+On top of the HTTP layer sit three optional protocol layers that reuse
+the same callables and state: a JSON-RPC 2.0 endpoint, a Model Context
+Protocol (MCP) server endpoint, and an OpenAPI 3.1 document generator.
+Handlers may also receive per-connection or per-session state objects by
+simply declaring a parameter of the right type.
+
 All of it is asynchronous by construction. The session and the TCP
 acceptor are C++20 coroutines, and a request handler can itself be a
 coroutine: declare its result as `taar::awaitable<T>` and `co_await`

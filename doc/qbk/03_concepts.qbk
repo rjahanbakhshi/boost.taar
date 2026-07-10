@@ -20,6 +20,10 @@ chapter and can be reached from the entries below.
   handler's return value into an HTTP response.
 * [link boost_taar.concepts.rest_arg_cast rest_arg_cast]: converts an
   argument provider's output into the type a handler expects.
+* [link boost_taar.concepts.context_aware Context-aware handler]: a
+  handler that receives the contexts in scope.
+* [link boost_taar.concepts.observer Registration observer]: a callable
+  told about every route as it is registered.
 
 [section:matcher Matcher]
 
@@ -40,6 +44,16 @@ Given an instance `m` of a /Matcher/, a request `req`, a `context` object
  May write to `ctx.path_args` and other context state.]]
 ]
 
+[heading Metadata]
+
+A composed matcher is a `matcher::operand<Callable, Metadata>`. `Metadata`
+is a type-level AST (`and_`, `or_`, `not_` over leaf tags such as
+`method_eq_constraint` and `target_constraint`), and `captures()` returns
+the values each leaf captured, in leaf order. Generators inspect the AST
+at compile time to decide whether they can express a route, and read the
+captures at run time. A plain callable used as a matcher has
+`any_metadata` and cannot be documented.
+
 [endsect]
 
 [section:arg_provider Argument Provider]
@@ -48,9 +62,31 @@ An /Argument Provider/ is an object that, given an HTTP request, produces
 exactly one argument for a wrapped callable. Argument providers are
 supplied as the trailing arguments to `taar::handler::rest`.
 
-The library exports `path_arg`, `query_arg`, `header_arg`, `cookie_arg`, and
-`body_arg`. User code can define new argument providers by satisfying the
-required expressions.
+The library exports `path_arg`, `query_arg`, `header_arg`, `cookie_arg`,
+`string_body_arg`, `json_body_arg`, `url_encoded_form_data_arg`,
+`target_arg` and `body_size_arg`, plus `with_default` to substitute a
+value when a provider reports `argument_not_found`. User code can define
+new argument providers by satisfying the required expressions.
+
+[heading Required expressions]
+
+Given a provider `p`, a request `req` whose body type the provider
+declares, and a `matcher::context` `ctx`:
+
+[table
+[[Expression][Semantics]]
+[[`p(req, ctx)`][Returns `boost::system::result<V>`. The value is passed
+ through `rest_arg_cast` to the callable's parameter type; an error is
+ reported to the soft error handler.]]
+[[`p.name()`][The argument's name, used in diagnostics and documentation.]]
+[[`p.description()`][Optional. A human-readable description used by
+ documentation generators. Named providers take it as a trailing
+ constructor string; body providers take `handler::description{...}`.]]
+]
+
+The JSON-RPC and MCP layers have their own providers (`rpc_arg`,
+`mcp_arg`, `uri_arg`) with the same shape but a different first
+argument: the decoded call rather than the HTTP request.
 
 [endsect]
 
@@ -59,18 +95,57 @@ required expressions.
 Any user-defined return type can be converted to an HTTP response by
 overloading the `boost::taar::response_from_tag` tag (declared in
 `<boost/taar/core/response_from_tag.hpp>`). This extension point is the
-basis for the automatic JSON conversion of `boost::json::value`, the
-string conversion of `std::string` and `std::string_view`, and the file
-conversion used by `taar::handler::htdocs`.
+basis for the automatic JSON conversion of `boost::json::value`,
+`boost::json::object` and `boost::json::array`, the text conversion of
+strings and arithmetic types, and the file conversion used by
+`taar::handler::htdocs`.
 
 [endsect]
 
 [section:rest_arg_cast rest_arg_cast]
 
 `rest_arg_cast` is the extension point used by argument providers to turn a
-string view extracted from the request into the typed argument of a
-callable. Customise it by overloading
-`boost::taar::handler::rest_arg_cast_tag` for your type.
+string view (or JSON value) extracted from the request into the typed
+argument of a callable. Customise it by overloading
+`boost::taar::handler::rest_arg_cast_tag` for your type. Types that
+`boost::json::value_to` understands, including `boost::describe`d
+structs, work without any overload.
+
+[endsect]
+
+[section:context_aware Context-aware handler]
+
+A /Context-aware handler/ opts in to receiving the contexts the session
+has in scope. The handlers produced by `handler::rest`, `with_session`,
+`jsonrpc::endpoint::handler()` and `mcp::endpoint::handler()` all satisfy
+it.
+
+[table
+[[Expression][Semantics]]
+[[`H::context_aware`][`static constexpr bool`, `true`.]]
+[[`typename H::request_type`][The `http::request<Body>` the handler reads;
+ the session parses the body accordingly.]]
+[[`h(ctxs, req, ctx)`][`ctxs` is a `handler::contexts<C...>`, a tuple of
+ `shared_ptr<C>`; `req` is `request_type const&`; `ctx` is
+ `matcher::context const&`. Returns a response, an awaitable of one, or a
+ streaming generator.]]
+]
+
+Handlers that are not context-aware keep the classic
+`(request, matcher::context)` signature. Wrappers such as `with_session`
+extend `ctxs` with their own object before calling the inner handler, so
+the set of types in scope grows outward-in.
+
+[endsect]
+
+[section:observer Registration observer]
+
+A /Registration observer/ is any callable accepting
+`(matcher::operand const&, Handler const&)`, passed as a trailing
+argument to `register_request_handler`. It runs once, before the route is
+installed, and may inspect the operand's metadata and captures and the
+handler's `params()` and `callable_result_type` when present.
+`openapi::generator::describe(...)` returns one.
 
 [endsect]
 
