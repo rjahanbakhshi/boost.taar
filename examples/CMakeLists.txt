@@ -2,49 +2,23 @@ project(boost-taar-examples)
 
 find_package(Boost 1.84 CONFIG REQUIRED)
 
-add_executable(htdocs_server EXCLUDE_FROM_ALL)
-set_target_properties(htdocs_server PROPERTIES CXX_STANDARD 23)
-set_target_properties(htdocs_server PROPERTIES UNITY_BUILD ${ENABLE_UNITY_BUILD})
-target_sources(htdocs_server PRIVATE htdocs_server.cpp)
-target_link_libraries(htdocs_server PRIVATE boost-taar)
-
-add_executable(mixed_server EXCLUDE_FROM_ALL)
-set_target_properties(mixed_server PROPERTIES CXX_STANDARD 23)
-set_target_properties(mixed_server PROPERTIES UNITY_BUILD ${ENABLE_UNITY_BUILD})
-target_sources(mixed_server PRIVATE mixed_server.cpp)
-target_link_libraries(mixed_server PRIVATE boost-taar)
-
-add_executable(awaitable_server EXCLUDE_FROM_ALL)
-set_target_properties(awaitable_server PROPERTIES CXX_STANDARD 23)
-set_target_properties(awaitable_server PROPERTIES UNITY_BUILD ${ENABLE_UNITY_BUILD})
-target_sources(awaitable_server PRIVATE awaitable_server.cpp)
-target_link_libraries(awaitable_server PRIVATE boost-taar)
-
-add_executable(chunked_server EXCLUDE_FROM_ALL)
-set_target_properties(chunked_server PROPERTIES CXX_STANDARD 23)
-set_target_properties(chunked_server PROPERTIES UNITY_BUILD ${ENABLE_UNITY_BUILD})
-target_sources(chunked_server PRIVATE chunked_server.cpp)
-target_link_libraries(chunked_server PRIVATE boost-taar)
-
-add_executable(response_stream EXCLUDE_FROM_ALL)
-set_target_properties(response_stream PROPERTIES CXX_STANDARD 23)
-set_target_properties(response_stream PROPERTIES UNITY_BUILD ${ENABLE_UNITY_BUILD})
-target_sources(response_stream PRIVATE response_stream.cpp)
-target_link_libraries(response_stream PRIVATE boost-taar)
-
-add_executable(websocket_server EXCLUDE_FROM_ALL)
-set_target_properties(websocket_server PROPERTIES CXX_STANDARD 23)
-set_target_properties(websocket_server PROPERTIES UNITY_BUILD ${ENABLE_UNITY_BUILD})
-target_sources(websocket_server PRIVATE websocket_server.cpp)
-target_link_libraries(websocket_server PRIVATE boost-taar)
-
-add_custom_target(
-    examples DEPENDS
-        htdocs_server
-        mixed_server
-        awaitable_server
-        chunked_server
-        response_stream
-        websocket_server
+set(TAAR_EXAMPLES
+    connection_state_server
+    cookie_session_server
+    hello_server
+    htdocs_server
+    jsonrpc_server
+    mcp_server
+    proxy_server
+    rest_crud_server
+    streaming_server
+    websocket_server
 )
 
+foreach(example IN LISTS TAAR_EXAMPLES)
+    add_executable(${example} EXCLUDE_FROM_ALL ${example}.cpp)
+    set_target_properties(${example} PROPERTIES CXX_STANDARD 23 UNITY_BUILD ${ENABLE_UNITY_BUILD})
+    target_link_libraries(${example} PRIVATE boost-taar)
+endforeach()
+
+add_custom_target(examples DEPENDS ${TAAR_EXAMPLES})

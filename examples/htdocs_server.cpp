@@ -6,74 +6,58 @@
 //
 // Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
+// Static file server. handler::htdocs maps the greedy {*path} capture onto a
+// document root, infers content types, and serves index.html for directories.
+//
+//   ./htdocs_server 8080 ./doc
+//   curl localhost:8080/main.qbk
+//
 
-#include <boost/json/value.hpp>
-#include <boost/taar/handler/htdocs.hpp>
-#include <boost/taar/session/http.hpp>
-#include <boost/taar/server/tcp.hpp>
-#include "boost/taar/matcher/method.hpp"
-#include "boost/taar/matcher/target.hpp"
 #include <boost/taar/core/cancellation_signals.hpp>
 #include <boost/taar/core/ignore_and_rethrow.hpp>
-#include <boost/beast/http.hpp>
-#include <boost/asio/ip/tcp.hpp>
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/signal_set.hpp>
+#include <boost/taar/handler/htdocs.hpp>
+#include <boost/taar/matcher/method.hpp>
+#include <boost/taar/matcher/target.hpp>
+#include <boost/taar/server/tcp.hpp>
+#include <boost/taar/session/http.hpp>
 #include <boost/asio/bind_cancellation_slot.hpp>
+#include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
-#include <thread>
+#include <boost/asio/signal_set.hpp>
 #include <iostream>
-#include <cstdlib>
+#include <thread>
+#include <vector>
 
 int main(int argc, char* argv[])
 {
-    if (argc != 3)
-    {
-        std::cerr << "Usage: htdocs_server port /example/document/root\n";
-        return EXIT_FAILURE;
-    }
-
     namespace net = boost::asio;
     namespace http = boost::beast::http;
     namespace taar = boost::taar;
-    using net::co_spawn;
-    using net::bind_cancellation_slot;
-    using net::detached;
     using taar::matcher::method;
     using taar::matcher::target;
 
-    net::io_context io_context;
-
-    net::signal_set os_signals(io_context, SIGINT, SIGTERM);
-    os_signals.async_wait([&](auto, auto) { io_context.stop(); });
-
-    taar::session::http http_session;
-
-    http_session.register_request_handler(
-        method == http::verb::get && target == "/{*path}",
-        taar::handler::htdocs {argv[2]}
-    );
-
-    taar::cancellation_signals cancellation_signals;
-    co_spawn(
-        io_context,
-        taar::server::tcp(
-            "0.0.0.0",
-            argv[1],
-            http_session,
-            cancellation_signals,
-            [](net::ip::tcp::endpoint const& endpoint)
-            {
-                std::clog << "HTTP server is listening on port " << endpoint.port() << '\n';
-            }),
-        bind_cancellation_slot(cancellation_signals.slot(), taar::ignore_and_rethrow));
-
-    std::vector<std::jthread> threads;
-    for (int i = 0; i < 8; ++i)
+    if (argc != 3)
     {
-        threads.emplace_back([&]{io_context.run();});
+        std::cerr << "Usage: htdocs_server <port> <document-root>\n";
+        return 1;
     }
 
-    return EXIT_SUCCESS;
-}
+    taar::session::http session;
+    session.register_request_handler(
+        method == http::verb::get && target == "/{*path}",
+        taar::handler::htdocs {argv[2]});
 
+    net::io_context io;
+    taar::cancellation_signals signals;
+    net::signal_set os_signals {io, SIGINT, SIGTERM};
+    os_signals.async_wait([&](auto, auto) { signals.emit(); });
+
+    net::co_spawn(
+        io,
+        taar::server::tcp("0.0.0.0", argv[1], session, signals,
+            [](net::ip::tcp::endpoint const& ep) { std::clog << "Listening on " << ep << '\n'; }),
+        net::bind_cancellation_slot(signals.slot(), taar::ignore_and_rethrow));
+
+    std::vector<std::jthread> threads;
+    for (int i = 0; i < 4; ++i) threads.emplace_back([&] { io.run(); });
+}

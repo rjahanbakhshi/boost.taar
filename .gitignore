@@ -12,3 +12,6 @@ compile_commands.json
 .python-version
 Pipfile
 Pipfile.lock
+
+# Secondary build trees
+build-*/

@@ -63,8 +63,9 @@ int main(int argc, char* argv[])
 
     net::io_context io_context;
 
+    taar::cancellation_signals cancellation_signals;
     net::signal_set os_signals(io_context, SIGINT, SIGTERM);
-    os_signals.async_wait([&](auto, auto) { io_context.stop(); });
+    os_signals.async_wait([&](auto, auto) { cancellation_signals.emit(); });
 
     taar::session::http http_session;
 
@@ -126,7 +127,6 @@ int main(int argc, char* argv[])
             co_return;
         });
 
-    taar::cancellation_signals cancellation_signals;
     net::co_spawn(
         io_context,
         taar::server::tcp(
