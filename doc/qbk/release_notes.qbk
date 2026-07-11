@@ -31,6 +31,14 @@
   `response_from` accepts `boost::json::object` and `boost::json::array`.
 * `core::async_channel`: executor-agnostic asynchronous queue used for
   server-push streams.
+* `session::http`: responses follow the request's HTTP version and
+  keep-alive; pipelined requests are served in order; a peer closing an
+  idle connection is no longer reported as a hard error; shutdown lets
+  in-flight handlers finish and closes afterwards; mid-stream generator
+  exceptions reach the hard error handler.
+* Test suite extended with user-scenario coverage (dual-surface
+  consistency, transport and lifecycle e2e, streaming e2e, routing edge
+  cases) and a compile-fail probe harness under `test/compile_fail/`.
 * Matcher metadata: every matcher expression carries a compile-time
   description of its constraints and captured values.
 * Examples reorganised around use cases (hello, REST CRUD with OpenAPI,

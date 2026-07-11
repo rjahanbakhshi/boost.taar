@@ -156,13 +156,29 @@ event stream, a chat room) read from a `taar::async_channel<T>`: any
 thread pushes, the generator `co_await`s `async_receive`, and `close()`
 ends the stream.
 
-[heading Cancellation]
+[heading Cancellation and graceful shutdown]
 
 Shutdown is cooperative. A `taar::cancellation_signals` pool hands a
 cancellation slot to every spawned coroutine; emitting on the pool
-(typically from a `SIGINT`/`SIGTERM` handler) unwinds the acceptor and
-the in-flight sessions cleanly, and the cancellation propagates into a
-streaming generator's pending `co_await`.
+(typically from a `SIGINT`/`SIGTERM` handler) stops the acceptor and
+cancels the idle read on every keep-alive connection, so idle connections
+close at once.
+
+A request whose handler is running when the signal arrives is allowed to
+finish: the session shields a plain (non-streaming) handler from
+cancellation, records that shutdown was requested, writes the handler's
+response with `Connection: close`, and ends the connection. Streaming
+handlers stay cancellable, because an open-ended stream would otherwise
+hold the process up; the cancellation propagates into the generator's
+pending `co_await` and the connection is dropped.
+
+Responses are always aligned with the request they answer: same HTTP
+version, and keep-alive only if the request allows it, the handler did not
+disable it, and the server is not shutting down. Pipelined requests are
+served in order from one per-connection buffer. A peer that closes an idle
+keep-alive connection is not an error; a generator that throws after
+chunks are on the wire truncates the response and reports the exception
+to the hard error handler.
 
 [endsect]
 

@@ -12,6 +12,8 @@
 
 #include <boost/asio/async_result.hpp>
 #include <boost/asio/cancellation_signal.hpp>
+#include <boost/asio/cancellation_state.hpp>
+#include <boost/asio/this_coro.hpp>
 #include <boost/asio/write.hpp>
 #include <boost/beast/http/fields.hpp>
 #include <boost/taar/handler/context_inject.hpp>
@@ -36,6 +38,7 @@
 #include <boost/beast/http/read.hpp>
 #include <boost/beast/http/write.hpp>
 #include <boost/beast/http/chunk_encode.hpp>
+#include <boost/beast/http/rfc7230.hpp>
 #include <boost/beast/http/serializer.hpp>
 #include <boost/beast/http/message_generator.hpp>
 #include <boost/beast/http/message.hpp>
@@ -138,6 +141,63 @@ auto async_write(
         message);
 }
 
+/// The peer closed (or the operation was cancelled) between requests: not an error.
+inline bool is_clean_close(boost::system::error_code const& ec)
+{
+    namespace asio_err = boost::asio::error;
+    namespace http_err = boost::beast::http;
+    return ec == asio_err::eof ||
+           ec == asio_err::operation_aborted ||
+           ec == http_err::error::end_of_stream;
+}
+
+/** Align a handler's response with the request: same HTTP version, and
+    keep-alive only if the request allows it, the handler did not disable
+    it, and the server is not shutting down. No-op for message_generator.
+*/
+template <typename Response>
+void finish_response(Response& response, unsigned version, bool keep_alive, bool shutting_down)
+{
+    if constexpr (requires { response.version(version); response.keep_alive(keep_alive); })
+    {
+        // Read the handler's intent before switching the version: a bare
+        // HTTP/1.0 message reports keep_alive() == false by default.
+        bool const handler_allows = response.keep_alive();
+        response.version(version);
+        response.keep_alive(keep_alive && handler_allows && !shutting_down);
+    }
+}
+
+/// Keep-alive semantics of a request header (what message::keep_alive() computes).
+inline bool header_keep_alive(boost::beast::http::request_header<> const& h)
+{
+    boost::beast::http::token_list tokens {h[boost::beast::http::field::connection]};
+    if (h.version() >= 11) return !tokens.exists("close");
+    return tokens.exists("keep-alive");
+}
+
+/// Shield the current awaitable thread: cancellation is recorded but neither
+/// forwarded to child operations nor turned into exceptions at co_await.
+inline awaitable<void> shield_from_cancellation()
+{
+    namespace net = boost::asio;
+    co_await net::this_coro::reset_cancellation_state(
+        net::enable_total_cancellation(), net::disable_cancellation());
+    co_await net::this_coro::throw_if_cancelled(false);
+}
+
+/// Reports whether cancellation was requested while the state was shielded,
+/// then restores the default (terminal-only) cancellation filter.
+inline awaitable<bool> observe_shutdown()
+{
+    namespace net = boost::asio;
+    auto const cs = co_await net::this_coro::cancellation_state;
+    bool const cancelled = cs.cancelled() != net::cancellation_type::none;
+    co_await net::this_coro::reset_cancellation_state(net::enable_terminal_cancellation());
+    co_await net::this_coro::throw_if_cancelled(true);
+    co_return cancelled;
+}
+
 inline bool is_transport_error(boost::system::error_code const& ec)
 {
     namespace asio_err = boost::asio::error;
@@ -225,7 +285,8 @@ awaitable<bool> write_chunked_response(
     StreamType& stream,
     unsigned version,
     bool keep_alive,
-    ::boost::asio::cancellation_slot cancellation_slot = {})
+    ::boost::asio::cancellation_slot cancellation_slot = {},
+    std::exception_ptr* mid_stream_error = nullptr)
 {
     namespace http = ::boost::beast::http;
     namespace net = ::boost::asio;
@@ -289,13 +350,15 @@ awaitable<bool> write_chunked_response(
     // yielding values), do NOT send the terminating chunk. The chunked
     // protocol has no way to signal failure once headers are on the wire,
     // so we drop the connection: the client sees a truncated response
-    // rather than a falsely-successful one.
+    // rather than a falsely-successful one. The exception is handed back
+    // so the session can report it through the hard error handler.
     try
     {
         generator.rethrow_if_exception();
     }
     catch (...)
     {
+        if (mid_stream_error) *mid_stream_error = std::current_exception();
         co_return false;
     }
 
@@ -430,6 +493,7 @@ public:
                 {
                     auto response = response_from(error_msg);
                     response.result(boost::beast::http::status::bad_request);
+                    detail::finish_response(response, req.version(), detail::header_keep_alive(req), false);
                     bool keep_alive = response.keep_alive();
                     co_await detail::async_write(stream, std::move(response));
                     co_return keep_alive;
@@ -486,6 +550,10 @@ public:
             std::get<0>(conn_ctx) = std::make_shared<Context>();
         }
 
+        // One buffer per connection: bytes of a pipelined request that arrive
+        // together with the previous one must survive into the next iteration.
+        flat_buffer buffer;
+
         try
         {
             for (auto cs = co_await this_coro::cancellation_state;
@@ -493,7 +561,6 @@ public:
                 cs = co_await this_coro::cancellation_state)
             {
                 // Read and parse the header and use the target to find the handler.
-                flat_buffer buffer;
                 http::request_parser<http::buffer_body> header_parser;
                 header_parser.header_limit(request_header_limit_);
                 header_parser.body_limit(request_body_limit_);
@@ -505,6 +572,11 @@ public:
 
                 if (header_ec)
                 {
+                    if (detail::is_clean_close(header_ec))
+                    {
+                        // Idle keep-alive connection closed by the peer, or shutdown.
+                        break;
+                    }
                     if (!detail::is_transport_error(header_ec))
                     {
                         // Protocol error. Send an appropriate error response.
@@ -739,7 +811,12 @@ public:
                 auto cs = co_await boost::asio::this_coro::cancellation_state;
                 auto cancellation_slot = cs.slot();
 
+                // Plain (non-streaming) handlers run shielded from cancellation
+                // so a shutdown lets the in-flight request finish; the response
+                // then closes the connection. Streaming handlers stay cancellable.
+                bool shutting_down = false;
                 std::exception_ptr eptr;
+                std::exception_ptr stream_error;
                 try
                 {
                     if constexpr (is_chunked_response<result_type>)
@@ -750,8 +827,10 @@ public:
                             conn_ctx,
                             body_parser.get(),
                             context);
-                        co_return co_await detail::write_chunked_response(
-                            generator, stream, version, keep_alive, cancellation_slot);
+                        bool const ka = co_await detail::write_chunked_response(
+                            generator, stream, version, keep_alive, cancellation_slot, &stream_error);
+                        if (stream_error) std::rethrow_exception(stream_error);
+                        co_return ka;
                     }
                     else if constexpr (is_async_generator<result_type>)
                     {
@@ -761,8 +840,10 @@ public:
                             conn_ctx,
                             body_parser.get(),
                             context);
-                        co_return co_await detail::write_chunked_response(
-                            generator, stream, version, keep_alive, cancellation_slot);
+                        bool const ka = co_await detail::write_chunked_response(
+                            generator, stream, version, keep_alive, cancellation_slot, &stream_error);
+                        if (stream_error) std::rethrow_exception(stream_error);
+                        co_return ka;
                     }
                     else if constexpr (is_awaitable<result_type>)
                     {
@@ -774,8 +855,10 @@ public:
                                 conn_ctx,
                                 body_parser.get(),
                                 context);
-                            co_return co_await detail::write_chunked_response(
-                                generator, stream, version, keep_alive, cancellation_slot);
+                            bool const ka = co_await detail::write_chunked_response(
+                                generator, stream, version, keep_alive, cancellation_slot, &stream_error);
+                            if (stream_error) std::rethrow_exception(stream_error);
+                            co_return ka;
                         }
                         else if constexpr (is_async_generator<typename result_type::value_type>)
                         {
@@ -785,48 +868,64 @@ public:
                                 conn_ctx,
                                 body_parser.get(),
                                 context);
-                            co_return co_await detail::write_chunked_response(
-                                generator, stream, version, keep_alive, cancellation_slot);
+                            bool const ka = co_await detail::write_chunked_response(
+                                generator, stream, version, keep_alive, cancellation_slot, &stream_error);
+                            if (stream_error) std::rethrow_exception(stream_error);
+                            co_return ka;
                         }
                         else
                         {
                             // Existing awaitable path
+                            co_await detail::shield_from_cancellation();
                             auto response = co_await handler::detail::response_from_invoke_handler(
                                 std::move(request_handler),
                                 conn_ctx,
                                 body_parser.get(),
                                 context);
+                            shutting_down = co_await detail::observe_shutdown();
 
-                            bool keep_alive = response.keep_alive();
+                            detail::finish_response(response, version, keep_alive, shutting_down);
+                            bool const ka = response.keep_alive();
                             co_await detail::async_write(stream, std::move(response));
-                            co_return keep_alive;
+                            co_return ka;
                         }
                     }
                     else
                     {
                         // Existing path: response_from_invoke -> async_write
+                        co_await detail::shield_from_cancellation();
                         auto response = co_await handler::detail::response_from_invoke_handler(
                             std::move(request_handler),
                             conn_ctx,
                             body_parser.get(),
                             context);
+                        shutting_down = co_await detail::observe_shutdown();
 
-                        bool keep_alive = response.keep_alive();
+                        detail::finish_response(response, version, keep_alive, shutting_down);
+                        bool const ka = response.keep_alive();
                         co_await detail::async_write(stream, std::move(response));
-                        co_return keep_alive;
+                        co_return ka;
                     }
                 }
                 catch (...)
                 {
                     eptr = std::current_exception();
                 }
+                if (stream_error)
+                {
+                    // Headers and some chunks are already on the wire: no error
+                    // response is possible. Surface it as a hard error instead.
+                    std::rethrow_exception(stream_error);
+                }
+                shutting_down = co_await detail::observe_shutdown() || shutting_down;
 
                 // An exception is thrown within the request handler.
-                co_return co_await wrapped_soft_error_handler_(
+                bool const ka = co_await wrapped_soft_error_handler_(
                     eptr,
                     stream,
                     body_parser.get(),
                     signals);
+                co_return ka && !shutting_down;
             }
         );
     }
@@ -996,6 +1095,7 @@ public:
             -> awaitable<bool>
             {
                 auto response = co_await response_from_invoke(handler, eptr);
+                detail::finish_response(response, request_header.version(), detail::header_keep_alive(request_header), false);
                 bool keep_alive = response.keep_alive();
                 co_await detail::async_write(stream, std::move(response));
                 co_return keep_alive;
