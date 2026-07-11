@@ -26,9 +26,12 @@ target_sources(
         test_constexpr_string.cpp
         test_context_store.cpp
         test_cookies.cpp
+        test_dual_surface.cpp
         test_e2e_context.cpp
         test_e2e_jsonrpc.cpp
         test_e2e_mcp.cpp
+        test_e2e_operational.cpp
+        test_e2e_streaming.cpp
         test_http_session.cpp
         test_is_http_response.cpp
         test_jsonrpc.cpp
@@ -52,6 +55,7 @@ target_sources(
         test_rest_arg.cpp
         test_rest_arg_cast_builtin.cpp
         test_rest_arg_cast_user.cpp
+        test_routing_edges.cpp
         test_tcp_server.cpp
         test_template_parser.cpp
         test_with_session.cpp
@@ -67,3 +71,5 @@ add_test(
     NAME ${PROJECT_NAME}
     COMMAND ${PROJECT_NAME}
 )
+
+add_subdirectory(compile_fail)
