@@ -230,6 +230,69 @@ BOOST_AUTO_TEST_CASE(test_e2e_streaming_generator_throwing_mid_stream_truncates_
     BOOST_TEST(generator_errors == 1);
 }
 
+BOOST_AUTO_TEST_CASE(test_e2e_streaming_mid_stream_throw_bypasses_custom_soft_error_handler)
+{
+    net::io_context io;
+    taar::session::http session;
+    std::atomic<int> soft_calls {0};
+    std::atomic<int> hard_calls {0};
+
+    // A soft handler that writes a full response must not run once chunks
+    // are on the wire: its bytes would corrupt the chunked framing.
+    session.set_soft_error_handler([&](std::exception_ptr)
+    {
+        ++soft_calls;
+        http::response<http::string_body> res {http::status::internal_server_error, 11};
+        res.body() = "{\"error\":\"late\"}";
+        res.prepare_payload();
+        return res;
+    });
+    session.set_hard_error_handler([&](std::exception_ptr ep)
+    {
+        try { std::rethrow_exception(ep); }
+        catch (std::runtime_error const&) { ++hard_calls; }
+        catch (...) {}
+    });
+
+    session.register_request_handler(
+        method == http::verb::get && target == "/boom",
+        rest([]() -> taar::chunked_response<std::string>
+        {
+            co_yield std::string {"a"};
+            co_yield std::string {"b"};
+            throw std::runtime_error {"mid-stream"};
+        }));
+    session.register_request_handler(
+        method == http::verb::get && target == "/early",
+        rest([]() -> taar::chunked_response<std::string>
+        {
+            throw std::runtime_error {"before first chunk"};
+            co_yield std::string {"never"};
+        }));
+
+    e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
+    {
+        auto socket = co_await connect(port);
+        co_await send_get(socket, "/boom");
+
+        beast::flat_buffer buffer;
+        parser_type parser;
+        co_await http::async_read_header(socket, buffer, parser);
+        BOOST_TEST(parser.get().result() == http::status::ok);
+        auto ec = co_await read_to_end(socket, buffer, parser);
+        BOOST_TEST((ec == http::error::partial_message));   // clean truncation, no trailing response
+        BOOST_TEST(parser.get().body() == "ab");
+        BOOST_TEST(soft_calls == 0);
+
+        // Before the first chunk nothing is on the wire: the soft handler applies.
+        auto early = co_await e2e::send_all(port, {e2e::make_request(http::verb::get, "/early")});
+        BOOST_TEST(early[0].result() == http::status::internal_server_error);
+        BOOST_TEST(early[0].body() == "{\"error\":\"late\"}");
+        BOOST_TEST(soft_calls == 1);
+    });
+    BOOST_TEST(hard_calls == 1);
+}
+
 BOOST_AUTO_TEST_CASE(test_e2e_streaming_websocket_echo_upgrade)
 {
     net::io_context io;
