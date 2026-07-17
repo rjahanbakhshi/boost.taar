@@ -376,7 +376,9 @@ public:
         }
 
     private:
+    /// @cond
         endpoint* self_;
+    /// @endcond
     };
 
     /// Returns the handler to register. The endpoint must outlive the session.
@@ -402,6 +404,7 @@ public:
     }
 
 private:
+/// @cond
     struct entry
     {
         method_info info;
@@ -412,6 +415,7 @@ private:
     std::unordered_map<std::string, entry> methods_;
     std::vector<std::string> order_;
     error_mapper mapper_ = default_error_mapper;
+/// @endcond
 };
 
 } // namespace boost::taar::jsonrpc

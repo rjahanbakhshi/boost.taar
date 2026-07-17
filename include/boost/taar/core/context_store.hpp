@@ -90,9 +90,11 @@ public:
     }
 
 private:
+/// @cond
     mutable std::mutex mutex_;
     bool locked_ = false;
     std::deque<std::move_only_function<void()>> waiters_;
+/// @endcond
 };
 
 } // namespace detail
@@ -187,6 +189,7 @@ public:
         }
 
     private:
+    /// @cond
         friend class context_store;
 
         void touch(time_point now) noexcept
@@ -199,6 +202,7 @@ public:
         std::atomic<duration::rep> last_activity_;
         std::atomic<int> in_flight_ {0};
         detail::async_lock lock_;
+    /// @endcond
     };
 
     using entry_ptr = std::shared_ptr<entry>;
@@ -236,6 +240,7 @@ public:
         explicit operator bool() const noexcept { return entry_ != nullptr; }
 
     private:
+    /// @cond
         friend class context_store;
 
         lock_guard(entry_ptr e, clock_function now)
@@ -256,6 +261,7 @@ public:
 
         entry_ptr entry_;
         clock_function now_;
+    /// @endcond
     };
 
     /** Construct a store.
@@ -425,6 +431,7 @@ public:
     }
 
 private:
+/// @cond
     bool expired(entry const& e, time_point now) const noexcept
     {
         return !e.in_flight() && now - e.last_activity() > idle_timeout_;
@@ -463,6 +470,7 @@ private:
     mutable std::mutex mutex_;
     std::unordered_map<Key, entry_ptr> entries_;
     time_point last_sweep_;
+/// @endcond
 };
 
 } // namespace boost::taar

@@ -340,8 +340,10 @@ public:
         }
 
     private:
+    /// @cond
         generator* owner_;
         operation op_;
+    /// @endcond
     };
 
     /// Describe the next registered route. Pass as a trailing argument of `register_request_handler`.
@@ -409,6 +411,7 @@ public:
     }
 
 private:
+/// @cond
     struct path_param
     {
         std::string name;
@@ -620,6 +623,7 @@ private:
     info info_;
     std::vector<server> servers_;
     std::vector<recorded> operations_;
+/// @endcond
 };
 
 } // namespace boost::taar::openapi

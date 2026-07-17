@@ -9,8 +9,7 @@
 
 This chapter walks through what you need to build against Boost.Taar,
 how to bring it into your own project, the smallest useful HTTP server
-you can write with it, and a tour of the four idioms you will see again
-and again:
+you can write with it, and a tour of the idioms you will see again and again:
 
 * [link boost_taar.quickstart.requirements Requirements]: supported
   compilers, Boost components, and CMake version.

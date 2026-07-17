@@ -73,10 +73,9 @@ inline bool is_notification(envelope const& env) noexcept
              `error::parse_error` themselves.
 
     Batch requests (top-level arrays of envelopes) are not handled here.
-    Phase B/C dispatch code iterates a parsed array and invokes this
-    function per element; per-spec, a batch whose array is empty or whose
-    elements all fail to parse is reported as a single
-    `invalid_request` response.
+    `jsonrpc::endpoint` iterates a parsed array and invokes this function
+    per element; per the specification, an empty batch is reported as a
+    single `invalid_request` response.
  */
 inline boost::system::result<envelope> parse_envelope(
     boost::json::value const& value)

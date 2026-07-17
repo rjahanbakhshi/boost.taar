@@ -149,6 +149,7 @@ public:
     }
 
 private:
+/// @cond
     struct waiter
     {
         std::uint64_t id;
@@ -176,6 +177,7 @@ private:
     std::deque<waiter> waiters_;
     std::uint64_t next_id_ = 0;
     bool closed_ = false;
+/// @endcond
 };
 
 } // namespace boost::taar

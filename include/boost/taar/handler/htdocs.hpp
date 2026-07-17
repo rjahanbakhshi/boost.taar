@@ -33,7 +33,7 @@ namespace boost::taar::handler {
 
     @code
     session.register_request_handler(
-        method == http::verb::get && target == "/{*}",
+        method == http::verb::get && target == "/{*path}",
         taar::handler::htdocs{"./public", "index.html"});
     @endcode
 
@@ -175,6 +175,7 @@ public:
     }
 
 private:
+/// @cond
     static boost::beast::http::message_generator text_response(
         request_type const& request,
         boost::beast::http::status status,
@@ -225,9 +226,12 @@ private:
         return "application/text";
     }
 
+/// @endcond
 private:
+/// @cond
     std::string htdocs_root_;
     std::string default_doc_;
+/// @endcond
 };
 
 } // namespace boost::taar::handler

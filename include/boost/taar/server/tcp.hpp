@@ -38,8 +38,7 @@ namespace boost::taar::server {
 
     @param bind_host             Host or address to bind. `"0.0.0.0"` and
                                  `"::"` accept on all interfaces.
-    @param bind_port             Port string. The empty string asks the OS
-                                 to pick a port; use @a local_endpoint_handler
+    @param bind_port             Port string. `"0"` asks the OS to pick a port; use @a local_endpoint_handler
                                  to learn the chosen port.
     @param session_handler       A callable invoked as
                                  @c session_handler(socket, signals). Usually

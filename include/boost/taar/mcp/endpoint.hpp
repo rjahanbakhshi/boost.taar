@@ -474,7 +474,9 @@ public:
         }
 
     private:
+    /// @cond
         endpoint* self_;
+    /// @endcond
     };
 
     /// Returns the handler to register. The endpoint must outlive the session.
@@ -530,6 +532,7 @@ public:
     }
 
 private:
+/// @cond
     struct tool_entry
     {
         tool_info info;
@@ -1072,6 +1075,7 @@ private:
     std::move_only_function<void(contexts_type const&, initialize_params const&)> on_initialize_;
     tool_error_handler tool_error_ = default_tool_error_handler;
     std::function<bool(std::string_view)> origin_validator_;
+/// @endcond
 };
 
 } // namespace boost::taar::mcp

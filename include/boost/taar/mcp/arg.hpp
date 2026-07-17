@@ -43,7 +43,7 @@ struct resource_call
     boost::beast::http::request<boost::beast::http::string_body> const& request;
 };
 
-/** Argument provider reading `params.arguments.<name>` of a `tools/call`.
+/** Argument provider reading one member of `params.arguments` in a `tools/call`.
 
     Converted to the callable's parameter type through `rest_arg_cast`.
     The description feeds the tool's `inputSchema`.

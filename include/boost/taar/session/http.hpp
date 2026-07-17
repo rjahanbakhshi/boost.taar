@@ -413,14 +413,15 @@ awaitable<bool> write_chunked_response(
     spawned sessions by reference.
 
     @tparam Context Per-connection state type. When set to anything other
-                    than @ref no_context, the session calls
-                    `std::make_shared<Context>()` on every accepted TCP
-                    connection and keeps that pointer alive across all
-                    keep-alive requests on the connection. Handlers opt in
-                    by accepting `std::shared_ptr<Context>` as their first
-                    parameter; handlers that do not are unaffected. The
-                    default specialisation, @ref http, uses @ref no_context
-                    and behaves identically to the pre-Phase-0 session.
+                    than @ref no_context, the session creates one
+                    `Context` (via `std::make_shared`) for every accepted
+                    TCP connection and keeps it alive across all
+                    keep-alive requests on that connection. Handlers opt
+                    in through leading parameters of type `Context&`,
+                    `Context const&` or `std::shared_ptr<Context>`;
+                    handlers without such a parameter are unaffected. The
+                    default alias, @ref http, uses @ref no_context and
+                    creates nothing per connection.
 */
 template <typename Context = no_context>
 class basic_http
@@ -430,6 +431,7 @@ public:
     using context_type = Context;
 
 private:
+/// @cond
     using matcher_type = std::move_only_function<
         bool(
             boost::beast::http::request_header<> const&,
@@ -461,6 +463,7 @@ private:
 
     using hard_error_handler_type = std::move_only_function<void(std::exception_ptr)>;
 
+/// @endcond
 public:
     basic_http()
         : wrapped_soft_error_handler_ {
@@ -1121,6 +1124,7 @@ public:
     }
 
 private:
+/// @cond
     std::vector<matcher_handler_type> matcher_handlers_;
     soft_error_handler_wrapper_type wrapped_soft_error_handler_;
     hard_error_handler_type hard_error_handler_ = [](std::exception_ptr){};
@@ -1128,14 +1132,14 @@ private:
     boost::optional<std::uint64_t> request_body_limit_ = 1 * 1024 * 1024;
     bool needs_parsed_target_ = false;
     bool needs_parsed_cookies_ = false;
+/// @endcond
 };
 
 /** Default HTTP session with no per-connection context.
 
-    Equivalent to `basic_http<no_context>`. Existing code that names
-    `boost::taar::session::http` keeps the pre-Phase-0 behaviour: no
-    shared object is created on accept and handlers are not eligible to
-    opt into one.
+    Equivalent to `basic_http<no_context>`: no object is created on
+    accept, and handlers cannot request a connection context. Keyed
+    contexts added by `handler::with_session` are still available.
  */
 using http = basic_http<>;
 

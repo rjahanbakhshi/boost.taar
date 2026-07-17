@@ -35,13 +35,20 @@ objects exported by `boost::taar::matcher` (`method`, `target`, `header`,
 
 [heading Required expressions]
 
-Given an instance `m` of a /Matcher/, a request `req`, a `context` object
-`ctx`, and a parsed target URL `url`:
+A type is a /Matcher/ when a `matcher::operand` can be constructed from it.
+Besides the composed DSL expressions, that includes any callable returning
+`bool` that takes a `boost::beast::http::request_header<> const&` and a
+`matcher::context&`, optionally followed by a `boost::urls::url_view
+const&` (the parsed target), a `cookies const&` (the parsed `Cookie`
+headers), or both in either order. The session parses the target and the
+cookies only when some registered matcher asks for them.
 
 [table
 [[Expression][Semantics]]
-[[`m(req, ctx, url)`][Returns a value contextually convertible to `bool`.
- May write to `ctx.path_args` and other context state.]]
+[[`m(req, ctx)`][Returns `bool`. May write to `ctx.path_args` and other
+ context state; the context is cleared before each matcher runs.]]
+[[`m(req, ctx, url)`][As above, with the request target parsed as a URL.]]
+[[`m(req, ctx, cookies)`][As above, with the parsed cookies.]]
 ]
 
 [heading Metadata]
