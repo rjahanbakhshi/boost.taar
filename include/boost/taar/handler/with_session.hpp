@@ -160,7 +160,7 @@ struct with_session_handler
 
     @param store  The @ref context_store that owns the keyed contexts. Must
                   outlive the session.
-    @param key    A key extractor from @ref session_key.
+    @param key    A key extractor from the `session_key` namespace.
     @param policy What to do when the key is absent or unknown.
     @param inner  The handler to run with the keyed context in scope.
 */

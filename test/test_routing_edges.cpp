@@ -18,6 +18,7 @@
 #include <boost/taar/matcher/target.hpp>
 #include <boost/test/unit_test.hpp>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -252,7 +253,8 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_empty_query_value)
     auto session = make_session();
     e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
     {
-        auto r = co_await e2e::send_all(port, {get("/q?q="), get("/q?q"), get("/qi?n="), get("/qi")});
+        std::vector<e2e::request> reqs {get("/q?q="), get("/q?q"), get("/qi?n="), get("/qi")};
+        auto r = co_await e2e::send_all(port, std::move(reqs));
         BOOST_TEST(r[0].body() == "[]");
         BOOST_TEST(r[1].body() == "[]");
         BOOST_TEST(r[2].result() == http::status::bad_request);

@@ -15,3 +15,7 @@ Pipfile.lock
 
 # Secondary build trees
 build-*/
+
+# Generated documentation
+doc/html/
+doc/reference.xml

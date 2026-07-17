@@ -54,7 +54,7 @@ namespace boost::taar::matcher {
     such as @ref method_t and @ref target_t attach a tag and the
     captured value at construction time; composition operators combine
     the tags with @ref and_, @ref or_, @ref not_ and concatenate the
-    captures tuples. See @ref matcher_metadata for the type vocabulary
+    captures tuples. See `<boost/taar/matcher/metadata.hpp>` for the type vocabulary
     and the rationale.
 
     Users normally do not construct `operand` directly; matcher placeholders

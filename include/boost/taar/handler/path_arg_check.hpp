@@ -131,7 +131,7 @@ auto find_target_template(Operand const& op)
     @li @a op's metadata contains no `target_constraint` (e.g. the matcher
         only constrains method or headers, or is registered against an
         MCP envelope), or
-    @li @a handler does not satisfy @ref has_path_arg_names (e.g. it's a
+    @li @a handler does not satisfy `has_path_arg_names` (e.g. it's a
         raw lambda rather than a @ref boost::taar::handler::rest "rest"
         handler).
 
