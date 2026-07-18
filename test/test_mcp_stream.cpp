@@ -207,4 +207,33 @@ BOOST_AUTO_TEST_CASE(test_mcp_broadcast_reaches_every_session)
     }
 }
 
+BOOST_AUTO_TEST_CASE(test_mcp_session_info_lets_a_tool_address_its_own_stream)
+{
+    endpoint e {{.name = "s", .version = "1"}};
+    e.tool("whoami", "Session id", [](mcp::session_info const& s) { return s.id; });
+    e.tool("ping_me", "Notify the caller", [&](chat_session& c, mcp::session_info const& s)
+    {
+        ++c.messages;
+        return e.notify(s.id, "notifications/message", json::object {{"level", "info"}, {"data", c.messages}});
+    });
+    auto sid = initialize(e);
+
+    auto who = json::parse(post(e, http::verb::post, R"({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"whoami"}})", sid).body());
+    BOOST_TEST(who.at("result").at("structuredContent").at("result").as_string() == sid);
+
+    auto schema = json::parse(post(e, http::verb::post, R"({"jsonrpc":"2.0","id":2,"method":"tools/list"})", sid).body());
+    BOOST_TEST(schema.at("result").at("tools").as_array()[0].at("inputSchema").at("properties").as_object().empty());   // contexts are not parameters
+
+    stream_reader r {open_stream(e, sid)};
+    BOOST_REQUIRE(r.next().has_value());
+    auto msg = r.next([&]
+    {
+        auto res = json::parse(post(e, http::verb::post, R"({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ping_me"}})", sid).body());
+        BOOST_TEST(res.at("result").at("structuredContent").at("result").as_bool());
+    });
+    BOOST_REQUIRE(msg.has_value());
+    BOOST_TEST(msg->find("notifications/message") != std::string::npos);
+    BOOST_TEST(msg->find("\"data\":1") != std::string::npos);
+}
+
 } // namespace

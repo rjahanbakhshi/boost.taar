@@ -1,0 +1,155 @@
+//
+// Copyright (c) 2022-2024 Reza Jahanbakhshi (reza dot jahanbakhshi at gmail dot com)
+//
+// Distributed under the Boost Software License, Version 1.0. (See accompanying
+// file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
+//
+// Official repository: https://github.com/rjahanbakhshi/boost-taar
+//
+
+#include <boost/taar/mcp/endpoint.hpp>
+#include <boost/test/unit_test.hpp>
+
+#if defined(BOOST_ASIO_HAS_POSIX_STREAM_DESCRIPTOR)
+
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/posix/stream_descriptor.hpp>
+#include <boost/asio/read_until.hpp>
+#include <boost/asio/streambuf.hpp>
+#include <boost/asio/write.hpp>
+#include <boost/json/parse.hpp>
+#include <csignal>
+#include <string>
+#include <unistd.h>
+#include <vector>
+
+namespace {
+
+namespace net = boost::asio;
+namespace json = boost::json;
+namespace taar = boost::taar;
+namespace mcp = boost::taar::mcp;
+using mcp::mcp_arg;
+
+struct notes { std::vector<std::string> items; };
+using token = net::use_awaitable_t<net::io_context::executor_type>;
+
+/// A stdio server wired to two pipes, driven from a test coroutine.
+struct stdio_harness
+{
+    net::io_context io;
+    mcp::endpoint<notes> server {{.name = "notes", .version = "1"}};
+    int in_pipe[2] {};
+    int out_pipe[2] {};
+    bool finished = false;
+
+    stdio_harness()
+    {
+        BOOST_REQUIRE(::pipe(in_pipe) == 0);
+        BOOST_REQUIRE(::pipe(out_pipe) == 0);
+        server.tool("notes/add", "Add", [](notes& n, std::string text) { n.items.push_back(text); return n.items.size(); }, mcp_arg("text"));
+        server.tool("notes/announce", "Broadcast", [this] { return server.broadcast("notifications/resources/updated", json::object {{"uri", "notes://all"}}); });
+        std::signal(SIGPIPE, SIG_IGN);
+        // The server owns the read end of stdin and the write end of stdout.
+        net::co_spawn(io, [this]() -> taar::awaitable<void>
+        {
+            co_await server.serve_stdio(in_pipe[0], out_pipe[1], server.default_incoming());
+            finished = true;
+        }, net::detached);
+    }
+
+    template <typename Client>
+    void run(Client client)
+    {
+        net::co_spawn(io, [&]() -> taar::awaitable<void>
+        {
+            net::posix::stream_descriptor in {co_await net::this_coro::executor, in_pipe[1]};
+            net::posix::stream_descriptor out {co_await net::this_coro::executor, out_pipe[0]};
+            net::streambuf buffer;
+            auto send = [&](std::string line) -> taar::awaitable<void>
+            {
+                line += '\n';
+                co_await net::async_write(in, net::buffer(line), token {});
+            };
+            auto receive = [&]() -> taar::awaitable<json::value>
+            {
+                auto n = co_await net::async_read_until(out, buffer, '\n', token {});
+                std::string line {net::buffers_begin(buffer.data()), net::buffers_begin(buffer.data()) + static_cast<std::ptrdiff_t>(n)};
+                buffer.consume(n);
+                co_return json::parse(line);
+            };
+            co_await client(send, receive);
+            in.close();     // EOF for the server
+        }, net::detached);
+        io.run();
+    }
+};
+
+BOOST_AUTO_TEST_CASE(test_mcp_stdio_lifecycle_tools_and_notifications)
+{
+    stdio_harness h;
+    h.run([&](auto& send, auto& receive) -> taar::awaitable<void>
+    {
+        co_await send(R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","clientInfo":{"name":"t","version":"1"}}})");
+        auto init = co_await receive();
+        BOOST_TEST(init.at("id").as_int64() == 1);
+        BOOST_TEST(init.at("result").at("serverInfo").at("name").as_string() == "notes");
+        BOOST_TEST(h.server.session_count() == 1u);
+
+        co_await send(R"({"jsonrpc":"2.0","method":"notifications/initialized"})");
+        co_await send(R"({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"notes/add","arguments":{"text":"milk"}}})");
+        auto added = co_await receive();
+        BOOST_TEST(added.at("id").as_int64() == 2);
+        BOOST_TEST(added.at("result").at("structuredContent").at("result").as_int64() == 1);
+
+        // A broadcast reaches the stdio client as a notification line.
+        co_await send(R"({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"notes/announce"}})");
+        json::value a = co_await receive();
+        json::value b = co_await receive();
+        auto const& notification = a.as_object().contains("method") ? a : b;
+        auto const& reply = a.as_object().contains("method") ? b : a;
+        BOOST_TEST(notification.at("method").as_string() == "notifications/resources/updated");
+        BOOST_TEST(!notification.as_object().contains("id"));
+        BOOST_TEST(reply.at("result").at("structuredContent").at("result").as_int64() == 1);
+
+        co_await send("{not json");
+        auto bad = co_await receive();
+        BOOST_TEST(bad.at("error").at("code").as_int64() == -32700);
+
+        co_await send(R"([{"jsonrpc":"2.0","id":4,"method":"ping"}])");
+        auto batch = co_await receive();
+        BOOST_TEST(batch.at("error").at("code").as_int64() == -32600);
+
+        co_await send(R"({"jsonrpc":"2.0","id":9,"result":{}})");       // client response: ignored
+        co_await send(R"({"jsonrpc":"2.0","id":5,"method":"ping"})");
+        auto pong = co_await receive();
+        BOOST_TEST(pong.at("id").as_int64() == 5);
+    });
+    BOOST_TEST(h.finished);
+    BOOST_TEST(h.server.session_count() == 0u);    // EOF ended the implicit session
+}
+
+BOOST_AUTO_TEST_CASE(test_mcp_stdio_requires_initialize_first)
+{
+    stdio_harness h;
+    h.run([&](auto& send, auto& receive) -> taar::awaitable<void>
+    {
+        co_await send(R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})");
+        auto err = co_await receive();
+        BOOST_TEST(err.at("error").at("code").as_int64() == -32600);
+        BOOST_TEST(err.at("error").at("message").as_string() == "Server not initialized");
+        co_await send(R"({"jsonrpc":"2.0","id":2,"method":"initialize"})");
+        auto init = co_await receive();
+        BOOST_TEST(init.at("result").at("protocolVersion").as_string() == "2025-11-25");
+        co_await send(R"({"jsonrpc":"2.0","id":3,"method":"tools/list"})");
+        auto tools = co_await receive();
+        BOOST_TEST(tools.at("result").at("tools").as_array().size() == 2u);
+    });
+    BOOST_TEST(h.finished);
+}
+
+} // namespace
+
+#endif // BOOST_ASIO_HAS_POSIX_STREAM_DESCRIPTOR

@@ -25,6 +25,13 @@
 #include <boost/taar/jsonrpc/response.hpp>
 #include <boost/taar/matcher/context.hpp>
 #include <boost/taar/mcp/arg.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
+#include <boost/asio/posix/stream_descriptor.hpp>
+#include <boost/asio/read_until.hpp>
+#include <boost/asio/streambuf.hpp>
+#include <boost/asio/this_coro.hpp>
+#include <boost/asio/write.hpp>
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/field.hpp>
 #include <boost/beast/http/message.hpp>
@@ -51,6 +58,9 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#if defined(BOOST_ASIO_HAS_POSIX_STREAM_DESCRIPTOR)
+#include <unistd.h>
+#endif
 
 namespace boost::taar::mcp {
 
@@ -71,6 +81,15 @@ struct client_info
 {
     std::string name;
     std::string version;
+};
+
+/** Identity of the current MCP session, injectable into stateful tools and
+    resources by declaring a `session_info const&` parameter. Lets a tool
+    address its own client: `endpoint.notify(info.id, "notifications/...")`.
+*/
+struct session_info
+{
+    std::string id;
 };
 
 /// Parsed `initialize` parameters handed to the @ref endpoint::on_initialize hook.
@@ -156,6 +175,7 @@ template <typename Session>
 struct session_slot
 {
     Session session {};
+    session_info info {};
     std::shared_ptr<async_channel<std::string>> mailbox = std::make_shared<async_channel<std::string>>();
     std::shared_ptr<std::atomic<bool>> stream_attached = std::make_shared<std::atomic<bool>>(false);
 
@@ -177,6 +197,11 @@ struct session_store
     {
         return std::shared_ptr<Session> {e->context(), &e->context()->session};
     }
+
+    static std::shared_ptr<session_info> info_of(typename type::entry_ptr const& e)
+    {
+        return std::shared_ptr<session_info> {e->context(), &e->context()->info};
+    }
 };
 
 template <>
@@ -184,6 +209,21 @@ struct session_store<stateless>
 {
     explicit session_store(std::chrono::steady_clock::duration) {}
 };
+
+template <typename Session>
+struct session_handle
+{
+    using type = typename session_store<Session>::type::entry_ptr;
+};
+
+template <>
+struct session_handle<stateless>
+{
+    using type = std::nullptr_t;
+};
+
+template <typename Session>
+using session_handle_t = typename session_handle<Session>::type;
 
 inline std::string text_of(boost::json::value const& v)
 {
@@ -214,7 +254,8 @@ inline std::string text_of(boost::json::value const& v)
     @tparam Context  Context types forwarded from the HTTP session (the
                      connection context, keyed contexts from wrappers).
                      Tool and resource callables may request any of these
-                     and, in stateful mode, the `Session` type.
+                     and, in stateful mode, the `Session` type and
+                     @ref session_info (the session's id).
 
     @code
     taar::mcp::endpoint<calc_session, conn_stats> mcp {
@@ -239,6 +280,9 @@ inline std::string text_of(boost::json::value const& v)
         when @ref stream_handler is registered for it; otherwise 405.
         Messages queued with @ref notify or @ref broadcast are delivered
         as SSE `message` events on that stream.
+    @li The same endpoint can serve the stdio transport with
+        @ref serve_stdio: newline-delimited JSON-RPC on stdin/stdout, one
+        implicit session, notifications written to stdout.
 */
 template <typename Session = stateless, typename... Context>
 class endpoint
@@ -248,11 +292,13 @@ public:
 
     using incoming_contexts = handler::contexts<Context...>;
     using contexts_type = std::conditional_t<stateful,
-        handler::contexts<Context..., Session>,
+        handler::contexts<Context..., Session, session_info>,
         handler::contexts<Context...>>;
     using rpc_type = std::conditional_t<stateful,
-        jsonrpc::endpoint<Context..., Session>,
+        jsonrpc::endpoint<Context..., Session, session_info>,
         jsonrpc::endpoint<Context...>>;
+    /// Handle to a live session: the store entry in stateful mode, `nullptr` otherwise.
+    using session_handle = detail::session_handle_t<Session>;
     using request_type = boost::beast::http::request<boost::beast::http::string_body>;
     using response_type = boost::beast::http::response<boost::beast::http::string_body>;
 
@@ -454,6 +500,153 @@ public:
         };
     }
 
+#if defined(BOOST_ASIO_HAS_POSIX_STREAM_DESCRIPTOR)
+    /** Serve the MCP stdio transport on @a in_fd / @a out_fd.
+
+        Takes ownership of both descriptors (they are closed when the
+        coroutine ends). Reads newline-delimited JSON-RPC messages, answers on @a out_fd and
+        writes server notifications (from @ref notify / @ref broadcast) there
+        as well. One implicit session is created on `initialize` in stateful
+        mode; the session is removed when the input reaches end of file.
+        Nothing but protocol messages is written to @a out_fd, so a program
+        using it must log to stderr. Idle expiry applies to the stdio
+        session like any other; a stdio-only server should give
+        @ref server_info::session_idle_timeout a generous value.
+
+        @param incoming Contexts for the `Context...` types, normally one
+                        fresh object each (the default).
+    */
+    awaitable<void> serve_stdio(int in_fd, int out_fd, incoming_contexts incoming)
+    {
+        namespace net = boost::asio;
+        namespace http = boost::beast::http;
+
+        auto ex = co_await net::this_coro::executor;
+        net::posix::stream_descriptor in {ex, in_fd};
+        net::posix::stream_descriptor out {ex, out_fd};
+        auto outbox = std::make_shared<async_channel<std::string>>();
+
+        // Single writer: everything leaving the process goes through outbox.
+        net::co_spawn(ex, [outbox, &out]() -> awaitable<void>
+        {
+            for (;;)
+            {
+                auto line = co_await outbox->async_receive(
+                    net::use_awaitable_t<net::io_context::executor_type> {});
+                if (!line) break;
+                auto [ec, n] = co_await net::async_write(out, net::buffer(*line),
+                    net::as_tuple(net::use_awaitable_t<net::io_context::executor_type> {}));
+                if (ec) break;
+            }
+        }, net::detached);
+
+        auto send = [outbox](boost::json::value const& v)
+        {
+            outbox->push(boost::json::serialize(v) + "\n");
+        };
+
+        request_type const request {http::verb::post, "/", 11};
+        matcher::context const mctx;
+        session_handle session {};
+        net::streambuf buffer;
+
+        for (;;)
+        {
+            auto [ec, n] = co_await net::async_read_until(in, buffer, '\n',
+                net::as_tuple(net::use_awaitable_t<net::io_context::executor_type> {}));
+            if (ec) break;
+            std::string line {net::buffers_begin(buffer.data()), net::buffers_begin(buffer.data()) + static_cast<std::ptrdiff_t>(n)};
+            buffer.consume(n);
+            if (line.find_first_not_of(" \t\r\n") == std::string::npos) continue;
+
+            boost::system::error_code pec;
+            auto body = boost::json::parse(line, pec);
+            if (pec)
+            {
+                send(error_envelope(boost::json::value {nullptr}, jsonrpc::error::parse_error));
+                continue;
+            }
+            if (body.is_array())
+            {
+                send(error_envelope(boost::json::value {nullptr},
+                    static_cast<int>(jsonrpc::error::invalid_request),
+                    "Batch requests are not supported by this transport"));
+                continue;
+            }
+            if (auto const* obj = body.if_object();
+                obj != nullptr && !obj->contains("method") && (obj->contains("result") || obj->contains("error")))
+            {
+                continue;   // a response from the client
+            }
+            auto env = jsonrpc::parse_envelope(body);
+            if (env.has_error())
+            {
+                send(error_envelope(rpc_type::recoverable_id(body), jsonrpc::error::invalid_request));
+                continue;
+            }
+
+            if (env->method == "initialize")
+            {
+                auto outcome = co_await initialize(incoming, env.value());
+                if constexpr (stateful)
+                {
+                    if (outcome.session)
+                    {
+                        if (session) sessions_.store.erase(session->key());
+                        session = outcome.session;
+                        // Forward this session's notifications to stdout.
+                        net::co_spawn(ex, [mailbox = session->context()->mailbox, outbox]() -> awaitable<void>
+                        {
+                            for (;;)
+                            {
+                                auto msg = co_await mailbox->async_receive(
+                                    net::use_awaitable_t<net::io_context::executor_type> {});
+                                if (!msg) break;
+                                outbox->push(*msg + "\n");
+                            }
+                        }, net::detached);
+                    }
+                }
+                if (outcome.reply) send(*outcome.reply);
+                continue;
+            }
+
+            if constexpr (stateful)
+            {
+                if (!session)
+                {
+                    if (!jsonrpc::is_notification(env.value()))
+                    {
+                        send(error_envelope(env->id.value_or(boost::json::value {nullptr}),
+                            static_cast<int>(jsonrpc::error::invalid_request), "Server not initialized"));
+                    }
+                    continue;
+                }
+            }
+            auto reply = co_await run(incoming, env.value(), session, request, mctx);
+            if (reply) send(*reply);
+        }
+
+        if constexpr (stateful)
+        {
+            if (session) sessions_.store.erase(session->key());
+        }
+        outbox->close();
+    }
+
+    /// Serve the stdio transport on duplicates of the process's stdin/stdout with fresh contexts.
+    awaitable<void> serve_stdio()
+    {
+        return serve_stdio(::dup(STDIN_FILENO), ::dup(STDOUT_FILENO), default_incoming());
+    }
+
+    /// One freshly constructed object for each `Context...` type.
+    static incoming_contexts default_incoming()
+    {
+        return incoming_contexts {std::make_shared<Context>()...};
+    }
+#endif
+
     /// The HTTP handler for the MCP route (`POST`, and `DELETE` in stateful mode).
     class handler_type
     {
@@ -624,9 +817,16 @@ private:
 
         if (env->method == "initialize")
         {
-            co_return co_await handle_initialize(incoming, env.value(), request, mctx);
+            auto outcome = co_await initialize(incoming, env.value());
+            auto response = rpc_type::to_http(request, std::move(outcome.reply));
+            if constexpr (stateful)
+            {
+                if (outcome.session) response.set("Mcp-Session-Id", outcome.session->key());
+            }
+            co_return response;
         }
 
+        session_handle session {};
         if constexpr (stateful)
         {
             auto sid = request.find("Mcp-Session-Id");
@@ -634,22 +834,54 @@ private:
             {
                 co_return plain(request, http::status::bad_request, "Missing Mcp-Session-Id");
             }
-            auto entry = sessions_.store.find(std::string {sid->value()});
-            if (!entry)
+            session = sessions_.store.find(std::string {sid->value()});
+            if (!session)
             {
                 co_return plain(request, http::status::not_found, "Unknown or expired session");
             }
-            auto guard = co_await sessions_.store.lock(entry);
-            auto ctxs = std::tuple_cat(incoming, std::make_tuple(sessions_.session_of(entry)));
-            auto out = co_await dispatch(ctxs, env.value(), request, mctx);
-            co_return rpc_type::to_http(request, std::move(out));
+        }
+        auto out = co_await run(incoming, env.value(), session, request, mctx);
+        co_return rpc_type::to_http(request, std::move(out));
+    }
+
+    /// Contexts for a call on @a session: the incoming ones plus the session and its info.
+    contexts_type session_contexts(incoming_contexts const& incoming, session_handle const& session) const
+    {
+        if constexpr (stateful)
+        {
+            return std::tuple_cat(incoming,
+                std::make_tuple(sessions_.session_of(session), sessions_.info_of(session)));
         }
         else
         {
-            auto out = co_await dispatch(incoming, env.value(), request, mctx);
-            co_return rpc_type::to_http(request, std::move(out));
+            return incoming;
         }
     }
+
+    /// Lock the session (stateful) and dispatch one envelope.
+    awaitable<std::optional<boost::json::value>> run(
+        incoming_contexts const& incoming,
+        jsonrpc::envelope const& env,
+        session_handle session,
+        request_type const& request,
+        matcher::context const& mctx)
+    {
+        if constexpr (stateful)
+        {
+            auto guard = co_await sessions_.store.lock(session);
+            co_return co_await dispatch(session_contexts(incoming, session), env, request, mctx);
+        }
+        else
+        {
+            co_return co_await dispatch(incoming, env, request, mctx);
+        }
+    }
+
+    struct initialize_outcome
+    {
+        std::optional<boost::json::value> reply;
+        session_handle session {};
+    };
 
     static initialize_params parse_initialize(jsonrpc::envelope const& env)
     {
@@ -704,30 +936,29 @@ private:
         return result;
     }
 
-    awaitable<response_type> handle_initialize(
-        incoming_contexts const& incoming,
-        jsonrpc::envelope const& env,
-        request_type const& request,
-        matcher::context const& mctx)
+    /// Run `initialize`: negotiate the version, create the session (stateful), run the hook.
+    awaitable<initialize_outcome> initialize(incoming_contexts const& incoming, jsonrpc::envelope const& env)
     {
-        (void)mctx;
         auto const id = env.id.value_or(boost::json::value {nullptr});
         auto params = parse_initialize(env);
         auto const negotiated = is_supported_protocol_version(params.protocol_version)
             ? std::string_view {params.protocol_version}
             : latest_protocol_version;
 
+        initialize_outcome outcome;
+        std::exception_ptr failure;
+
         if constexpr (stateful)
         {
             auto [sid, entry] = sessions_.store.create();
-            std::exception_ptr failure;
+            entry->context()->info.id = sid;
             {
                 auto guard = co_await sessions_.store.lock(entry);
                 if (on_initialize_)
                 {
                     try
                     {
-                        on_initialize_(std::tuple_cat(incoming, std::make_tuple(sessions_.session_of(entry))), params);
+                        on_initialize_(session_contexts(incoming, entry), params);
                     }
                     catch (...)
                     {
@@ -738,42 +969,35 @@ private:
             if (failure)
             {
                 sessions_.store.erase(sid);
-                auto info = rpc_.map_exception(failure);
-                co_return rpc_type::to_http(request, jsonrpc::make_error_response(
-                    id, info.code, std::move(info.message), std::move(info.data)));
             }
-
-            std::optional<boost::json::value> out;
-            if (!jsonrpc::is_notification(env))
+            else
             {
-                out = jsonrpc::make_response(id, initialize_result(negotiated));
+                outcome.session = entry;
             }
-            auto response = rpc_type::to_http(request, std::move(out));
-            response.set("Mcp-Session-Id", sid);
-            co_return response;
         }
-        else
+        else if (on_initialize_)
         {
-            if (on_initialize_)
+            try
             {
-                try
-                {
-                    on_initialize_(incoming, params);
-                }
-                catch (...)
-                {
-                    auto info = rpc_.map_exception(std::current_exception());
-                    co_return rpc_type::to_http(request, jsonrpc::make_error_response(
-                        id, info.code, std::move(info.message), std::move(info.data)));
-                }
+                on_initialize_(incoming, params);
             }
-            std::optional<boost::json::value> out;
-            if (!jsonrpc::is_notification(env))
+            catch (...)
             {
-                out = jsonrpc::make_response(id, initialize_result(negotiated));
+                failure = std::current_exception();
             }
-            co_return rpc_type::to_http(request, std::move(out));
         }
+
+        if (failure)
+        {
+            auto info = rpc_.map_exception(failure);
+            outcome.reply = jsonrpc::make_error_response(
+                id, info.code, std::move(info.message), std::move(info.data));
+        }
+        else if (!jsonrpc::is_notification(env))
+        {
+            outcome.reply = jsonrpc::make_response(id, initialize_result(negotiated));
+        }
+        co_return outcome;
     }
 
     awaitable<std::optional<boost::json::value>> dispatch(
