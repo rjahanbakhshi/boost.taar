@@ -438,4 +438,52 @@ BOOST_AUTO_TEST_CASE(test_jsonrpc_endpoint_method_info_for_generators)
     BOOST_TEST(!rpc->has_method("pong"));
 }
 
+BOOST_AUTO_TEST_CASE(test_jsonrpc_endpoint_http_providers_and_schemas)
+{
+    jsonrpc::endpoint<calc_session> rpc;
+    rpc.method("whoami", "Caller", [](std::string token, std::optional<std::string> trace)
+    {
+        return token + "/" + trace.value_or("none");
+    }, taar::handler::header_arg("X-Token", "API token"), taar::handler::header_arg("X-Trace"));
+    rpc.method("sum", [](std::vector<int> values)
+    {
+        int s = 0;
+        for (int v : values) s += v;
+        return s;
+    }, rpc_arg("values", "Numbers to add"));
+
+    auto send = [&](std::string body, std::optional<std::string> token)
+    {
+        http::request<http::string_body> req {http::verb::post, "/rpc", 11};
+        req.set(http::field::content_type, "application/json");
+        if (token) req.set("X-Token", *token);
+        req.body() = std::move(body);
+        req.prepare_payload();
+        contexts<calc_session> ctxs {std::make_shared<calc_session>()};
+        taar::matcher::context mctx;
+        auto handler = rpc.handler();
+        net::io_context io;
+        std::optional<http::response<http::string_body>> out;
+        net::co_spawn(io, [&]() -> taar::awaitable<void> { out = co_await handler(ctxs, req, mctx); }, net::detached);
+        io.run();
+        return body_json(*out);
+    };
+
+    auto ok = send(R"({"jsonrpc":"2.0","id":1,"method":"whoami"})", "abc");
+    BOOST_TEST(ok.at("result").as_string() == "abc/none");
+    auto missing = send(R"({"jsonrpc":"2.0","id":2,"method":"whoami"})", std::nullopt);
+    BOOST_TEST(missing.at("error").at("code").as_int64() == -32602);
+    auto sum = send(R"({"jsonrpc":"2.0","id":3,"method":"sum","params":{"values":[1,2,3]}})", std::nullopt);
+    BOOST_TEST(sum.at("result").as_int64() == 6);
+
+    auto infos = rpc.methods();
+    BOOST_REQUIRE(infos.size() == 2u);
+    BOOST_TEST(infos[0].params[0].name == "X-Token");
+    BOOST_TEST(infos[0].params[0].description == "API token");
+    BOOST_TEST(infos[0].params[0].required);
+    BOOST_TEST(!infos[0].params[1].required);
+    BOOST_TEST(infos[1].params[0].schema.at("type").as_string() == "array");
+    BOOST_TEST(infos[1].params[0].schema.at("items").at("type").as_string() == "integer");
+}
+
 } // namespace

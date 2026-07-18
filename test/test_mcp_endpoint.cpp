@@ -11,6 +11,7 @@
 #include <boost/taar/mcp/arg.hpp>
 #include <boost/taar/handler/context_inject.hpp>
 #include <boost/taar/handler/rest_arg.hpp>
+#include <boost/describe.hpp>
 #include <boost/taar/matcher/context.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
@@ -49,6 +50,17 @@ struct calc_session
 };
 
 struct division_by_zero : std::domain_error { using domain_error::domain_error; };
+
+struct point
+{
+    int x;
+    int y;
+    std::optional<std::string> label;
+};
+BOOST_DESCRIBE_STRUCT(point, (), (x, y, label))
+
+enum class color { red, green };
+BOOST_DESCRIBE_ENUM(color, red, green)
 
 int add(calc_session& s, int a, int b)
 {
@@ -504,6 +516,52 @@ BOOST_AUTO_TEST_CASE(test_mcp_registration_introspection_and_duplicates)
     BOOST_TEST(e.resources()[1].params[0].description == "zero-based");
     BOOST_CHECK_THROW(e.tool("add", "dup", &add, mcp_arg("a"), mcp_arg("b")), std::logic_error);
     BOOST_CHECK_THROW(e.resource("calc://history/last", "text/plain", "dup", &last_entry), std::logic_error);
+}
+
+BOOST_AUTO_TEST_CASE(test_mcp_tool_schemas_for_structs_sequences_and_enums)
+{
+    stateless_endpoint e {{.name = "s", .version = "1"}};
+    e.tool("move", "Move to a point", [](point p, std::vector<int> path, color c)
+    {
+        return json::value {{"x", p.x}, {"y", p.y}, {"steps", path.size()}, {"color", c == color::red ? "red" : "green"}};
+    }, mcp_arg("to", "Target"), mcp_arg("path"), mcp_arg("color"));
+
+    auto tools = body_json(post(e, R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})")).at("result").at("tools").as_array();
+    auto const& props = tools[0].at("inputSchema").at("properties");
+    BOOST_TEST(props.at("to").at("type").as_string() == "object");
+    BOOST_TEST(props.at("to").at("description").as_string() == "Target");
+    BOOST_TEST(props.at("to").at("properties").at("x").at("type").as_string() == "integer");
+    BOOST_TEST(props.at("to").at("properties").at("label").at("type").as_string() == "string");
+    auto const& req = props.at("to").at("required").as_array();
+    BOOST_TEST(req.size() == 2u);           // label is optional
+    BOOST_TEST(props.at("path").at("type").as_string() == "array");
+    BOOST_TEST(props.at("path").at("items").at("type").as_string() == "integer");
+    BOOST_TEST(props.at("color").at("type").as_string() == "string");
+    BOOST_TEST(props.at("color").at("enum").as_array().size() == 2u);
+
+    auto call = body_json(post(e, R"({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"move","arguments":{"to":{"x":1,"y":2},"path":[1,2,3],"color":"green"}}})"));
+    BOOST_TEST(call.at("result").at("structuredContent").at("steps").as_int64() == 3);
+    BOOST_TEST(call.at("result").at("structuredContent").at("color").as_string() == "green");
+}
+
+BOOST_AUTO_TEST_CASE(test_mcp_tool_reads_http_headers_through_rest_providers)
+{
+    stateless_endpoint e {{.name = "s", .version = "1"}};
+    e.tool("whoami", "Caller identity", [](std::string auth, std::optional<std::string> trace)
+    {
+        return auth + "/" + trace.value_or("none");
+    }, taar::handler::header_arg(http::field::authorization, "Bearer token"), taar::handler::header_arg("X-Trace"));
+
+    auto schema = body_json(post(e, R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})")).at("result").at("tools").as_array()[0].at("inputSchema");
+    BOOST_TEST(schema.at("properties").at("Authorization").at("description").as_string() == "Bearer token");
+    BOOST_TEST(schema.at("required").as_array().size() == 1u);
+
+    auto ok = body_json(post(e, R"({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"whoami"}})",
+        {{"Authorization", "Bearer abc"}}));
+    BOOST_TEST(ok.at("result").at("structuredContent").at("result").as_string() == "Bearer abc/none");
+
+    auto missing = body_json(post(e, R"({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"whoami"}})"));
+    BOOST_TEST(missing.at("error").at("code").as_int64() == -32602);
 }
 
 } // namespace

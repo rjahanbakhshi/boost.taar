@@ -20,6 +20,8 @@
 #include <boost/taar/matcher/metadata.hpp>
 #include <boost/taar/matcher/template_parser.hpp>
 #include <boost/taar/type_traits/string_like.hpp>
+#include <boost/describe/enumerators.hpp>
+#include <boost/describe/members.hpp>
 #include <boost/beast/http/field.hpp>
 #include <boost/beast/http/message_generator.hpp>
 #include <boost/beast/http/verb.hpp>
@@ -211,11 +213,19 @@ struct extractor<matcher::type_list<L...>>
 
 // ---- handler response introspection -------------------------------------------
 
+namespace detail_schema {
+
+// Containers that response_from serialises through value_from.
+template <typename T>
+concept json_like = taar::detail::sequence_like<T> || taar::detail::string_map_like<T>;
+
+} // namespace detail_schema
+
 struct response_info
 {
     bool known = false;
     std::string content_type;
-    std::string json_type;      // empty: no schema
+    boost::json::object schema;      // empty: no schema
     bool no_content = false;
 };
 
@@ -234,14 +244,15 @@ response_info response_of_type()
         else return {true, "text/plain", {}, false};
     }
     else if constexpr (is_http_response<U> || std::same_as<U, boost::beast::http::message_generator>) return {};
-    else if constexpr (std::same_as<U, bool>) return {true, "text/plain", "boolean", false};
-    else if constexpr (std::is_arithmetic_v<U>) return {true, "text/plain", std::string {json_type_name<U>()}, false};
-    else if constexpr (type_traits::string_like<U>) return {true, "text/plain", "string", false};
-    else if constexpr (std::same_as<U, boost::json::value>) return {true, "application/json", {}, false};
-    else if constexpr (std::same_as<U, boost::json::object> || std::same_as<U, boost::json::array>)
-        return {true, "application/json", std::string {json_type_name<U>()}, false};
+    else if constexpr (std::is_arithmetic_v<U> || type_traits::string_like<U>)
+        return {true, "text/plain", json_schema_for<U>(), false};
     else if constexpr (std::same_as<U, std::vector<std::byte>> || std::same_as<U, std::span<std::byte const>>)
         return {true, "application/octet-stream", {}, false};
+    else if constexpr (
+        std::same_as<U, boost::json::value> || std::same_as<U, boost::json::object> ||
+        std::same_as<U, boost::json::array> || boost::describe::has_describe_members<U>::value ||
+        boost::describe::has_describe_enumerators<U>::value || detail_schema::json_like<U>)
+        return {true, "application/json", json_schema_for<U>(), false};
     else return {};
 }
 
@@ -498,8 +509,8 @@ private:
         json::array parameters;
         auto type_schema = [](param_info const& info)
         {
-            json::object schema;
-            if (!info.json_type.empty()) schema["type"] = info.json_type;
+            json::object schema = info.schema;
+            if (schema.empty() && !info.json_type.empty()) schema["type"] = info.json_type;
             return schema;
         };
         auto add_param = [&](std::string const& name, std::string_view in, bool required,
@@ -557,9 +568,7 @@ private:
                 for (auto const& ct : p.content_types)
                 {
                     json::object media;
-                    json::object schema;
-                    if (!p.info.json_type.empty()) schema["type"] = p.info.json_type;
-                    media["schema"] = std::move(schema);
+                    media["schema"] = type_schema(p.info);
                     content[ct] = std::move(media);
                 }
                 request_body["required"] = p.info.required;
@@ -607,9 +616,7 @@ private:
             if (rec.response.known && !rec.response.no_content)
             {
                 json::object media;
-                json::object schema;
-                if (!rec.response.json_type.empty()) schema["type"] = rec.response.json_type;
-                media["schema"] = std::move(schema);
+                media["schema"] = rec.response.schema;
                 json::object content;
                 content[rec.response.content_type] = std::move(media);
                 ok["content"] = std::move(content);

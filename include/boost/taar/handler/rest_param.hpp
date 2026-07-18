@@ -115,17 +115,20 @@ rest_param_info describe_rest_param(Provider const& provider)
 {
     rest_param_info out;
     out.in = location_of<Provider>();
-    out.info.name = arg_provider_name(provider);
-    out.info.description = arg_provider_description(provider);
-    out.info.required = !strip_default<std::remove_cvref_t<Provider>>::defaulted && !is_optional_v<ArgType>;
+    out.info = make_param_info<ArgType>(
+        arg_provider_name(provider),
+        arg_provider_description(provider),
+        !strip_default<std::remove_cvref_t<Provider>>::defaulted && !is_optional_v<ArgType>);
     if (out.in == param_location::body)
     {
-        out.info.json_type = body_json_type<ArgType, Provider>();
+        using P = typename strip_default<std::remove_cvref_t<Provider>>::type;
+        if constexpr (std::same_as<P, string_body_arg> || std::same_as<P, url_encoded_form_data_arg>)
+        {
+            // The wire format is fixed by the provider, whatever the C++ type.
+            out.info.json_type = body_json_type<ArgType, Provider>();
+            out.info.schema = boost::json::object {{"type", out.info.json_type}};
+        }
         out.content_types = content_types_of(provider);
-    }
-    else
-    {
-        out.info.json_type = std::string {json_type_name<ArgType>()};
     }
     return out;
 }

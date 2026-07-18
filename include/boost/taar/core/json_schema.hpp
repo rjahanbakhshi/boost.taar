@@ -11,13 +11,15 @@
 #define BOOST_TAAR_CORE_JSON_SCHEMA_HPP
 
 #include <boost/taar/type_traits/string_like.hpp>
+#include <boost/describe/enumerators.hpp>
+#include <boost/describe/members.hpp>
 #include <boost/json/array.hpp>
 #include <boost/json/object.hpp>
 #include <boost/json/value.hpp>
+#include <boost/mp11/algorithm.hpp>
 #include <concepts>
 #include <optional>
 #include <string>
-#include <string_view>
 #include <type_traits>
 #include <vector>
 
@@ -32,8 +34,9 @@ struct param_info
 {
     std::string name;
     std::string description;
-    std::string json_type;      ///< JSON Schema type name, empty for "any".
+    std::string json_type;              ///< JSON Schema type name, empty for "any".
     bool required = true;
+    boost::json::object schema {};      ///< Full JSON Schema for the parameter type.
 };
 
 namespace detail {
@@ -41,8 +44,22 @@ namespace detail {
 template <typename T> struct is_optional : std::false_type {};
 template <typename T> struct is_optional<std::optional<T>> : std::true_type {};
 
-template <typename T> struct is_vector : std::false_type {};
-template <typename T, typename A> struct is_vector<std::vector<T, A>> : std::true_type {};
+template <typename T>
+concept string_map_like = requires
+{
+    typename T::key_type;
+    typename T::mapped_type;
+    requires type_traits::string_like<typename T::key_type>;
+};
+
+template <typename T>
+concept sequence_like = requires(T const& t)
+{
+    typename T::value_type;
+    t.begin();
+    t.end();
+} && !type_traits::string_like<T> && !string_map_like<T> &&
+    !std::same_as<T, boost::json::object> && !std::same_as<T, boost::json::value>;
 
 } // namespace detail
 
@@ -50,61 +67,136 @@ template <typename T, typename A> struct is_vector<std::vector<T, A>> : std::tru
 template <typename T>
 inline constexpr bool is_optional_v = detail::is_optional<std::remove_cvref_t<T>>::value;
 
-/** The JSON Schema type name for C++ type @a T.
+/** A JSON Schema (2020-12 vocabulary) for C++ type @a T.
 
-    `bool` -> `boolean`; integral -> `integer`; floating point -> `number`;
-    string-like -> `string`; `std::vector` and `boost::json::array` ->
-    `array`; `boost::json::object` -> `object`; `boost::json::value` -> an
-    empty string (any type); `std::optional<U>` -> the name for `U`;
-    anything else -> `object`.
+    @li `bool` -> `{"type":"boolean"}`; integral -> `integer`; floating
+        point -> `number`; string-like -> `string`.
+    @li `std::optional<U>` -> the schema of `U`.
+    @li `boost::json::value` -> `{}` (any); `boost::json::object` ->
+        `{"type":"object"}`; `boost::json::array` -> `{"type":"array"}`.
+    @li Sequences (`std::vector`, `std::array`, ...) -> `array` with
+        `items` from the element type.
+    @li Maps with string keys -> `object` with `additionalProperties`.
+    @li `BOOST_DESCRIBE_STRUCT`ed types -> `object` with `properties`
+        from the public members and `required` listing the non-optional
+        ones. `BOOST_DESCRIBE_ENUM`ed types -> `string` with `enum`.
+    @li Anything else -> `{"type":"object"}`.
 */
 template <typename T>
-constexpr std::string_view json_type_name()
+boost::json::object json_schema_for()
 {
     using U = std::remove_cvref_t<T>;
+    boost::json::object schema;
+
     if constexpr (is_optional_v<U>)
     {
-        return json_type_name<typename U::value_type>();
+        return json_schema_for<typename U::value_type>();
     }
     else if constexpr (std::same_as<U, bool>)
     {
-        return "boolean";
+        schema["type"] = "boolean";
     }
     else if constexpr (std::integral<U>)
     {
-        return "integer";
+        schema["type"] = "integer";
     }
     else if constexpr (std::floating_point<U>)
     {
-        return "number";
+        schema["type"] = "number";
     }
     else if constexpr (type_traits::string_like<U>)
     {
-        return "string";
+        schema["type"] = "string";
     }
     else if constexpr (std::same_as<U, boost::json::value>)
     {
-        return "";
+        // any
     }
     else if constexpr (std::same_as<U, boost::json::object>)
     {
-        return "object";
+        schema["type"] = "object";
     }
-    else if constexpr (std::same_as<U, boost::json::array> || detail::is_vector<U>::value)
+    else if constexpr (std::same_as<U, boost::json::array>)
     {
-        return "array";
+        schema["type"] = "array";
+    }
+    else if constexpr (boost::describe::has_describe_enumerators<U>::value)
+    {
+        boost::json::array names;
+        boost::mp11::mp_for_each<boost::describe::describe_enumerators<U>>([&](auto d)
+        {
+            names.emplace_back(d.name);
+        });
+        schema["type"] = "string";
+        schema["enum"] = std::move(names);
+    }
+    else if constexpr (boost::describe::has_describe_members<U>::value)
+    {
+        boost::json::object properties;
+        boost::json::array required;
+        boost::mp11::mp_for_each<boost::describe::describe_members<U, boost::describe::mod_public>>([&](auto d)
+        {
+            using member_type = std::remove_cvref_t<decltype(std::declval<U&>().*(d.pointer))>;
+            properties[d.name] = json_schema_for<member_type>();
+            if (!is_optional_v<member_type>)
+            {
+                required.emplace_back(d.name);
+            }
+        });
+        schema["type"] = "object";
+        schema["properties"] = std::move(properties);
+        if (!required.empty())
+        {
+            schema["required"] = std::move(required);
+        }
+    }
+    else if constexpr (detail::string_map_like<U>)
+    {
+        schema["type"] = "object";
+        schema["additionalProperties"] = json_schema_for<typename U::mapped_type>();
+    }
+    else if constexpr (detail::sequence_like<U>)
+    {
+        schema["type"] = "array";
+        schema["items"] = json_schema_for<typename U::value_type>();
     }
     else
     {
-        return "object";
+        schema["type"] = "object";
     }
+    return schema;
 }
 
-/// A JSON Schema fragment for one parameter: `{"type": ..., "description": ...}`.
+/// The JSON Schema `type` name for @a T (empty for "any"). Shorthand over @ref json_schema_for.
+template <typename T>
+std::string json_type_name()
+{
+    auto schema = json_schema_for<T>();
+    if (auto const* t = schema.if_contains("type"); t && t->is_string())
+    {
+        return std::string {t->as_string()};
+    }
+    return {};
+}
+
+/// Build a @ref param_info for a parameter of type @a T.
+template <typename T>
+param_info make_param_info(std::string name, std::string description, bool required)
+{
+    param_info p;
+    p.name = std::move(name);
+    p.description = std::move(description);
+    p.schema = json_schema_for<T>();
+    p.json_type = json_type_name<T>();
+    p.required = required;
+    return p;
+}
+
+/// A JSON Schema fragment for one parameter: its schema plus `description`.
 inline boost::json::object param_schema(param_info const& p)
 {
-    boost::json::object schema;
-    if (!p.json_type.empty())
+    boost::json::object schema = p.schema;
+    if (schema.empty() && !p.json_type.empty())
     {
         schema["type"] = p.json_type;
     }

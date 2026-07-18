@@ -34,14 +34,46 @@
 
 namespace boost::taar::jsonrpc::detail {
 
-/// A provider usable for @a CallType: has `name()` and takes `CallType const&`.
+/// A provider that reads the decoded call itself (`rpc_arg`, `mcp_arg`, `uri_arg`).
 template <typename T, typename CallType>
-concept provider_for = requires(T const& p)
+concept call_provider_for = requires(T const& p)
 {
     { p.name() } -> std::convertible_to<std::string>;
     requires std::is_same_v<
         std::remove_cvref_t<handler::detail::arg_provider_request_t<T>>, CallType>;
 };
+
+/** A provider that reads the carrying HTTP request (`header_arg`,
+    `cookie_arg`, `query_arg`, ...). Every call type exposes the request
+    as `request`, so the REST providers work unchanged on RPC methods and
+    MCP tools: `rpc.method("whoami", &whoami, handler::header_arg("Authorization"))`.
+*/
+template <typename T, typename CallType>
+concept request_provider_for = requires(T const& p)
+{
+    { p.name() } -> std::convertible_to<std::string>;
+    requires std::is_convertible_v<
+        decltype(std::declval<CallType const&>().request),
+        handler::detail::arg_provider_request_t<T> const&>;
+};
+
+/// A provider usable for @a CallType: reads either the call or its HTTP request.
+template <typename T, typename CallType>
+concept provider_for = call_provider_for<T, CallType> || request_provider_for<T, CallType>;
+
+/// What to hand a provider: the call, or the HTTP request it arrived on.
+template <typename Provider, typename CallType>
+decltype(auto) provider_input(CallType const& c)
+{
+    if constexpr (call_provider_for<Provider, CallType>)
+    {
+        return (c);
+    }
+    else
+    {
+        return (c.request);
+    }
+}
 
 template <typename P>
 std::string provider_description(P const& p)
@@ -64,13 +96,12 @@ template <typename Callable, std::size_t Offset, typename ProvidersTuple, std::s
 std::vector<param_info> describe_params(ProvidersTuple const& providers, std::index_sequence<Is...>)
 {
     std::vector<param_info> out;
-    (out.push_back(param_info {
+    (out.push_back(make_param_info<type_traits::callable_arg<Callable, Offset + Is>>(
         std::get<Is>(providers).name(),
         provider_description(std::get<Is>(providers)),
-        std::string {json_type_name<type_traits::callable_arg<Callable, Offset + Is>>()},
         !is_optional_v<type_traits::callable_arg<Callable, Offset + Is>> &&
             !type_traits::specialization_of<handler::with_default,
-                std::tuple_element_t<Is, ProvidersTuple>>}), ...);
+                std::tuple_element_t<Is, ProvidersTuple>>)), ...);
     return out;
 }
 
@@ -120,7 +151,8 @@ struct method_handler<Callable, ProvidersTuple, CallType, std::index_sequence<Ct
                 handler::get_rest_arg<
                     type_traits::callable_arg<Callable, context_count + ArgIs>,
                     std::tuple_element_t<ArgIs, ProvidersTuple>
-                >(std::get<ArgIs>(providers_), ArgIs, c, mctx)...);
+                >(std::get<ArgIs>(providers_), ArgIs,
+                  provider_input<std::tuple_element_t<ArgIs, ProvidersTuple>>(c), mctx)...);
         };
         using result_type = decltype(invoke());
 
@@ -170,9 +202,10 @@ bound_method<CallType, Contexts> bind_method(Callable&& callable, Providers... p
     using fn = std::remove_cvref_t<Callable>;
 
     static_assert((provider_for<Providers, CallType> && ...),
-        "Argument providers for this kind of call must read from the matching "
-        "call type: rpc_arg for JSON-RPC methods, mcp_arg for MCP tools, "
-        "uri_arg for MCP resources (optionally wrapped in with_default).");
+        "Argument providers for this kind of call must read either the call "
+        "(rpc_arg for JSON-RPC methods, mcp_arg for MCP tools, uri_arg for MCP "
+        "resources) or the carrying HTTP request (header_arg, cookie_arg, "
+        "query_arg), optionally wrapped in with_default.");
 
     constexpr std::size_t arg_count = type_traits::callable_args_count<fn>;
     constexpr std::size_t provider_count = sizeof...(Providers);

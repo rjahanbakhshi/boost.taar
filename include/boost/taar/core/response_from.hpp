@@ -15,6 +15,7 @@
 #include <boost/taar/core/is_awaitable.hpp>
 #include <boost/taar/core/is_chunked_response.hpp>
 #include <boost/taar/core/is_http_response.hpp>
+#include <boost/taar/core/json_schema.hpp>
 #include <boost/taar/core/response_from_tag.hpp>
 #include <boost/beast/http/message_generator.hpp>
 #include <boost/beast/http/message.hpp>
@@ -24,6 +25,9 @@
 #include <boost/json/object.hpp>
 #include <boost/json/serialize.hpp>
 #include <boost/json/value.hpp>
+#include <boost/json/value_from.hpp>
+#include <boost/describe/enumerators.hpp>
+#include <boost/describe/members.hpp>
 #include <span>
 #include <vector>
 #include <concepts>
@@ -146,6 +150,33 @@ inline auto tag_invoke(
     http::response<http::string_body> response {http::status::ok, 11};
     response.set(boost::beast::http::field::content_type, "application/json");
     response.body() = boost::json::serialize(value);
+    response.prepare_payload();
+    return response;
+}
+
+/// Types `boost::json::value_from` understands natively: `BOOST_DESCRIBE`d
+/// structs and enums, sequences and string-keyed maps of such values.
+template <typename T>
+concept json_convertible =
+    !is_response_from_result<T> &&
+    (boost::describe::has_describe_members<T>::value ||
+    boost::describe::has_describe_enumerators<T>::value ||
+    ((detail::sequence_like<T> || detail::string_map_like<T>) &&
+     !std::same_as<T, std::vector<std::byte>> &&
+     !std::same_as<T, std::span<std::byte const>> &&
+     !std::same_as<T, boost::json::object> &&
+     !std::same_as<T, boost::json::array>));
+
+// Serialise through value_from as application/json.
+template <typename T> requires (json_convertible<std::remove_cvref_t<T>>)
+inline auto tag_invoke(
+    response_from_built_in_tag<std::remove_cvref_t<T>>,
+    T&& value)
+{
+    namespace http = boost::beast::http;
+    http::response<http::string_body> response {http::status::ok, 11};
+    response.set(boost::beast::http::field::content_type, "application/json");
+    response.body() = boost::json::serialize(boost::json::value_from(std::forward<T>(value)));
     response.prepare_payload();
     return response;
 }

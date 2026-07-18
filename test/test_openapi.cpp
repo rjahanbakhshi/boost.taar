@@ -19,6 +19,7 @@
 #include <boost/taar/matcher/metadata.hpp>
 #include <boost/taar/matcher/method.hpp>
 #include <boost/taar/matcher/target.hpp>
+#include <boost/describe.hpp>
 #include <boost/json/parse.hpp>
 #include <boost/json/serialize.hpp>
 #include <boost/test/unit_test.hpp>
@@ -68,6 +69,24 @@ static_assert(!openapi::detail::expressible_v<matcher::any_metadata>,
 // ---- fixtures -------------------------------------------------------------
 
 struct user_session { std::string user = "alice"; };
+
+struct todo_input
+{
+    std::string title;
+    std::optional<bool> done;
+};
+BOOST_DESCRIBE_STRUCT(todo_input, (), (title, done))
+
+struct todo
+{
+    int id;
+    std::string title;
+    bool done;
+};
+BOOST_DESCRIBE_STRUCT(todo, (), (id, title, done))
+
+todo create_todo(todo_input in) { return {1, in.title, in.done.value_or(false)}; }
+std::vector<todo> list_todos() { return {}; }
 
 json::object get_user(int id, std::optional<bool> verbose, int page)
 {
@@ -324,6 +343,35 @@ BOOST_AUTO_TEST_CASE(test_e2e_openapi_document_served)
         BOOST_TEST(json::parse(res[0].body()) == json::value {gen.document()});
         BOOST_TEST(json::parse(res[1].body()).at("id").as_int64() == 7);
     });
+}
+
+BOOST_AUTO_TEST_CASE(test_openapi_described_types_render_full_schemas)
+{
+    taar::session::http session;
+    openapi::generator gen {{.title = "t", .version = "1"}};
+    session.register_request_handler(
+        method == http::verb::post && target == "/todos",
+        rest(&create_todo, json_body_arg(description {"New todo"})),
+        gen.describe("Create"));
+    session.register_request_handler(
+        method == http::verb::get && target == "/todos",
+        rest(&list_todos),
+        gen.describe("List"));
+
+    auto doc = gen.document();
+    auto const& body = doc.at("paths").at("/todos").at("post").at("requestBody").at("content").at("application/json").at("schema");
+    BOOST_TEST(body.at("type").as_string() == "object");
+    BOOST_TEST(body.at("properties").at("title").at("type").as_string() == "string");
+    BOOST_TEST(body.at("properties").at("done").at("type").as_string() == "boolean");
+    BOOST_TEST(body.at("required").as_array().size() == 1u);
+
+    auto const& created = doc.at("paths").at("/todos").at("post").at("responses").at("200").at("content").at("application/json").at("schema");
+    BOOST_TEST(created.at("properties").at("id").at("type").as_string() == "integer");
+    BOOST_TEST(created.at("required").as_array().size() == 3u);
+
+    auto const& listed = doc.at("paths").at("/todos").at("get").at("responses").at("200").at("content").at("application/json").at("schema");
+    BOOST_TEST(listed.at("type").as_string() == "array");
+    BOOST_TEST(listed.at("items").at("properties").at("title").at("type").as_string() == "string");
 }
 
 } // namespace
