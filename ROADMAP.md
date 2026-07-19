@@ -1,0 +1,80 @@
+# Roadmap and known limitations
+
+What boost.taar does not do yet, grouped by how it affects a server that
+exposes one set of callables over REST, JSON-RPC and MCP. Items are
+tackled one at a time; the order below is a suggestion, not a promise.
+
+## Inherent to the surfaces
+
+These follow from what each protocol can carry. They are documented
+rather than planned.
+
+- Streaming results exist only on REST (`chunked_response`,
+  `async_generator`). A JSON-RPC method or MCP tool returns one JSON value.
+- A callable returning `http::response`, `response_builder` or raw bytes is
+  REST-only; one whose return type has only a `response_from` overload
+  cannot be an RPC method or MCP tool, and one with only `value_from`
+  support cannot be a REST route unless it is a described type or JSON
+  container (those now work on all three).
+- REST sessions (cookie or header keyed) and MCP sessions (`Mcp-Session-Id`)
+  are separate stores. One logical user session spanning both requires the
+  application to map keys itself.
+
+## Transport
+
+- TLS. `server::tcp` is plain TCP; add a TLS session over
+  `beast::ssl_stream` so MCP and cookie sessions can run securely outside
+  localhost.
+- Request body streaming. Handlers receive fully buffered bodies under the
+  body limit; large uploads cannot stream in.
+- Multipart form bodies. No provider for `multipart/form-data`.
+- 405 and HEAD. A known path with the wrong method answers 404; HEAD is not
+  synthesised from GET.
+- HTTP/2 and response compression are out of scope for now.
+
+## JSON-RPC
+
+- Positional parameter arrays are rejected with -32602.
+- No cancellation of in-flight calls.
+
+## MCP
+
+- Capabilities not implemented: prompts, `resources/subscribe`,
+  `completion/complete`, `logging/setLevel`, list pagination cursors.
+- No `progressToken` progress notifications tied to a request, and no
+  `notifications/cancelled` handling.
+- No server-to-client requests (sampling, elicitation, `roots/list`);
+  client responses posted to the endpoint are acknowledged and dropped.
+- Tool results are text plus `structuredContent`; image, audio and
+  embedded resource content, `outputSchema` and tool annotations are not
+  emitted. Resources carry `text` only, no `blob`.
+- A POST never answers with an SSE stream; notifications go over the GET
+  stream (or stdout on stdio). No `Last-Event-ID` resumption.
+- Resource templates support `{name}` placeholders only (no RFC 6570
+  operators).
+- The stdio transport is POSIX-only (`posix::stream_descriptor`).
+
+## OpenAPI
+
+- Default values from `with_default` are not emitted.
+- No security schemes, validation constraints (ranges, patterns), examples,
+  or `components` reuse; every schema is inlined.
+- Query parameters only bind scalars and CSV lists; repeated query keys
+  (`?tag=a&tag=b`) are rejected as ambiguous.
+
+## REST
+
+- `with_session` cannot wrap a streaming handler, so a per-user SSE stream
+  must read the session cookie by hand.
+- No declarative validation on arguments.
+
+## Recently closed
+
+- REST request providers (`header_arg`, `cookie_arg`, `query_arg`) usable
+  on JSON-RPC methods and MCP tools.
+- Full JSON Schema for `boost::describe`d structs and enums, sequences and
+  maps, shared by OpenAPI and MCP `inputSchema`; described types as REST
+  return values.
+- `mcp::session_info` context so a tool can notify its own client.
+- CORS policy with preflight handler and session response filter.
+- MCP stdio transport.

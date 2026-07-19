@@ -19,7 +19,7 @@ you can write with it, and a tour of the idioms you will see again and again:
   complete program serving a single GET endpoint.
 * [link boost_taar.quickstart.tour A Whirlwind Tour]: stock responses,
   JSON, path arguments, static files, hand-written handlers, per-connection
-  and per-session state, JSON-RPC, MCP, OpenAPI, and graceful shutdown.
+  and per-session state, JSON-RPC, MCP, CORS, OpenAPI, and graceful shutdown.
 
 [section:requirements Requirements]
 
@@ -220,6 +220,37 @@ derived from the callable's parameter types:
     http_session.register_request_handler(
         method == http::verb::get && target == "/mcp", mcp.stream_handler());
     http_session.register_request_handler(target == "/mcp", mcp.handler());
+
+A stateful tool may ask for `taar::mcp::session_info const&` to learn its
+own session id and push a notification to its caller, and REST request
+providers such as `header_arg` work on tools and JSON-RPC methods too:
+
+    mcp.tool("notes/remind", "Remind the caller",
+        [&](taar::mcp::session_info const& me, std::string text)
+        {
+            return mcp.notify(me.id, "notifications/message", {{"data", text}});
+        },
+        taar::mcp::mcp_arg("text"));
+
+    rpc.method("whoami", [](std::string token) { return token; },
+        taar::handler::header_arg(http::field::authorization));
+
+The same endpoint serves the stdio transport that desktop clients launch
+locally:
+
+    boost::asio::co_spawn(io, mcp.serve_stdio(), boost::asio::detached);
+
+[heading CORS]
+
+Browser clients need preflight answers and `Access-Control` headers on
+every response. A `taar::cors` policy provides both:
+
+    taar::cors cors;
+    cors.allowed_origins = {"http://localhost:3000"};
+
+    http_session.set_response_filter(cors.response_filter());
+    http_session.register_request_handler(
+        method == http::verb::options, cors.preflight_handler());
 
 [heading OpenAPI]
 

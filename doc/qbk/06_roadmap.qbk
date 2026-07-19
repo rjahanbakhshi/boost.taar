@@ -1,0 +1,28 @@
+[/
+ / Copyright (c) 2021, 2024 Reza Jahanbakhshi
+ /
+ / Distributed under the Boost Software License, Version 1.0. (See accompanying
+ / file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
+ /]
+
+[section:roadmap Limitations and Roadmap]
+
+The authoritative list of what is not supported yet lives in
+[@https://github.com/rjahanbakhshi/boost.taar/blob/master/ROADMAP.md ROADMAP.md]
+in the repository and is updated as items close. In outline:
+
+* /Inherent to the surfaces/: streaming results are REST-only; return
+  types without a JSON representation cannot be RPC or MCP results; REST
+  and MCP sessions are separate stores.
+* /Transport/: no TLS, no request body streaming, no multipart bodies, no
+  405 or synthesised HEAD, no HTTP/2 or compression.
+* /JSON-RPC/: positional parameters and cancellation are not supported.
+* /MCP/: no prompts, subscriptions, pagination, progress or cancellation
+  notifications, server-to-client requests, binary content, SSE
+  resumption; `{name}`-only resource templates; stdio is POSIX-only.
+* /OpenAPI/: no default values, security schemes, constraints or reusable
+  components.
+* /REST/: no streaming handler under `with_session`; repeated query keys
+  are ambiguous.
+
+[endsect]

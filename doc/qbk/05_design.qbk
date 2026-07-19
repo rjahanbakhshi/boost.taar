@@ -202,7 +202,10 @@ turns a callable plus argument providers into an invoker and a parameter
 description; `handler::rest`, JSON-RPC methods, MCP tools and MCP
 resources all use the same context-injection rules and the same
 `rest_arg_cast` conversions, which is what lets one `int add(calc&, int,
-int)` serve all three surfaces unchanged.
+int)` serve all three surfaces unchanged. Providers that read the
+HTTP request (`header_arg`, `cookie_arg`, `query_arg`) are accepted on
+every surface as well, because every call type carries the request it
+arrived on.
 
 [endsect]
 
@@ -299,7 +302,12 @@ Where the specifications leave room, Taar makes these choices:
 * The `GET` event stream is one per session (`409` for a second), fed by
   `notify`/`broadcast`; messages queued before a stream opens are kept.
   Deleting or sweeping the session ends the stream. `notify` does not
-  refresh the session's idle timer.
+  refresh the session's idle timer. A tool reaches its own stream through
+  the injected `session_info`.
+* The stdio transport (`serve_stdio`) runs one implicit session: created
+  on `initialize`, removed at end of input. Requests before `initialize`
+  are answered `-32600`. Replies and notifications share one writer so
+  lines never interleave.
 
 [heading OpenAPI]
 
@@ -314,6 +322,11 @@ Where the specifications leave room, Taar makes these choices:
 * The response schema is derived from the callable's return type when the
   built-in conversions apply; a hand-written `http::response` documents
   only a generic `200`. Per-operation `responses` override the default.
+* Schemas come from `json_schema_for<T>()`: `boost::describe`d structs
+  render their members (optional members are not required), described
+  enums render as string enumerations, sequences and string-keyed maps
+  render `items` and `additionalProperties`. MCP `inputSchema` uses the
+  same function, so both documents agree by construction.
 
 [endsect]
 

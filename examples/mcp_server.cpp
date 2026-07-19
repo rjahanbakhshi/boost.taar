@@ -8,8 +8,9 @@
 //
 // An MCP (Model Context Protocol) server over Streamable HTTP with
 // per-session state: tools, resources, a URI template, server-to-client
-// notifications over the GET event stream, and Origin validation.
-// `mcp::endpoint<>` (no Session type) would be the stateless variant.
+// notifications over the GET event stream, CORS for browser clients, and
+// Origin validation. `mcp::endpoint<>` (no Session type) would be the
+// stateless variant; mcp_stdio_server.cpp serves the same tools over stdio.
 //
 //   ./mcp_server 8080
 //   curl -si localhost:8080/mcp -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"curl","version":"1"}}}'
@@ -21,6 +22,7 @@
 //
 
 #include <boost/taar/core/cancellation_signals.hpp>
+#include <boost/taar/core/cors.hpp>
 #include <boost/taar/core/ignore_and_rethrow.hpp>
 #include <boost/taar/matcher/method.hpp>
 #include <boost/taar/matcher/target.hpp>
@@ -118,6 +120,13 @@ int main(int argc, char* argv[])
     {
         return server.broadcast("notifications/resources/updated", json::object {{"uri", "notes://all"}});
     });
+    // session_info identifies the calling session, so a tool can notify its own client.
+    server.tool("notes/remind", "Push a reminder to the caller's event stream",
+        [&](mcp::session_info const& me, std::string text)
+        {
+            return server.notify(me.id, "notifications/message", json::object {{"level", "info"}, {"data", text}});
+        },
+        mcp_arg("text", "Reminder text"));
 
     server.resource("notes://all", "text/plain", "Every note, one per line", &all_notes);
     server.resource("notes://{index}", "text/plain", "A single note by index", &note_at, uri_arg("index", "zero-based"));
@@ -128,7 +137,13 @@ int main(int argc, char* argv[])
         return origin.starts_with("http://localhost") || origin.starts_with("http://127.0.0.1");
     });
 
+    // Browser clients need CORS: preflight on OPTIONS, headers on every response.
+    taar::cors cors;
+    cors.allowed_origins = {"http://localhost:3000", "http://127.0.0.1:3000"};
+
     taar::session::http session;
+    session.set_response_filter(cors.response_filter());
+    session.register_request_handler(method == http::verb::options, cors.preflight_handler());
     session.register_request_handler(method == http::verb::get && target == "/mcp", server.stream_handler());
     session.register_request_handler(target == "/mcp", server.handler());
 

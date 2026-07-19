@@ -31,6 +31,14 @@
   `response_from` accepts `boost::json::object` and `boost::json::array`.
 * `core::async_channel`: executor-agnostic asynchronous queue used for
   server-push streams.
+* JSON Schema generation for `boost::describe`d structs and enums,
+  sequences and maps (`json_schema_for`), shared by OpenAPI and MCP;
+  described types and JSON containers as REST return values.
+* REST request providers (`header_arg`, `cookie_arg`, `query_arg`) accepted
+  on JSON-RPC methods and MCP tools.
+* `mcp::session_info` context; `mcp::endpoint::serve_stdio` transport.
+* `core::cors` policy and `basic_http::set_response_filter`.
+* `ROADMAP.md` lists the remaining gaps.
 * `session::http`: responses follow the request's HTTP version and
   keep-alive; pipelined requests are served in order; a peer closing an
   idle connection is no longer reported as a hard error; shutdown lets

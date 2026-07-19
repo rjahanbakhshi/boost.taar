@@ -45,8 +45,12 @@ with the `curl` commands that exercise it.
  custom error mapper, and per-client state through `with_session`.]]
 [[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/mcp_server.cpp mcp_server.cpp]]
  [An MCP server over Streamable HTTP: tools with generated input schemas,
- resources and URI templates, per-session state, server-to-client
- notifications over the event stream, and Origin validation.]]
+ resources and URI templates, per-session state, a tool that notifies its
+ own caller through `session_info`, CORS for browser clients, and Origin
+ validation.]]
+[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/mcp_stdio_server.cpp mcp_stdio_server.cpp]]
+ [The same MCP tools served over stdio, the transport desktop clients
+ launch locally.]]
 ]
 
 Start with `hello_server.cpp`, then the example closest to what you are

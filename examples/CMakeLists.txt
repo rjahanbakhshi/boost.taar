@@ -9,6 +9,7 @@ set(TAAR_EXAMPLES
     htdocs_server
     jsonrpc_server
     mcp_server
+    mcp_stdio_server
     proxy_server
     rest_crud_server
     streaming_server

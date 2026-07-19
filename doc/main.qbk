@@ -114,6 +114,7 @@ the [link boost_taar.examples Examples chapter] for complete programs.
 [include qbk/03_concepts.qbk]
 [include qbk/04_examples.qbk]
 [include qbk/05_design.qbk]
+[include qbk/06_roadmap.qbk]
 
 [xinclude reference.xml]
 
