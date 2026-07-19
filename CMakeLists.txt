@@ -31,6 +31,7 @@ target_sources(
         include/boost/taar/core/chunked_response_meta.hpp
         include/boost/taar/core/constexpr_string.hpp
         include/boost/taar/core/context_store.hpp
+        include/boost/taar/core/cors.hpp
         include/boost/taar/core/cookies.hpp
         include/boost/taar/core/error.hpp
         include/boost/taar/core/form_kvp.hpp

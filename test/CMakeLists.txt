@@ -26,6 +26,7 @@ target_sources(
         test_constexpr_string.cpp
         test_context_store.cpp
         test_cookies.cpp
+        test_cors.cpp
         test_dual_surface.cpp
         test_e2e_context.cpp
         test_e2e_jsonrpc.cpp

@@ -208,6 +208,24 @@ inline bool is_transport_error(boost::system::error_code const& ec)
            ec == http_err::error::end_of_stream;
 }
 
+/// Hook run on every response header before it is written (CORS, Server, security headers).
+using response_filter_type = std::function<void(
+    boost::beast::http::request_header<> const&,
+    boost::beast::http::response_header<>&)>;
+
+/// Run @a filter on @a response if it is a typed message (message_generator is opaque).
+template <typename Response>
+void apply_response_filter(
+    response_filter_type const& filter,
+    boost::beast::http::request_header<> const& request,
+    Response& response)
+{
+    if constexpr (requires { response.base(); })
+    {
+        if (filter) filter(request, response.base());
+    }
+}
+
 /// A callable invoked at registration with the route's operand and handler.
 template <typename Observer, typename MatcherType, typename Handler>
 concept registration_observer = requires(
@@ -286,7 +304,9 @@ awaitable<bool> write_chunked_response(
     unsigned version,
     bool keep_alive,
     ::boost::asio::cancellation_slot cancellation_slot = {},
-    std::exception_ptr* mid_stream_error = nullptr)
+    std::exception_ptr* mid_stream_error = nullptr,
+    response_filter_type const& filter = {},
+    ::boost::beast::http::request_header<> const* request = nullptr)
 {
     namespace http = ::boost::beast::http;
     namespace net = ::boost::asio;
@@ -309,6 +329,7 @@ awaitable<bool> write_chunked_response(
     header_response.set(http::field::content_type, default_chunk_content_type<T>());
     header_response.keep_alive(keep_alive);
     apply_chunked_metadata(generator, header_response);
+    if (filter && request) filter(*request, header_response.base());
     header_response.set(http::field::transfer_encoding, "chunked");
 
     http::response_serializer<http::empty_body> serializer {header_response};
@@ -467,7 +488,7 @@ private:
 public:
     basic_http()
         : wrapped_soft_error_handler_ {
-            [](
+            [this](
                 std::exception_ptr eptr,
                 rebind_executor<boost::beast::tcp_stream>& stream,
                 boost::beast::http::request_header<>& req,
@@ -497,6 +518,7 @@ public:
                     auto response = response_from(error_msg);
                     response.result(boost::beast::http::status::bad_request);
                     detail::finish_response(response, req.version(), detail::header_keep_alive(req), false);
+                    detail::apply_response_filter(response_filter_, req, response);
                     bool keep_alive = response.keep_alive();
                     co_await detail::async_write(stream, std::move(response));
                     co_return keep_alive;
@@ -506,6 +528,19 @@ public:
             }
         }
     {}
+
+    /** Install a hook that runs on every response header before it is written.
+
+        Applies to handler responses, soft-error responses, the stock 404
+        and the header of chunked responses; raw handlers that return a
+        `message_generator` are opaque and bypass it. Use it for CORS
+        (`taar::cors::response_filter()`), a `Server` header, or security
+        headers.
+    */
+    void set_response_filter(detail::response_filter_type filter)
+    {
+        response_filter_ = std::move(filter);
+    }
 
     /// Cap the bytes consumed by a request header. Default 8 KiB.
     void set_request_header_limit(std::uint32_t limit)
@@ -681,6 +716,7 @@ public:
                 // Stock not-found response.
                 http::response<http::empty_body> response {http::status::not_found, version};
                 response.keep_alive(keep_alive);
+                detail::apply_response_filter(response_filter_, req_header, response);
                 response.prepare_payload();
                 auto [resp_ec, resp_sz] = co_await http::async_write(
                     stream,
@@ -831,7 +867,8 @@ public:
                             body_parser.get(),
                             context);
                         bool const ka = co_await detail::write_chunked_response(
-                            generator, stream, version, keep_alive, cancellation_slot, &stream_error);
+                            generator, stream, version, keep_alive, cancellation_slot, &stream_error,
+                            response_filter_, &body_parser.get());
                         if (stream_error) std::rethrow_exception(stream_error);
                         co_return ka;
                     }
@@ -844,7 +881,8 @@ public:
                             body_parser.get(),
                             context);
                         bool const ka = co_await detail::write_chunked_response(
-                            generator, stream, version, keep_alive, cancellation_slot, &stream_error);
+                            generator, stream, version, keep_alive, cancellation_slot, &stream_error,
+                            response_filter_, &body_parser.get());
                         if (stream_error) std::rethrow_exception(stream_error);
                         co_return ka;
                     }
@@ -859,7 +897,8 @@ public:
                                 body_parser.get(),
                                 context);
                             bool const ka = co_await detail::write_chunked_response(
-                                generator, stream, version, keep_alive, cancellation_slot, &stream_error);
+                                generator, stream, version, keep_alive, cancellation_slot, &stream_error,
+                            response_filter_, &body_parser.get());
                             if (stream_error) std::rethrow_exception(stream_error);
                             co_return ka;
                         }
@@ -872,7 +911,8 @@ public:
                                 body_parser.get(),
                                 context);
                             bool const ka = co_await detail::write_chunked_response(
-                                generator, stream, version, keep_alive, cancellation_slot, &stream_error);
+                                generator, stream, version, keep_alive, cancellation_slot, &stream_error,
+                            response_filter_, &body_parser.get());
                             if (stream_error) std::rethrow_exception(stream_error);
                             co_return ka;
                         }
@@ -888,6 +928,7 @@ public:
                             shutting_down = co_await detail::observe_shutdown();
 
                             detail::finish_response(response, version, keep_alive, shutting_down);
+                            detail::apply_response_filter(response_filter_, body_parser.get(), response);
                             bool const ka = response.keep_alive();
                             co_await detail::async_write(stream, std::move(response));
                             co_return ka;
@@ -905,6 +946,7 @@ public:
                         shutting_down = co_await detail::observe_shutdown();
 
                         detail::finish_response(response, version, keep_alive, shutting_down);
+                        detail::apply_response_filter(response_filter_, body_parser.get(), response);
                         bool const ka = response.keep_alive();
                         co_await detail::async_write(stream, std::move(response));
                         co_return ka;
@@ -1090,7 +1132,7 @@ public:
     void set_soft_error_handler(HandlerType handler)
     {
         wrapped_soft_error_handler_ =
-            [handler = std::move(handler)](
+            [this, handler = std::move(handler)](
                 std::exception_ptr eptr,
                 rebind_executor<boost::beast::tcp_stream>& stream,
                 boost::beast::http::request_header<>& request_header,
@@ -1099,6 +1141,7 @@ public:
             {
                 auto response = co_await response_from_invoke(handler, eptr);
                 detail::finish_response(response, request_header.version(), detail::header_keep_alive(request_header), false);
+                detail::apply_response_filter(response_filter_, request_header, response);
                 bool keep_alive = response.keep_alive();
                 co_await detail::async_write(stream, std::move(response));
                 co_return keep_alive;
@@ -1128,6 +1171,7 @@ private:
     std::vector<matcher_handler_type> matcher_handlers_;
     soft_error_handler_wrapper_type wrapped_soft_error_handler_;
     hard_error_handler_type hard_error_handler_ = [](std::exception_ptr){};
+    detail::response_filter_type response_filter_;
     std::uint32_t request_header_limit_ = 8192;
     boost::optional<std::uint64_t> request_body_limit_ = 1 * 1024 * 1024;
     bool needs_parsed_target_ = false;
