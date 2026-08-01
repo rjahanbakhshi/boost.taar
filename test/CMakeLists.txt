@@ -1,6 +1,7 @@
 project(boost-taar-test)
 
 find_package(Boost 1.84 CONFIG REQUIRED)
+find_package(OpenSSL REQUIRED)
 
 add_executable(${PROJECT_NAME})
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 23)
@@ -33,6 +34,7 @@ target_sources(
         test_e2e_mcp.cpp
         test_e2e_operational.cpp
         test_e2e_streaming.cpp
+        test_e2e_tls.cpp
         test_http_session.cpp
         test_is_http_response.cpp
         test_jsonrpc.cpp
@@ -66,7 +68,7 @@ target_sources(
 
 target_link_libraries(
     ${PROJECT_NAME}
-    PRIVATE boost-taar
+    PRIVATE boost-taar OpenSSL::SSL OpenSSL::Crypto
 )
 
 add_test(

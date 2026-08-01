@@ -1,6 +1,7 @@
 project(boost-taar-examples)
 
 find_package(Boost 1.84 CONFIG REQUIRED)
+find_package(OpenSSL REQUIRED)
 
 set(TAAR_EXAMPLES
     connection_state_server
@@ -13,6 +14,7 @@ set(TAAR_EXAMPLES
     proxy_server
     rest_crud_server
     streaming_server
+    tls_server
     websocket_server
 )
 
@@ -21,5 +23,7 @@ foreach(example IN LISTS TAAR_EXAMPLES)
     set_target_properties(${example} PROPERTIES CXX_STANDARD 23 UNITY_BUILD ${ENABLE_UNITY_BUILD})
     target_link_libraries(${example} PRIVATE boost-taar)
 endforeach()
+
+target_link_libraries(tls_server PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 
 add_custom_target(examples DEPENDS ${TAAR_EXAMPLES})

@@ -19,7 +19,8 @@ you can write with it, and a tour of the idioms you will see again and again:
   complete program serving a single GET endpoint.
 * [link boost_taar.quickstart.tour A Whirlwind Tour]: stock responses,
   JSON, path arguments, static files, hand-written handlers, per-connection
-  and per-session state, JSON-RPC, MCP, CORS, OpenAPI, and graceful shutdown.
+  and per-session state, JSON-RPC, MCP, CORS, OpenAPI, TLS, and graceful
+  shutdown.
 
 [section:requirements Requirements]
 
@@ -267,6 +268,26 @@ Describe routes as you register them and serve the generated document:
 
     http_session.register_request_handler(
         method == http::verb::get && target == "/openapi.json", openapi.handler());
+
+[heading TLS]
+
+HTTPS is the same session over a TLS stream, accepted by `server::tls`,
+which performs the handshake before the session starts. Programs using it
+link OpenSSL.
+
+    boost::asio::ssl::context tls {boost::asio::ssl::context::tls_server};
+    tls.use_certificate_chain_file("cert.pem");
+    tls.use_private_key_file("key.pem", boost::asio::ssl::context::pem);
+
+    taar::session::https https_session;
+    https_session.register_request_handler(
+        method == http::verb::get && target == "/hello",
+        taar::handler::rest([] { return "hello over TLS"; }));
+
+    boost::asio::co_spawn(
+        io,
+        taar::server::tls("0.0.0.0", "8443", tls, https_session, signals),
+        boost::asio::detached);
 
 [heading Graceful shutdown]
 

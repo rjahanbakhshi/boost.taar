@@ -78,7 +78,9 @@ target_sources(
         include/boost/taar/mcp/endpoint.hpp
         include/boost/taar/openapi/generator.hpp
         include/boost/taar/server/tcp.hpp
+        include/boost/taar/server/tls.hpp
         include/boost/taar/session/http.hpp
+        include/boost/taar/session/https.hpp
         include/boost/taar/type_traits/always_false.hpp
         include/boost/taar/type_traits/callable.hpp
         include/boost/taar/type_traits/container_like.hpp

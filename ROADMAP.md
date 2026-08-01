@@ -22,9 +22,6 @@ rather than planned.
 
 ## Transport
 
-- TLS. `server::tcp` is plain TCP; add a TLS session over
-  `beast::ssl_stream` so MCP and cookie sessions can run securely outside
-  localhost.
 - Request body streaming. Handlers receive fully buffered bodies under the
   body limit; large uploads cannot stream in.
 - Multipart form bodies. No provider for `multipart/form-data`.
@@ -70,6 +67,7 @@ rather than planned.
 
 ## Recently closed
 
+- TLS: `session::https` over `beast::ssl_stream`, accepted by `server::tls`.
 - REST request providers (`header_arg`, `cookie_arg`, `query_arg`) usable
   on JSON-RPC methods and MCP tools.
 - Full JSON Schema for `boost::describe`d structs and enums, sequences and

@@ -19,6 +19,7 @@
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/bind_cancellation_slot.hpp>
+#include <functional>
 #include <system_error>
 #include <string>
 
@@ -53,19 +54,21 @@ namespace boost::taar::server {
 
     @throws std::system_error if name resolution fails.
 */
-template <typename SessionHandler> // TODO: SessionHandler concept for callable with correct syntax
-[[nodiscard]] awaitable<void> tcp(
+namespace detail {
+
+/// Bind, listen and call @a on_socket for every accepted connection until cancelled.
+template <typename OnSocket>
+awaitable<void> accept_loop(
     std::string bind_host,
     std::string bind_port,
-    SessionHandler&& session_handler,
     cancellation_signals& signals,
-    std::function<void(boost::asio::ip::tcp::endpoint const&)> local_endpoint_handler = nullptr)
+    std::function<void(boost::asio::ip::tcp::endpoint const&)> local_endpoint_handler,
+    OnSocket on_socket)
 {
     namespace net = boost::asio;
     namespace this_coro = net::this_coro;
     using net::ip::tcp;
-    using net::co_spawn;
-    using net::detached;
+    (void)signals;
 
     rebind_executor<tcp::resolver> resolver {co_await this_coro::executor};
     auto [ec, query] = co_await resolver.async_resolve(bind_host, bind_port);
@@ -75,17 +78,9 @@ template <typename SessionHandler> // TODO: SessionHandler concept for callable 
     }
 
     rebind_executor<tcp::acceptor> acceptor {co_await this_coro::executor};
-
-    // Open the acceptor
     acceptor.open(query.begin()->endpoint().protocol());
-
-    // Allow address reuse
     acceptor.set_option(net::socket_base::reuse_address(true));
-
-    // Bind to the server address
     acceptor.bind(query.begin()->endpoint());
-
-    // Start listening for connections
     acceptor.listen(net::socket_base::max_listen_connections);
 
     if (local_endpoint_handler)
@@ -97,16 +92,39 @@ template <typename SessionHandler> // TODO: SessionHandler concept for callable 
          cs.cancelled() == net::cancellation_type::none;
          cs = co_await this_coro::cancellation_state)
     {
-        auto [ec, socket] = co_await acceptor.async_accept();
-        if (!ec)
+        auto [aec, socket] = co_await acceptor.async_accept();
+        if (!aec)
         {
-            auto const executor = socket.get_executor();
-            co_spawn(
-                executor,
-                std::forward<SessionHandler>(session_handler)(std::move(socket), signals),
-                net::bind_cancellation_slot(signals.slot(), detached));
+            on_socket(std::move(socket));
         }
     }
+}
+
+} // namespace detail
+
+template <typename SessionHandler> // TODO: SessionHandler concept for callable with correct syntax
+[[nodiscard]] awaitable<void> tcp(
+    std::string bind_host,
+    std::string bind_port,
+    SessionHandler&& session_handler,
+    cancellation_signals& signals,
+    std::function<void(boost::asio::ip::tcp::endpoint const&)> local_endpoint_handler = nullptr)
+{
+    namespace net = boost::asio;
+
+    co_await detail::accept_loop(
+        std::move(bind_host),
+        std::move(bind_port),
+        signals,
+        std::move(local_endpoint_handler),
+        [&](rebind_executor<net::ip::tcp::socket> socket)
+        {
+            auto const executor = socket.get_executor();
+            net::co_spawn(
+                executor,
+                std::forward<SessionHandler>(session_handler)(std::move(socket), signals),
+                net::bind_cancellation_slot(signals.slot(), net::detached));
+        });
 }
 
 } // namespace boost::taar::server

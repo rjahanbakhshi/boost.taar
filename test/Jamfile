@@ -8,10 +8,16 @@
 
 import testing ;
 
+# OpenSSL for the TLS tests (system libraries).
+lib ssl ;
+lib crypto ;
+
 project /boost/taar/test
     : requirements
         <library>/boost/taar//boost_taar
         <library>/boost/test//boost_unit_test_framework
+        <library>ssl
+        <library>crypto
         <cxxstd>23
         <toolset>msvc:<cxxflags>/bigobj
         <toolset>msvc:<cxxflags>/Zc\:preprocessor
@@ -36,6 +42,7 @@ run
     test_e2e_mcp.cpp
     test_e2e_operational.cpp
     test_e2e_streaming.cpp
+    test_e2e_tls.cpp
     test_http_session.cpp
     test_is_http_response.cpp
     test_jsonrpc.cpp

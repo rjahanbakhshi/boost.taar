@@ -37,6 +37,9 @@ with the `curl` commands that exercise it.
 [[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/proxy_server.cpp proxy_server.cpp]]
  [Asynchronous handlers: a coroutine that fetches an upstream URL with
  Beast and returns the response, plus a timer-based delay route.]]
+[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/tls_server.cpp tls_server.cpp]]
+ [HTTPS with `session::https` and `server::tls`: certificate and key from
+ PEM files, handlers registered as for plain HTTP.]]
 [[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/websocket_server.cpp websocket_server.cpp]]
  [Protocol upgrade to WebSocket via `register_raw_handler`, with an echo
  loop.]]

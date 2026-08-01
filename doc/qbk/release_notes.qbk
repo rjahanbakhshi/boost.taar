@@ -38,6 +38,8 @@
   on JSON-RPC methods and MCP tools.
 * `mcp::session_info` context; `mcp::endpoint::serve_stdio` transport.
 * `core::cors` policy and `basic_http::set_response_filter`.
+* TLS: `basic_http` takes its stream type as a template parameter;
+  `session::https` and `server::tls` serve HTTPS (OpenSSL required).
 * `ROADMAP.md` lists the remaining gaps.
 * `session::http`: responses follow the request's HTTP version and
   keep-alive; pipelined requests are served in order; a peer closing an

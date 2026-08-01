@@ -10,6 +10,7 @@
 #ifndef BOOST_TAAR_SESSION_HTTP_HPP
 #define BOOST_TAAR_SESSION_HTTP_HPP
 
+#include <boost/asio/as_tuple.hpp>
 #include <boost/asio/async_result.hpp>
 #include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/cancellation_state.hpp>
@@ -47,6 +48,7 @@
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/verb.hpp>
 #include <boost/beast/http/status.hpp>
+#include <boost/beast/core/stream_traits.hpp>
 #include <boost/beast/core/tcp_stream.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/asio/error.hpp>
@@ -58,6 +60,8 @@
 #include <type_traits>
 #include <vector>
 #include <utility>
+#include <chrono>
+#include <concepts>
 #include <exception>
 #include <cstdint>
 
@@ -433,6 +437,11 @@ awaitable<bool> write_chunked_response(
     `http` is move-constructible but not copyable; share one instance among
     spawned sessions by reference.
 
+    @tparam Stream  The connection stream type. `rebind_executor<beast::tcp_stream>`
+                    for plain HTTP (the default); `session::tls_stream` from
+                    `<boost/taar/session/https.hpp>` for HTTPS, where the
+                    @ref boost::taar::server::tls acceptor performs the
+                    handshake before handing the stream over.
     @tparam Context Per-connection state type. When set to anything other
                     than @ref no_context, the session creates one
                     `Context` (via `std::make_shared`) for every accepted
@@ -444,7 +453,7 @@ awaitable<bool> write_chunked_response(
                     default alias, @ref http, uses @ref no_context and
                     creates nothing per connection.
 */
-template <typename Context = no_context>
+template <typename Context = no_context, typename Stream = rebind_executor<boost::beast::tcp_stream>>
 class basic_http
 {
 public:
@@ -463,7 +472,7 @@ private:
     using request_handler_wrapper_type = std::move_only_function<
         awaitable<bool>(
             matcher::context const&,
-            rebind_executor<boost::beast::tcp_stream>&,
+            Stream&,
             boost::beast::flat_buffer&,
             boost::beast::http::request_parser<boost::beast::http::buffer_body>&,
             cancellation_signals&,
@@ -478,7 +487,7 @@ private:
     using soft_error_handler_wrapper_type = std::move_only_function<
         awaitable<bool>(
             std::exception_ptr,
-            rebind_executor<boost::beast::tcp_stream>&,
+            Stream&,
             boost::beast::http::request_header<>&,
             cancellation_signals&)>;
 
@@ -490,7 +499,7 @@ public:
         : wrapped_soft_error_handler_ {
             [this](
                 std::exception_ptr eptr,
-                rebind_executor<boost::beast::tcp_stream>& stream,
+                Stream& stream,
                 boost::beast::http::request_header<>& req,
                 cancellation_signals&) -> awaitable<bool>
             {
@@ -570,14 +579,25 @@ public:
     awaitable<void> operator()(
         rebind_executor<boost::asio::ip::tcp::socket> socket,
         cancellation_signals& signals)
+        requires std::constructible_from<Stream, rebind_executor<boost::asio::ip::tcp::socket>&&>
+    {
+        return (*this)(Stream {std::move(socket)}, signals);
+    }
+
+    /** Drive one connection on an already established stream.
+
+        Used by @ref boost::taar::server::tls after the handshake, and by
+        any transport that builds its own stream (`Stream` is the class
+        template parameter, `rebind_executor<beast::tcp_stream>` by
+        default). On exit a TLS stream receives `close_notify` before the
+        TCP shutdown.
+    */
+    awaitable<void> operator()(Stream stream, cancellation_signals& signals)
     {
         namespace net = boost::asio;
         namespace http = boost::beast::http;
         namespace this_coro = net::this_coro;
-        using boost::beast::tcp_stream;
         using boost::beast::flat_buffer;
-
-        rebind_executor<tcp_stream> stream {std::move(socket)};
 
         // Per-connection context. Created once on accept and carried
         // across every keep-alive request on this connection. For the
@@ -741,9 +761,15 @@ public:
             hard_error_handler_(std::current_exception());
         }
 
-        // Send a TCP shutdown
+        // Close the TLS layer first, if there is one, then half-close TCP.
+        if constexpr (requires { stream.async_shutdown(net::as_tuple(use_awaitable)); })
+        {
+            boost::beast::get_lowest_layer(stream).expires_after(std::chrono::seconds {5});
+            auto [sec] = co_await stream.async_shutdown(net::as_tuple(use_awaitable));
+            (void)sec;
+        }
         boost::system::error_code ec;
-        stream.socket().shutdown(net::ip::tcp::socket::shutdown_send, ec); // NOLINT
+        boost::beast::get_lowest_layer(stream).socket().shutdown(net::ip::tcp::socket::shutdown_send, ec); // NOLINT
     }
 
     template <typename MatcherType, typename RequestHandler>
@@ -810,7 +836,7 @@ public:
             },
             [this, request_handler = std::move(request_handler)](
                 matcher::context const& context,
-                rebind_executor<boost::beast::tcp_stream>& stream,
+                Stream& stream,
                 boost::beast::flat_buffer& buffer,
                 boost::beast::http::request_parser<boost::beast::http::buffer_body>& header_parser,
                 cancellation_signals& signals,
@@ -1041,7 +1067,8 @@ public:
     /** Register a "raw" handler that takes ownership of the connection on match.
 
         Used for protocol upgrades such as WebSocket. On a match the handler
-        receives the parsed request header, the underlying `tcp_stream`,
+        receives the parsed request header, the underlying stream (a
+        `tcp_stream`, or the TLS stream for an `https` session),
         and the `flat_buffer` holding any bytes already read past the
         header. The session performs no further I/O on the stream and ends
         the session as soon as the handler returns.
@@ -1052,7 +1079,7 @@ public:
         awaitable<void>(
             matcher::context const& context,
             boost::beast::http::request<boost::beast::http::empty_body>&& request,
-            rebind_executor<boost::beast::tcp_stream>&& stream,
+            Stream&& stream,
             boost::beast::flat_buffer&& buffer,
             cancellation_signals& signals)
         @endcode
@@ -1089,7 +1116,7 @@ public:
             },
             [raw_handler = std::move(raw_handler)](
                 matcher::context const& context,
-                rebind_executor<boost::beast::tcp_stream>& stream,
+                Stream& stream,
                 boost::beast::flat_buffer& buffer,
                 boost::beast::http::request_parser<boost::beast::http::buffer_body>& header_parser,
                 cancellation_signals& signals,
@@ -1134,7 +1161,7 @@ public:
         wrapped_soft_error_handler_ =
             [this, handler = std::move(handler)](
                 std::exception_ptr eptr,
-                rebind_executor<boost::beast::tcp_stream>& stream,
+                Stream& stream,
                 boost::beast::http::request_header<>& request_header,
                 cancellation_signals& signals) mutable
             -> awaitable<bool>
