@@ -11,6 +11,7 @@
 #define BOOST_TAAR_HANDLER_REST_ARG_HPP
 
 #include <boost/taar/handler/rest_arg_cast.hpp>
+#include <boost/taar/core/body_reader.hpp>
 #include <boost/taar/matcher/context.hpp>
 #include <boost/taar/core/cookies.hpp>
 #include <boost/taar/core/form_kvp.hpp>
@@ -207,7 +208,7 @@ with_default(T, U) -> with_default<std::remove_cvref_t<T>, std::remove_cvref_t<U
 
 // Direct or lazy retrieval of REST arg value from the arg provider.
 template <typename HandlerArgType, typename ArgProviderType, typename RequestType>
-auto get_rest_arg(
+decltype(auto) get_rest_arg(
     ArgProviderType const& arg_provider,
     std::size_t index,
     RequestType const& request,
@@ -221,6 +222,14 @@ auto get_rest_arg(
             using arg_provider_result_type = detail::arg_provider_result_t<ArgProviderType>;
 
             if constexpr (
+                std::is_lvalue_reference_v<HandlerArgType> &&
+                type_traits::specialization_of<std::reference_wrapper, typename arg_provider_result_type::value_type>)
+            {
+                // The provider lends an object (e.g. stream_body_arg's body_reader):
+                // bind the callable's reference parameter to it directly.
+                return arg_provider(request, context).value().get();
+            }
+            else if constexpr (
                 type_traits::specialization_of<with_default, ArgProviderType> &&
                 rest_arg_castable<typename arg_provider_result_type::value_type, handler_arg_no_cv_type>)
             {
@@ -748,6 +757,74 @@ struct url_encoded_form_data_arg
                 std::string(decoded_value.begin(), decoded_value.end()));
         }
         return result;
+    }
+
+    std::unordered_set<std::string> content_types_;
+    std::string description_;
+};
+
+/** Argument provider that hands the callable a @ref body_reader for an
+    incrementally read request body.
+
+    The callable parameter must be `body_reader&`. The body is not
+    buffered and the session's body limit does not apply; use
+    `body_reader::read_some` or `read_all(limit)`. Like the other body
+    providers, content types may be restricted; by default any content
+    type is accepted.
+
+    @code
+    rest([](taar::body_reader& body) -> taar::awaitable<std::string>
+    {
+        std::uint64_t total = 0;
+        while (!body.done()) total += (co_await body.read_some()).size();
+        co_return std::to_string(total);
+    }, stream_body_arg {});
+    @endcode
+*/
+struct stream_body_arg
+{
+    template <typename... T>
+    requires ((type_traits::string_like<T> || std::same_as<std::remove_cvref_t<T>, description>) && ...)
+    stream_body_arg(T&&... args)
+    {
+        (detail::apply_body_arg_option(content_types_, description_, std::forward<T>(args)), ...);
+    }
+
+    stream_body_arg(all_content_types_t, description d = {})
+        : description_ {std::move(d.text)}
+    {}
+
+    std::string name() const
+    {
+        return "stream_body";
+    }
+
+    std::string const& description() const
+    {
+        return description_;
+    }
+
+    std::unordered_set<std::string> const& content_types() const
+    {
+        return content_types_;
+    }
+
+    boost::system::result<std::reference_wrapper<body_reader>> operator()(
+        streaming_request const& request,
+        matcher::context const&) const
+    {
+        if (!content_types_.empty())
+        {
+            auto range = request.equal_range(boost::beast::http::field::content_type);
+            if (std::find_if(range.first, range.second, [&](auto const& elem)
+                {
+                    return content_types_.contains(elem.value());
+                }) == range.second)
+            {
+                return error::invalid_content_type;
+            }
+        }
+        return std::ref(request.body);
     }
 
     std::unordered_set<std::string> content_types_;

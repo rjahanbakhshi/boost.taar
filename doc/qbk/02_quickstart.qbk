@@ -159,6 +159,27 @@ type and the `co_return` change.
             return res;
         });
 
+[heading Streaming request bodies]
+
+A handler that takes a `body_reader` receives the body as it arrives,
+with no buffering and no body limit; it decides how much to accept. Header,
+path and query providers combine with it as usual:
+
+    http_session.register_request_handler(
+        method == http::verb::post && target == "/upload",
+        taar::handler::rest(
+            [](taar::body_reader& body) -> taar::awaitable<std::string>
+            {
+                std::uint64_t bytes = 0;
+                while (!body.done()) bytes += (co_await body.read_some()).size();
+                co_return std::to_string(bytes);
+            },
+            taar::handler::stream_body_arg {}));
+
+A raw handler can declare `taar::streaming_request const&` instead; it is
+the request header plus the reader. If the handler answers before the
+body is fully read, the response closes the connection.
+
 [heading Per-connection state]
 
 Give the session a context type and ask for it in a handler. One object

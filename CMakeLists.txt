@@ -24,6 +24,7 @@ target_sources(
         include/boost/taar/core/async_generator.hpp
         include/boost/taar/core/async_channel.hpp
         include/boost/taar/core/awaitable.hpp
+        include/boost/taar/core/body_reader.hpp
         include/boost/taar/core/cancellation_signals.hpp
         include/boost/taar/core/chunk_body_from.hpp
         include/boost/taar/core/chunk_body_from_tag.hpp

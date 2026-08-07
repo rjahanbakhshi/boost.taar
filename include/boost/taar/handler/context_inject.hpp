@@ -10,6 +10,7 @@
 #ifndef BOOST_TAAR_HANDLER_CONTEXT_INJECT_HPP
 #define BOOST_TAAR_HANDLER_CONTEXT_INJECT_HPP
 
+#include <boost/taar/core/body_reader.hpp>
 #include <boost/taar/core/response_from.hpp>
 #include <boost/taar/matcher/context.hpp>
 #include <boost/taar/type_traits/callable.hpp>
@@ -103,6 +104,7 @@ inline constexpr bool in_scope =
 template <typename T> struct is_http_request : std::false_type {};
 template <typename Body, typename Fields>
 struct is_http_request<boost::beast::http::message<true, Body, Fields>> : std::true_type {};
+template <> struct is_http_request<streaming_request> : std::true_type {};
 
 template <typename T>
 inline constexpr bool is_http_request_v = is_http_request<std::remove_cvref_t<T>>::value;

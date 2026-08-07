@@ -10,7 +10,8 @@ These follow from what each protocol can carry. They are documented
 rather than planned.
 
 - Streaming results exist only on REST (`chunked_response`,
-  `async_generator`). A JSON-RPC method or MCP tool returns one JSON value.
+  `async_generator`), as do streaming request bodies (`body_reader`). A
+  JSON-RPC method or MCP tool receives and returns one JSON value.
 - A callable returning `http::response`, `response_builder` or raw bytes is
   REST-only; one whose return type has only a `response_from` overload
   cannot be an RPC method or MCP tool, and one with only `value_from`
@@ -22,8 +23,6 @@ rather than planned.
 
 ## Transport
 
-- Request body streaming. Handlers receive fully buffered bodies under the
-  body limit; large uploads cannot stream in.
 - Multipart form bodies. No provider for `multipart/form-data`.
 - 405 and HEAD. A known path with the wrong method answers 404; HEAD is not
   synthesised from GET.
@@ -67,6 +66,7 @@ rather than planned.
 
 ## Recently closed
 
+- Request body streaming through `body_reader` / `stream_body_arg`.
 - TLS: `session::https` over `beast::ssl_stream`, accepted by `server::tls`.
 - REST request providers (`header_arg`, `cookie_arg`, `query_arg`) usable
   on JSON-RPC methods and MCP tools.

@@ -70,8 +70,8 @@ write that fails because the socket is closed.
 
 Both have pluggable handlers installed on a session via
 `set_soft_error_handler` and `set_hard_error_handler`. The default soft
-handler answers library argument errors with `400` and a short text body
-and rethrows everything else, which then reaches the hard error handler
+handler answers library argument errors with `400` and a short text body,
+a streaming handler's body limit with `413`, and rethrows everything else, which then reaches the hard error handler
 and closes the connection. Applications that throw their own exceptions
 from handlers install a soft error handler that maps them (see
 `examples/rest_crud_server.cpp`).
@@ -150,6 +150,14 @@ additionally lets the producer set the HTTP status and headers (by
 `co_yield`ing `taar::set_status` / `taar::set_header`) before the first
 chunk goes on the wire. The session drives the generator and writes each
 yielded value using HTTP chunked transfer-encoding.
+
+Request bodies stream too. A handler whose request type is
+`streaming_request` is invoked before the body is read and pulls it
+through a `body_reader` straight from the connection, so the session's
+body limit is bypassed and memory stays bounded by the handler's buffer. A
+body left unread when the response is produced closes the connection
+rather than being drained, since draining an arbitrarily large upload to
+keep one connection alive is rarely the right trade.
 
 Server-push streams that wait for events produced elsewhere (the MCP
 event stream, a chat room) read from a `taar::async_channel<T>`: any

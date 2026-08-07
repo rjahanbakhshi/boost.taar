@@ -31,6 +31,7 @@
 #include <boost/taar/core/member_function_of.hpp>
 #include <boost/taar/core/cancellation_signals.hpp>
 #include <boost/taar/core/awaitable.hpp>
+#include <boost/taar/core/body_reader.hpp>
 #include <boost/taar/core/rebind_executor.hpp>
 #include <boost/taar/core/is_awaitable.hpp>
 #include <boost/taar/core/error.hpp>
@@ -172,6 +173,16 @@ void finish_response(Response& response, unsigned version, bool keep_alive, bool
     }
 }
 
+/// True if the request declares a Content-Length above @a limit.
+inline bool declares_body_beyond(
+    boost::beast::http::request_parser<boost::beast::http::buffer_body> const& parser,
+    boost::optional<std::uint64_t> const& limit)
+{
+    if (!limit) return false;
+    auto const length = parser.content_length();
+    return length && *length > *limit;
+}
+
 /// Keep-alive semantics of a request header (what message::keep_alive() computes).
 inline bool header_keep_alive(boost::beast::http::request_header<> const& h)
 {
@@ -211,6 +222,9 @@ inline bool is_transport_error(boost::system::error_code const& ec)
            ec == asio_err::operation_aborted ||
            ec == http_err::error::end_of_stream;
 }
+
+template <typename T> struct awaitable_value { using type = void; };
+template <typename T, typename E> struct awaitable_value<boost::asio::awaitable<T, E>> { using type = T; };
 
 /// Hook run on every response header before it is written (CORS, Server, security headers).
 using response_filter_type = std::function<void(
@@ -505,6 +519,7 @@ public:
             {
                 std::exception_ptr ex;
                 std::string error_msg;
+                auto status = boost::beast::http::status::bad_request;
                 try
                 {
                     std::rethrow_exception(eptr);
@@ -514,6 +529,12 @@ public:
                     if (e.code().category() == error_category())
                     {
                         error_msg = e.code().message();
+                    }
+                    else if (e.code() == boost::beast::http::error::body_limit)
+                    {
+                        // A handler streaming the body hit its own size cap.
+                        error_msg = "Request body too large";
+                        status = boost::beast::http::status::payload_too_large;
                     }
                     ex = std::current_exception();
                 }
@@ -525,7 +546,7 @@ public:
                 if (!error_msg.empty())
                 {
                     auto response = response_from(error_msg);
-                    response.result(boost::beast::http::status::bad_request);
+                    response.result(status);
                     detail::finish_response(response, req.version(), detail::header_keep_alive(req), false);
                     detail::apply_response_filter(response_filter_, req, response);
                     bool keep_alive = response.keep_alive();
@@ -621,7 +642,11 @@ public:
                 // Read and parse the header and use the target to find the handler.
                 http::request_parser<http::buffer_body> header_parser;
                 header_parser.header_limit(request_header_limit_);
-                header_parser.body_limit(request_body_limit_);
+                // The body limit is applied when the body is read (the
+                // matched handler decides whether it buffers or streams),
+                // not at header time, so a streaming route can accept a
+                // Content-Length beyond the limit.
+                header_parser.body_limit(boost::none);
 
                 auto [header_ec, header_sz] = co_await http::async_read_header(
                     stream,
@@ -705,12 +730,21 @@ public:
                 auto version = req_header.version();
                 if (req_header.has_content_length() || req_header.chunked())
                 {
+                    boost::system::error_code req_ec;
+                    std::size_t req_sz = 0;
+                    if (detail::declares_body_beyond(header_parser, request_body_limit_))
+                    {
+                        req_ec = http::error::body_limit;
+                    }
                     http::request_parser<http::string_body> body_parser {std::move(header_parser)};
                     body_parser.body_limit(request_body_limit_);
-                    auto [req_ec, req_sz] = co_await async_read(
-                        stream,
-                        buffer,
-                        body_parser);
+                    if (!req_ec)
+                    {
+                        std::tie(req_ec, req_sz) = co_await async_read(
+                            stream,
+                            buffer,
+                            body_parser);
+                    }
 
                     if (req_ec)
                     {
@@ -845,12 +879,74 @@ public:
             {
                 using contexts_type = detail::contexts_for<Context>;
                 using request_type = detail::handler_request_t<RequestHandler, contexts_type>;
-                using body_type = request_type::body_type;
                 using result_type = detail::handler_result_t<RequestHandler, contexts_type>;
 
+                if constexpr (std::is_same_v<std::remove_cvref_t<request_type>, streaming_request>)
+                {
+                    // Streaming body: hand the handler a reader over the live
+                    // parser instead of buffering the body first. The body
+                    // limit is the handler's business; a body left unread
+                    // closes the connection after the response.
+                    static_assert(
+                        !is_chunked_response<result_type> && !is_async_generator<result_type> &&
+                        !(is_awaitable<result_type> &&
+                          (is_chunked_response<typename detail::awaitable_value<result_type>::type> ||
+                           is_async_generator<typename detail::awaitable_value<result_type>::type>)),
+                        "A handler that streams the request body must produce a plain response, "
+                        "not a chunked_response or async_generator.");
+
+                    header_parser.body_limit(boost::none);
+                    auto version = header_parser.get().version();
+                    auto keep_alive = header_parser.get().keep_alive();
+                    auto reader = ::boost::taar::detail::make_body_reader(stream, buffer, header_parser);
+                    streaming_request request {header_parser.get().base(), reader};
+
+                    bool shutting_down = false;
+                    std::exception_ptr eptr;
+                    try
+                    {
+                        co_await detail::shield_from_cancellation();
+                        auto response = co_await handler::detail::response_from_invoke_handler(
+                            std::move(request_handler), conn_ctx, request, context);
+                        shutting_down = co_await detail::observe_shutdown();
+                        detail::finish_response(response, version, keep_alive && header_parser.is_done(), shutting_down);
+                        detail::apply_response_filter(response_filter_, header_parser.get(), response);
+                        bool const ka = response.keep_alive();
+                        co_await detail::async_write(stream, std::move(response));
+                        co_return ka;
+                    }
+                    catch (...)
+                    {
+                        eptr = std::current_exception();
+                    }
+                    shutting_down = co_await detail::observe_shutdown() || shutting_down;
+                    if (!header_parser.is_done())
+                    {
+                        // Unread body: the error response must announce the close.
+                        header_parser.get().keep_alive(false);
+                    }
+                    bool const ka = co_await wrapped_soft_error_handler_(eptr, stream, header_parser.get(), signals);
+                    co_return ka && !shutting_down && header_parser.is_done();
+                }
+                else
+                {
+                using body_type = request_type::body_type;
+
+                // Reject an oversized Content-Length before reading, as the
+                // header-time limit used to; chunked bodies are limited
+                // progressively by the parser.
+                boost::system::error_code req_ec;
+                std::size_t req_sz = 0;
+                if (detail::declares_body_beyond(header_parser, request_body_limit_))
+                {
+                    req_ec = http::error::body_limit;
+                }
                 http::request_parser<body_type> body_parser {std::move(header_parser)};
                 body_parser.body_limit(request_body_limit_);
-                auto [req_ec, req_sz] = co_await async_read(stream, buffer, body_parser);
+                if (!req_ec)
+                {
+                    std::tie(req_ec, req_sz) = co_await async_read(stream, buffer, body_parser);
+                }
 
                 auto version = body_parser.get().version();
                 auto keep_alive = body_parser.get().keep_alive();
@@ -997,6 +1093,7 @@ public:
                     body_parser.get(),
                     signals);
                 co_return ka && !shutting_down;
+                }
             }
         );
     }

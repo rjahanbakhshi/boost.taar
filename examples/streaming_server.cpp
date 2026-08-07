@@ -6,23 +6,28 @@
 //
 // Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
-// Streaming responses with chunked transfer encoding: server-sent events
-// from a timer, a JSON stream from an async_generator, and large files
-// streamed from disk with a header/footer generator spliced in.
+// Streaming in both directions: server-sent events from a timer, a JSON
+// stream from an async_generator, large files streamed from disk with a
+// header/footer generator spliced in, and an upload consumed through a
+// body_reader without buffering it.
 //
 //   ./streaming_server 8080 ./
 //   curl -N localhost:8080/events          # one event per second, ten events
 //   curl -N localhost:8080/numbers
 //   curl localhost:8080/download/README.md
 //   curl localhost:8080/wrapped/README.md
+//   curl --data-binary @bigfile localhost:8080/upload     # streamed in, never buffered
 //
 
 #include <boost/taar/core/async_generator.hpp>
 #include <boost/taar/core/awaitable.hpp>
+#include <boost/taar/core/body_reader.hpp>
 #include <boost/taar/core/cancellation_signals.hpp>
 #include <boost/taar/core/chunked_response.hpp>
 #include <boost/taar/core/chunked_response_meta.hpp>
 #include <boost/taar/core/ignore_and_rethrow.hpp>
+#include <boost/taar/handler/rest.hpp>
+#include <boost/taar/handler/rest_arg.hpp>
 #include <boost/taar/matcher/method.hpp>
 #include <boost/taar/matcher/target.hpp>
 #include <boost/taar/server/tcp.hpp>
@@ -36,6 +41,7 @@
 #include <boost/beast/http.hpp>
 #include <boost/json/value.hpp>
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -144,6 +150,17 @@ int main(int argc, char* argv[])
             co_yield file_chunks(path);
             co_yield banner("end " + path.filename().string());
         });
+
+    // The request body arrives piece by piece; the session's body limit does not apply.
+    session.register_request_handler(
+        method == http::verb::post && target == "/upload",
+        taar::handler::rest([](taar::body_reader& body) -> taar::awaitable<boost::json::value>
+        {
+            std::uint64_t bytes = 0;
+            while (!body.done()) bytes += (co_await body.read_some(64 * 1024)).size();
+            co_return boost::json::value {{"received", bytes}};
+        },
+        taar::handler::stream_body_arg {}));
 
     net::io_context io;
     taar::cancellation_signals signals;

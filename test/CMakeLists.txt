@@ -34,6 +34,7 @@ target_sources(
         test_e2e_mcp.cpp
         test_e2e_operational.cpp
         test_e2e_streaming.cpp
+        test_e2e_streaming_body.cpp
         test_e2e_tls.cpp
         test_http_session.cpp
         test_is_http_response.cpp
