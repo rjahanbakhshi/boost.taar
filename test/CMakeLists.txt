@@ -50,6 +50,7 @@ target_sources(
         test_mcp_endpoint.cpp
         test_mcp_stdio.cpp
         test_mcp_stream.cpp
+        test_multipart.cpp
         test_openapi.cpp
         test_member_function_of.cpp
         test_path_arg_check.cpp

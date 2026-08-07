@@ -16,6 +16,7 @@
 //   curl localhost:8080/todos/1
 //   curl -X PUT localhost:8080/todos/1 -H 'content-type: application/json' -d '{"title":"write docs","done":true}'
 //   curl -X DELETE localhost:8080/todos/1
+//   curl -F list=@todos.txt -F done=true localhost:8080/todos/import   # one todo per line
 //   curl localhost:8080/openapi.json
 //
 
@@ -171,6 +172,7 @@ int main(int argc, char* argv[])
     using taar::handler::path_arg;
     using taar::handler::query_arg;
     using taar::handler::json_body_arg;
+    using taar::handler::multipart_form_arg;
     using taar::handler::with_default;
     using taar::handler::description;
 
@@ -210,6 +212,28 @@ int main(int argc, char* argv[])
         method == http::verb::delete_ && target == "/todos/{id}",
         rest([&](int id) { store.remove(id); }, path_arg("id", "Todo id")),
         openapi.describe({.summary = "Delete a todo", .tags = {"todos"}}));
+
+    // A multipart form: text fields plus an uploaded file, buffered under the body limit.
+    session.register_request_handler(
+        method == http::verb::post && target == "/todos/import",
+        rest([&](taar::multipart_form form)
+        {
+            bool const done = form.value("done").value_or("false") == "true";
+            int imported = 0;
+            if (auto const* list = form.find("list"))
+            {
+                std::string line;
+                for (char c : list->data)
+                {
+                    if (c == '\n') { if (!line.empty()) { store.create({line, done}); ++imported; } line.clear(); }
+                    else if (c != '\r') line += c;
+                }
+                if (!line.empty()) { store.create({line, done}); ++imported; }
+            }
+            return json::value {{"imported", imported}};
+        },
+        multipart_form_arg {description {"Fields: list (file, one title per line), done (true/false)"}}),
+        openapi.describe({.summary = "Import todos from a text file", .tags = {"todos"}}));
 
     session.register_request_handler(
         method == http::verb::get && target == "/openapi.json",

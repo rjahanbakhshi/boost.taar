@@ -40,6 +40,8 @@
 * `core::cors` policy and `basic_http::set_response_filter`.
 * Streaming request bodies: `body_reader`, `streaming_request` and the
   `stream_body_arg` provider; the body limit does not apply to them.
+* `multipart/form-data`: `parse_multipart` and `multipart_form_arg`
+  (buffered), `multipart_reader` and `multipart_stream_arg` (streamed).
 * TLS: `basic_http` takes its stream type as a template parameter;
   `session::https` and `server::tls` serve HTTPS (OpenSSL required).
 * `ROADMAP.md` lists the remaining gaps.

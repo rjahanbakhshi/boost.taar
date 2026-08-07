@@ -14,8 +14,7 @@ in the repository and is updated as items close. In outline:
 * /Inherent to the surfaces/: streaming results are REST-only; return
   types without a JSON representation cannot be RPC or MCP results; REST
   and MCP sessions are separate stores.
-* /Transport/: no multipart bodies, no 405 or synthesised HEAD, no HTTP/2
-  or compression.
+* /Transport/: no 405 or synthesised HEAD, no HTTP/2 or compression.
 * /JSON-RPC/: positional parameters and cancellation are not supported.
 * /MCP/: no prompts, subscriptions, pagination, progress or cancellation
   notifications, server-to-client requests, binary content, SSE

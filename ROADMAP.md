@@ -23,7 +23,6 @@ rather than planned.
 
 ## Transport
 
-- Multipart form bodies. No provider for `multipart/form-data`.
 - 405 and HEAD. A known path with the wrong method answers 404; HEAD is not
   synthesised from GET.
 - HTTP/2 and response compression are out of scope for now.
@@ -66,6 +65,8 @@ rather than planned.
 
 ## Recently closed
 
+- `multipart/form-data`, buffered (`multipart_form_arg`) and streamed
+  (`multipart_stream_arg`).
 - Request body streaming through `body_reader` / `stream_body_arg`.
 - TLS: `session::https` over `beast::ssl_stream`, accepted by `server::tls`.
 - REST request providers (`header_arg`, `cookie_arg`, `query_arg`) usable

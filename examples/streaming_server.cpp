@@ -17,6 +17,7 @@
 //   curl localhost:8080/download/README.md
 //   curl localhost:8080/wrapped/README.md
 //   curl --data-binary @bigfile localhost:8080/upload     # streamed in, never buffered
+//   curl -F note=hello -F file=@bigfile localhost:8080/files   # multipart, file streamed part by part
 //
 
 #include <boost/taar/core/async_generator.hpp>
@@ -26,6 +27,7 @@
 #include <boost/taar/core/chunked_response.hpp>
 #include <boost/taar/core/chunked_response_meta.hpp>
 #include <boost/taar/core/ignore_and_rethrow.hpp>
+#include <boost/taar/core/multipart.hpp>
 #include <boost/taar/handler/rest.hpp>
 #include <boost/taar/handler/rest_arg.hpp>
 #include <boost/taar/matcher/method.hpp>
@@ -161,6 +163,27 @@ int main(int argc, char* argv[])
             co_return boost::json::value {{"received", bytes}};
         },
         taar::handler::stream_body_arg {}));
+
+    // Multipart upload consumed part by part: fields are read whole, files in pieces.
+    session.register_request_handler(
+        method == http::verb::post && target == "/files",
+        taar::handler::rest([](taar::multipart_reader form) -> taar::awaitable<boost::json::value>
+        {
+            boost::json::object out;
+            while (auto part = co_await form.next_part())
+            {
+                if (!part->is_file())
+                {
+                    out[part->name] = co_await form.read_all(4096);
+                    continue;
+                }
+                std::uint64_t bytes = 0;
+                while (!form.part_done()) bytes += (co_await form.read_some(64 * 1024)).size();
+                out[*part->filename] = bytes;
+            }
+            co_return boost::json::value {std::move(out)};
+        },
+        taar::handler::multipart_stream_arg {}));
 
     net::io_context io;
     taar::cancellation_signals signals;

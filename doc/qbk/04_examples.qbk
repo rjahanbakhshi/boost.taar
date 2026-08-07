@@ -20,8 +20,9 @@ with the `curl` commands that exercise it.
  argument with a default, and graceful shutdown on `SIGINT`.]]
 [[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/rest_crud_server.cpp rest_crud_server.cpp]]
  [A JSON REST API: CRUD routes over an in-memory store, typed request
- bodies via `boost::describe`, a domain exception mapped to 404 by a soft
- error handler, and an OpenAPI 3.1 document generated from the routes.]]
+ bodies via `boost::describe`, a multipart import of a text file, a domain
+ exception mapped to 404 by a soft error handler, and an OpenAPI 3.1
+ document generated from the routes.]]
 [[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/htdocs_server.cpp htdocs_server.cpp]]
  [Serving a directory of static files with `handler::htdocs` on a
  multi-threaded `io_context`.]]
@@ -32,8 +33,10 @@ with the `curl` commands that exercise it.
  [Cookie-keyed sessions with `context_store` and `with_session`: login,
  logout, `create_if_missing` versus `require`, and idle expiry.]]
 [[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/streaming_server.cpp streaming_server.cpp]]
- [Chunked responses: server-sent events from a timer, a JSON stream from an
- `async_generator`, and files streamed from disk with spliced generators.]]
+ [Streaming in both directions: server-sent events from a timer, a JSON
+ stream from an `async_generator`, files streamed from disk with spliced
+ generators, and uploads consumed through `body_reader` and
+ `multipart_reader` without buffering.]]
 [[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/proxy_server.cpp proxy_server.cpp]]
  [Asynchronous handlers: a coroutine that fetches an upstream URL with
  Beast and returns the response, plus a timer-based delay route.]]

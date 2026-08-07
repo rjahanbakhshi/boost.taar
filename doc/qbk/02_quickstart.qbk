@@ -18,9 +18,9 @@ you can write with it, and a tour of the idioms you will see again and again:
 * [link boost_taar.quickstart.hello A Hello World HTTP Server]: a
   complete program serving a single GET endpoint.
 * [link boost_taar.quickstart.tour A Whirlwind Tour]: stock responses,
-  JSON, path arguments, static files, hand-written handlers, per-connection
-  and per-session state, JSON-RPC, MCP, CORS, OpenAPI, TLS, and graceful
-  shutdown.
+  JSON, path arguments, static files, hand-written handlers, streaming
+  request bodies, multipart forms, per-connection and per-session state,
+  JSON-RPC, MCP, CORS, OpenAPI, TLS, and graceful shutdown.
 
 [section:requirements Requirements]
 
@@ -179,6 +179,37 @@ path and query providers combine with it as usual:
 A raw handler can declare `taar::streaming_request const&` instead; it is
 the request header plus the reader. If the handler answers before the
 body is fully read, the response closes the connection.
+
+[heading Forms and file uploads]
+
+`multipart/form-data` has two providers. `multipart_form_arg` buffers the
+body (under the session's body limit) and hands over a `multipart_form`
+with fields and files; `multipart_stream_arg` hands over a
+`multipart_reader` that walks the parts as they arrive, so a file field
+of any size is consumed in pieces:
+
+    http_session.register_request_handler(
+        method == http::verb::post && target == "/profile",
+        taar::handler::rest(
+            [](taar::multipart_form form)
+            {
+                auto name = form.value("name").value_or("");
+                auto const* avatar = form.find("avatar");
+                return std::string {name} + ": " + std::to_string(avatar ? avatar->data.size() : 0);
+            },
+            taar::handler::multipart_form_arg {}));
+
+    http_session.register_request_handler(
+        method == http::verb::post && target == "/files",
+        taar::handler::rest(
+            [](taar::multipart_reader form) -> taar::awaitable<std::string>
+            {
+                std::uint64_t bytes = 0;
+                while (auto part = co_await form.next_part())
+                    while (!form.part_done()) bytes += (co_await form.read_some()).size();
+                co_return std::to_string(bytes);
+            },
+            taar::handler::multipart_stream_arg {}));
 
 [heading Per-connection state]
 

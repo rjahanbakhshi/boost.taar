@@ -12,6 +12,7 @@
 
 #include <boost/taar/handler/rest_arg_cast.hpp>
 #include <boost/taar/core/body_reader.hpp>
+#include <boost/taar/core/multipart.hpp>
 #include <boost/taar/matcher/context.hpp>
 #include <boost/taar/core/cookies.hpp>
 #include <boost/taar/core/form_kvp.hpp>
@@ -760,6 +761,111 @@ struct url_encoded_form_data_arg
     }
 
     std::unordered_set<std::string> content_types_;
+    std::string description_;
+};
+
+/** Argument provider that parses a buffered `multipart/form-data` body.
+
+    The callable parameter is `multipart_form` (or `multipart_form const&`).
+    Requests whose Content-Type is not multipart/form-data with a boundary
+    are reported as @ref error::invalid_content_type; a malformed body as
+    @ref error::invalid_request_format. The whole body is buffered under
+    the session's body limit; use @ref multipart_stream_arg for large
+    uploads.
+
+    @code
+    rest([](taar::multipart_form form)
+    {
+        auto title = form.value("title").value_or("");
+        auto const* file = form.find("attachment");
+        return std::to_string(file ? file->data.size() : 0);
+    }, multipart_form_arg {});
+    @endcode
+*/
+struct multipart_form_arg
+{
+    explicit multipart_form_arg(::boost::taar::handler::description d = {})
+        : description_ {std::move(d.text)}
+    {}
+
+    std::string name() const
+    {
+        return "multipart_form";
+    }
+
+    std::string const& description() const
+    {
+        return description_;
+    }
+
+    boost::system::result<multipart_form> operator()(
+        boost::beast::http::request<boost::beast::http::string_body> const& request,
+        matcher::context const&) const
+    {
+        auto boundary = multipart_boundary(request[boost::beast::http::field::content_type]);
+        if (!boundary)
+        {
+            return error::invalid_content_type;
+        }
+        try
+        {
+            return parse_multipart(request.body(), *boundary);
+        }
+        catch (boost::system::system_error const&)
+        {
+            return error::invalid_request_format;
+        }
+    }
+
+    std::string description_;
+};
+
+/** Argument provider that hands the callable a @ref multipart_reader over
+    a streamed `multipart/form-data` body.
+
+    The callable parameter is `multipart_reader` (by value). Parts are
+    consumed one at a time with bounded memory; the session's body limit
+    does not apply. Requests without a multipart boundary are reported as
+    @ref error::invalid_content_type.
+
+    @code
+    rest([](taar::multipart_reader form) -> taar::awaitable<std::string>
+    {
+        std::uint64_t bytes = 0;
+        while (auto part = co_await form.next_part())
+            while (!form.part_done()) bytes += (co_await form.read_some()).size();
+        co_return std::to_string(bytes);
+    }, multipart_stream_arg {});
+    @endcode
+*/
+struct multipart_stream_arg
+{
+    explicit multipart_stream_arg(::boost::taar::handler::description d = {})
+        : description_ {std::move(d.text)}
+    {}
+
+    std::string name() const
+    {
+        return "multipart_stream";
+    }
+
+    std::string const& description() const
+    {
+        return description_;
+    }
+
+    boost::system::result<multipart_reader> operator()(
+        streaming_request const& request,
+        matcher::context const&) const
+    {
+        auto boundary = multipart_boundary(request[boost::beast::http::field::content_type]);
+        if (!boundary)
+        {
+            return error::invalid_content_type;
+        }
+        return multipart_reader {request.body, std::move(*boundary)};
+    }
+
     std::string description_;
 };
 

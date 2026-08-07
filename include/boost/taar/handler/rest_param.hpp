@@ -77,7 +77,9 @@ constexpr param_location location_of()
         std::same_as<P, string_body_arg> ||
         std::same_as<P, json_body_arg> ||
         std::same_as<P, url_encoded_form_data_arg> ||
-        std::same_as<P, stream_body_arg>) return param_location::body;
+        std::same_as<P, stream_body_arg> ||
+        std::same_as<P, multipart_form_arg> ||
+        std::same_as<P, multipart_stream_arg>) return param_location::body;
     else return param_location::none;
 }
 
@@ -134,7 +136,19 @@ rest_param_info describe_rest_param(Provider const& provider)
             out.info.json_type = "string";
             out.info.schema = boost::json::object {{"type", "string"}, {"format", "binary"}};
         }
-        out.content_types = content_types_of(provider);
+        else if constexpr (std::same_as<P, multipart_form_arg> || std::same_as<P, multipart_stream_arg>)
+        {
+            out.info.json_type = "object";
+            out.info.schema = boost::json::object {{"type", "object"}};
+        }
+        if constexpr (std::same_as<P, multipart_form_arg> || std::same_as<P, multipart_stream_arg>)
+        {
+            out.content_types = {"multipart/form-data"};
+        }
+        else
+        {
+            out.content_types = content_types_of(provider);
+        }
         if (out.content_types.empty() && std::same_as<P, stream_body_arg>)
         {
             out.content_types = {"application/octet-stream"};

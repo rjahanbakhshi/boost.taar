@@ -43,6 +43,7 @@ target_sources(
         include/boost/taar/core/is_http_response.hpp
         include/boost/taar/core/json_schema.hpp
         include/boost/taar/core/member_function_of.hpp
+        include/boost/taar/core/multipart.hpp
         include/boost/taar/core/rebind_executor.hpp
         include/boost/taar/core/response_builder.hpp
         include/boost/taar/core/response_from.hpp
