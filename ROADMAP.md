@@ -23,8 +23,6 @@ rather than planned.
 
 ## Transport
 
-- 405 and HEAD. A known path with the wrong method answers 404; HEAD is not
-  synthesised from GET.
 - HTTP/2 and response compression are out of scope for now.
 
 ## JSON-RPC
@@ -65,6 +63,7 @@ rather than planned.
 
 ## Recently closed
 
+- `405 Method Not Allowed` with `Allow`, and `HEAD` served from `GET`.
 - `multipart/form-data`, buffered (`multipart_form_arg`) and streamed
   (`multipart_stream_arg`).
 - Request body streaming through `body_reader` / `stream_body_arg`.

@@ -16,6 +16,7 @@
 #include <boost/taar/matcher/header.hpp>
 #include <boost/taar/matcher/method.hpp>
 #include <boost/taar/matcher/target.hpp>
+#include <boost/asio/write.hpp>
 #include <boost/test/unit_test.hpp>
 #include <string>
 #include <utility>
@@ -199,14 +200,29 @@ BOOST_AUTO_TEST_CASE(test_routing_header_matcher_name_is_case_insensitive)
     });
 }
 
-BOOST_AUTO_TEST_CASE(test_routing_head_on_get_only_route_is_not_found)
+BOOST_AUTO_TEST_CASE(test_routing_head_on_get_only_route_is_served_header_only)
 {
     net::io_context io;
     auto session = make_session();
     e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
     {
-        auto r = co_await e2e::send_all(port, {e2e::make_request(http::verb::head, "/a")});
-        BOOST_TEST(r[0].result() == http::status::not_found);
+        // Header-only responses must be read raw: a generic client parser
+        // would wait for the announced Content-Length.
+        taar::rebind_executor<net::ip::tcp::socket> socket {co_await net::this_coro::executor};
+        co_await socket.async_connect({net::ip::address_v4::loopback(), port});
+        std::string const req = "HEAD /a HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n";
+        co_await net::async_write(socket, net::buffer(req));
+        std::string out;
+        char buf[1024];
+        for (;;)
+        {
+            auto [ec, n] = co_await socket.async_read_some(net::buffer(buf));
+            out.append(buf, n);
+            if (ec) break;
+        }
+        BOOST_TEST(out.starts_with("HTTP/1.1 200 OK\r\n"));
+        BOOST_TEST(out.find("Content-Length: 1\r\n") != std::string::npos);   // "a"
+        BOOST_TEST(out.ends_with("\r\n\r\n"));
     });
 }
 

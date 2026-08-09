@@ -92,13 +92,14 @@ BOOST_AUTO_TEST_CASE(test_e2e_jsonrpc_dual_surface_with_sessions)
         BOOST_TEST(arr[1].at("result").as_int64() == 30);
         BOOST_TEST(arr[2].at("result").as_int64() == 102);  // last=1 (notification ran), requests=2
 
-        // Notification only -> 202, and a GET on the POST-only route -> 404.
+        // Notification only -> 202, and a GET on the POST-only route -> 405 with Allow.
         auto n = e2e::make_request(http::verb::post, "/rpc", R"({"jsonrpc":"2.0","method":"add","params":{"a":1,"b":1}})");
         n.set("X-Session", key);
         auto g = e2e::make_request(http::verb::get, "/rpc");
         auto c = co_await e2e::send_all(port, {n, g});
         BOOST_TEST(c[0].result() == http::status::accepted);
-        BOOST_TEST(c[1].result() == http::status::not_found);
+        BOOST_TEST(c[1].result() == http::status::method_not_allowed);
+        BOOST_TEST(c[1][http::field::allow] == "POST");
 
         BOOST_TEST(sessions.size() == 1u);
     });

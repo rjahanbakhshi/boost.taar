@@ -18,6 +18,7 @@
 #include <boost/taar/handler/rest.hpp>
 #include <boost/taar/handler/rest_param.hpp>
 #include <boost/taar/matcher/metadata.hpp>
+#include <boost/taar/matcher/route_shape.hpp>
 #include <boost/taar/matcher/template_parser.hpp>
 #include <boost/taar/type_traits/string_like.hpp>
 #include <boost/describe/enumerators.hpp>
@@ -73,143 +74,13 @@ struct operation
 
 namespace detail {
 
-// ---- compile-time matcher shape analysis ----------------------------------
+// ---- matcher shape (see matcher/route_shape.hpp) --------------------------------
 
-struct shape
-{
-    bool valid = true;
-    bool methods_only = true;   // subtree consists of method_eq leaves only
-    int targets = 0;
-    int methods = 0;
-};
-
-template <typename AST> struct shape_of
-{
-    static constexpr shape value {false, false, 0, 0};
-};
-
-template <> struct shape_of<matcher::method_eq_constraint> { static constexpr shape value {true, true, 0, 1}; };
-template <> struct shape_of<matcher::target_constraint> { static constexpr shape value {true, false, 1, 0}; };
-template <> struct shape_of<matcher::header_eq_constraint> { static constexpr shape value {true, false, 0, 0}; };
-template <> struct shape_of<matcher::header_exists_constraint> { static constexpr shape value {true, false, 0, 0}; };
-template <> struct shape_of<matcher::cookie_eq_constraint> { static constexpr shape value {true, false, 0, 0}; };
-template <> struct shape_of<matcher::cookie_exists_constraint> { static constexpr shape value {true, false, 0, 0}; };
-template <> struct shape_of<matcher::version_eq_constraint> { static constexpr shape value {true, false, 0, 0}; };
-template <> struct shape_of<matcher::version_ne_constraint> { static constexpr shape value {true, false, 0, 0}; };
-template <> struct shape_of<matcher::version_lt_constraint> { static constexpr shape value {true, false, 0, 0}; };
-template <> struct shape_of<matcher::version_le_constraint> { static constexpr shape value {true, false, 0, 0}; };
-template <> struct shape_of<matcher::version_gt_constraint> { static constexpr shape value {true, false, 0, 0}; };
-template <> struct shape_of<matcher::version_ge_constraint> { static constexpr shape value {true, false, 0, 0}; };
-
-template <typename L, typename R>
-struct shape_of<matcher::and_<L, R>>
-{
-    static constexpr shape l = shape_of<L>::value;
-    static constexpr shape r = shape_of<R>::value;
-    static constexpr shape value {
-        l.valid && r.valid,
-        l.methods_only && r.methods_only,
-        l.targets + r.targets,
-        l.methods + r.methods};
-};
-
-template <typename L, typename R>
-struct shape_of<matcher::or_<L, R>>
-{
-    static constexpr shape l = shape_of<L>::value;
-    static constexpr shape r = shape_of<R>::value;
-    static constexpr shape value {
-        l.valid && r.valid && l.methods_only && r.methods_only,
-        true,
-        0,
-        l.methods + r.methods};
-};
-
-template <typename X>
-struct shape_of<matcher::not_<X>>
-{
-    static constexpr shape value {false, false, 0, 0};
-};
-
-/** True if a matcher AST can be rendered as OpenAPI operations.
-
-    Accepted: a conjunction with exactly one `target == "..."`, at least
-    one `method == ...` (several may be joined with `||`), plus any number
-    of `header(...) == ...`, `exist(header(...))`, `cookie(...) == ...`,
-    `exist(cookie(...))` and version constraints. Rejected: negation,
-    `!=` leaves, `||` over anything but methods, and matchers without
-    metadata (plain callables).
-*/
-template <typename AST>
-inline constexpr bool expressible_v =
-    shape_of<AST>::value.valid &&
-    shape_of<AST>::value.targets == 1 &&
-    shape_of<AST>::value.methods >= 1;
-
-// ---- runtime extraction -----------------------------------------------------
-
-struct required_input
-{
-    std::string name;
-    std::string value;      // empty for existence checks
-    bool exists_only = false;
-};
-
-struct route
-{
-    std::string template_str;
-    std::vector<std::string> methods;
-    std::vector<required_input> headers;
-    std::vector<required_input> cookies;
-};
-
-inline std::string verb_string(matcher::method_verb const& v)
-{
-    return std::visit([](auto const& x) -> std::string
-    {
-        if constexpr (std::is_same_v<std::remove_cvref_t<decltype(x)>, std::string>) return x;
-        else return std::string {boost::beast::http::to_string(x)};
-    }, v);
-}
-
-inline std::string header_string(matcher::header_key const& k)
-{
-    return std::visit([](auto const& x) -> std::string
-    {
-        if constexpr (std::is_same_v<std::remove_cvref_t<decltype(x)>, std::string>) return x;
-        else return std::string {boost::beast::http::to_string(x)};
-    }, k);
-}
-
-template <typename Leaf, typename Value>
-void visit_leaf(Value const& v, route& r)
-{
-    using namespace matcher;
-    if constexpr (std::same_as<Leaf, method_eq_constraint>) r.methods.push_back(verb_string(v.verb));
-    else if constexpr (std::same_as<Leaf, target_constraint>) r.template_str = v.template_str;
-    else if constexpr (std::same_as<Leaf, header_eq_constraint>) r.headers.push_back({header_string(v.key), v.value, false});
-    else if constexpr (std::same_as<Leaf, header_exists_constraint>) r.headers.push_back({header_string(v.key), {}, true});
-    else if constexpr (std::same_as<Leaf, cookie_eq_constraint>) r.cookies.push_back({v.name, v.value, false});
-    else if constexpr (std::same_as<Leaf, cookie_exists_constraint>) r.cookies.push_back({v.name, {}, true});
-    else {} // version constraints carry nothing OpenAPI can express
-}
-
-template <typename TL> struct extractor;
-
-template <typename... L>
-struct extractor<matcher::type_list<L...>>
-{
-    template <typename Captures>
-    static route extract(Captures const& captures)
-    {
-        route r;
-        [&]<std::size_t... I>(std::index_sequence<I...>)
-        {
-            (visit_leaf<L>(std::get<I>(captures), r), ...);
-        }(std::index_sequence_for<L...> {});
-        return r;
-    }
-};
+using shape = matcher::route_shape;
+template <typename AST> using shape_of = matcher::route_shape_of<AST>;
+template <typename AST> inline constexpr bool expressible_v = matcher::route_expressible_v<AST>;
+using required_input = matcher::route_input;
+using route = matcher::route_summary;
 
 // ---- handler response introspection -------------------------------------------
 
@@ -339,7 +210,7 @@ public:
                 "over non-method constraints and plain callable matchers are not "
                 "expressible in OpenAPI.");
 
-            auto r = detail::extractor<matcher::flatten_t<meta>>::extract(operand.captures());
+            auto r = matcher::summarize_route(operand);
 
             std::vector<handler::rest_param_info> params;
             if constexpr (handler::has_rest_params<Handler>)

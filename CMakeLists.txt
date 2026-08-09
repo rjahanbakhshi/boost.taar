@@ -73,6 +73,7 @@ target_sources(
         include/boost/taar/matcher/metadata.hpp
         include/boost/taar/matcher/method.hpp
         include/boost/taar/matcher/operand.hpp
+        include/boost/taar/matcher/route_shape.hpp
         include/boost/taar/matcher/target.hpp
         include/boost/taar/matcher/template_parser.hpp
         include/boost/taar/matcher/version.hpp

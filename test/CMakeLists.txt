@@ -53,6 +53,7 @@ target_sources(
         test_multipart.cpp
         test_openapi.cpp
         test_member_function_of.cpp
+        test_method_fallbacks.cpp
         test_path_arg_check.cpp
         test_response_builder.cpp
         test_response_from.cpp

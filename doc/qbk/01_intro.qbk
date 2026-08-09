@@ -102,7 +102,8 @@ The session distinguishes /soft errors/ (recoverable, application-visible
 problems like a missing query parameter that can be turned into a 400
 response) from /hard errors/ (connection-level problems that take the
 connection down). Both have pluggable handlers, defaulting to sane
-behaviour.
+behaviour. A known path asked with the wrong method gets `405` with an
+`Allow` header, and `HEAD` is served from the matching `GET` route.
 
 `register_request_handler` accepts trailing /registration observers/,
 callables invoked once with the route's matcher metadata and handler.

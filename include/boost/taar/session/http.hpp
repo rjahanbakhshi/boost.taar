@@ -21,6 +21,8 @@
 #include <boost/taar/handler/path_arg_check.hpp>
 #include <boost/taar/matcher/context.hpp>
 #include <boost/taar/matcher/operand.hpp>
+#include <boost/taar/matcher/route_shape.hpp>
+#include <boost/taar/matcher/target.hpp>
 #include <boost/taar/core/response_from.hpp>
 #include <boost/taar/core/chunk_body_from.hpp>
 #include <boost/taar/core/async_generator.hpp>
@@ -61,6 +63,7 @@
 #include <type_traits>
 #include <vector>
 #include <utility>
+#include <algorithm>
 #include <chrono>
 #include <concepts>
 #include <exception>
@@ -144,6 +147,29 @@ auto async_write(
     return ::boost::beast::http::async_write(
         stream,
         message);
+}
+
+/** Write @a response; for a HEAD request only its header goes on the wire.
+
+    A typed message keeps the Content-Length its body would have had. A
+    `message_generator` is written as produced: handlers that build one
+    (such as `htdocs`) see the HEAD method themselves.
+*/
+template <typename StreamType, typename Response>
+awaitable<void> write_response(StreamType& stream, Response&& response, bool head_only)
+{
+    namespace http = ::boost::beast::http;
+    using R = std::remove_cvref_t<Response>;
+    if constexpr (requires { typename R::body_type; typename R::fields_type; })
+    {
+        if (head_only)
+        {
+            http::response_serializer<typename R::body_type, typename R::fields_type> serializer {response};
+            co_await http::async_write_header(stream, serializer, use_awaitable_tuple);
+            co_return;
+        }
+    }
+    co_await ::boost::taar::session::detail::async_write(stream, std::forward<Response>(response));
 }
 
 /// The peer closed (or the operation was cancelled) between requests: not an error.
@@ -324,7 +350,8 @@ awaitable<bool> write_chunked_response(
     ::boost::asio::cancellation_slot cancellation_slot = {},
     std::exception_ptr* mid_stream_error = nullptr,
     response_filter_type const& filter = {},
-    ::boost::beast::http::request_header<> const* request = nullptr)
+    ::boost::beast::http::request_header<> const* request = nullptr,
+    bool head_only = false)
 {
     namespace http = ::boost::beast::http;
     namespace net = ::boost::asio;
@@ -355,6 +382,9 @@ awaitable<bool> write_chunked_response(
         stream, serializer, net::as_tuple(net::deferred));
     if (header_ec)
         co_return false;
+
+    if (head_only)
+        co_return keep_alive;      // HEAD: the chunked header says it all
 
     // Write first value if present
     if (first_value)
@@ -550,7 +580,7 @@ public:
                     detail::finish_response(response, req.version(), detail::header_keep_alive(req), false);
                     detail::apply_response_filter(response_filter_, req, response);
                     bool keep_alive = response.keep_alive();
-                    co_await detail::async_write(stream, std::move(response));
+                    co_await detail::write_response(stream, std::move(response), req.method() == boost::beast::http::verb::head);
                     co_return keep_alive;
                 }
 
@@ -558,6 +588,33 @@ public:
             }
         }
     {}
+
+    /** Answer `405 Method Not Allowed` (with an `Allow` header) instead of
+        `404` when no route matches but some route accepts the path under
+        another method. Enabled by default.
+
+        Only routes whose matcher is a conjunction of one `target == ...`
+        and `method == ...` constraints contribute; opaque or negated
+        matchers neither cause a 405 nor appear in `Allow`.
+    */
+    void set_method_not_allowed(bool enabled)
+    {
+        method_not_allowed_enabled_ = enabled;
+    }
+
+    /** Serve `HEAD` requests through a matching `GET` route when no route
+        matches `HEAD` itself. Enabled by default.
+
+        The handler runs with the original HEAD request and only the
+        response header is written, so `Content-Length` reflects the GET
+        body. Handlers producing a `message_generator` write what they
+        produce; a streaming handler's chunked header is sent without
+        chunks. `GET` routes list `HEAD` in `Allow`.
+    */
+    void set_head_from_get(bool enabled)
+    {
+        head_from_get_ = enabled;
+    }
 
     /** Install a hook that runs on every response header before it is written.
 
@@ -723,9 +780,43 @@ public:
                     continue;
                 }
 
-                // No handler found for this request. Reply with not found error.
-                // But before sending the error response, it is necessary to read
-                // the full buffer.
+                // No handler found. A HEAD request may be served by a GET
+                // route (the handler sees HEAD; only the header is written).
+                if (head_from_get_ && req_header.method() == http::verb::head)
+                {
+                    req_header.method(http::verb::get);
+                    iter = std::ranges::find_if(matcher_handlers_,
+                        [&](auto&& matcher_handler) -> bool
+                        {
+                            context.path_args.clear();
+                            return matcher_handler.matcher(
+                                req_header,
+                                context,
+                                parsed_target,
+                                parsed_cookies);
+                        });
+                    req_header.method(http::verb::head);
+                    if (iter != matcher_handlers_.cend())
+                    {
+                        if (!co_await iter->handler(
+                            context,
+                            stream,
+                            buffer,
+                            header_parser,
+                            signals,
+                            conn_ctx))
+                        {
+                            break;
+                        }
+                        continue;
+                    }
+                }
+
+                // 405 when some route knows this path under another method,
+                // otherwise 404. Either way the body must be consumed first.
+                auto const allow = method_not_allowed_enabled_
+                    ? allowed_methods(req_header, parsed_target, parsed_cookies)
+                    : std::string {};
                 auto keep_alive = req_header.keep_alive();
                 auto version = req_header.version();
                 if (req_header.has_content_length() || req_header.chunked())
@@ -767,8 +858,12 @@ public:
                     (void)body_parser.get();
                 }
 
-                // Stock not-found response.
-                http::response<http::empty_body> response {http::status::not_found, version};
+                http::response<http::empty_body> response {
+                    allow.empty() ? http::status::not_found : http::status::method_not_allowed, version};
+                if (!allow.empty())
+                {
+                    response.set(http::field::allow, allow);
+                }
                 response.keep_alive(keep_alive);
                 detail::apply_response_filter(response_filter_, req_header, response);
                 response.prepare_payload();
@@ -858,6 +953,7 @@ public:
 
         needs_parsed_target_ |= decltype(operand)::with_parsed_target;
         needs_parsed_cookies_ |= decltype(operand)::with_parsed_cookies;
+        record_route_methods(operand);
 
         matcher_handlers_.emplace_back(
             [this, operand = std::move(operand)](
@@ -912,7 +1008,7 @@ public:
                         detail::finish_response(response, version, keep_alive && header_parser.is_done(), shutting_down);
                         detail::apply_response_filter(response_filter_, header_parser.get(), response);
                         bool const ka = response.keep_alive();
-                        co_await detail::async_write(stream, std::move(response));
+                        co_await detail::write_response(stream, std::move(response), header_parser.get().method() == http::verb::head);
                         co_return ka;
                     }
                     catch (...)
@@ -990,7 +1086,8 @@ public:
                             context);
                         bool const ka = co_await detail::write_chunked_response(
                             generator, stream, version, keep_alive, cancellation_slot, &stream_error,
-                            response_filter_, &body_parser.get());
+                            response_filter_, &body_parser.get(),
+                            body_parser.get().method() == http::verb::head);
                         if (stream_error) std::rethrow_exception(stream_error);
                         co_return ka;
                     }
@@ -1004,7 +1101,8 @@ public:
                             context);
                         bool const ka = co_await detail::write_chunked_response(
                             generator, stream, version, keep_alive, cancellation_slot, &stream_error,
-                            response_filter_, &body_parser.get());
+                            response_filter_, &body_parser.get(),
+                            body_parser.get().method() == http::verb::head);
                         if (stream_error) std::rethrow_exception(stream_error);
                         co_return ka;
                     }
@@ -1020,7 +1118,8 @@ public:
                                 context);
                             bool const ka = co_await detail::write_chunked_response(
                                 generator, stream, version, keep_alive, cancellation_slot, &stream_error,
-                            response_filter_, &body_parser.get());
+                            response_filter_, &body_parser.get(),
+                            body_parser.get().method() == http::verb::head);
                             if (stream_error) std::rethrow_exception(stream_error);
                             co_return ka;
                         }
@@ -1034,7 +1133,8 @@ public:
                                 context);
                             bool const ka = co_await detail::write_chunked_response(
                                 generator, stream, version, keep_alive, cancellation_slot, &stream_error,
-                            response_filter_, &body_parser.get());
+                            response_filter_, &body_parser.get(),
+                            body_parser.get().method() == http::verb::head);
                             if (stream_error) std::rethrow_exception(stream_error);
                             co_return ka;
                         }
@@ -1052,7 +1152,7 @@ public:
                             detail::finish_response(response, version, keep_alive, shutting_down);
                             detail::apply_response_filter(response_filter_, body_parser.get(), response);
                             bool const ka = response.keep_alive();
-                            co_await detail::async_write(stream, std::move(response));
+                            co_await detail::write_response(stream, std::move(response), body_parser.get().method() == http::verb::head);
                             co_return ka;
                         }
                     }
@@ -1070,7 +1170,7 @@ public:
                         detail::finish_response(response, version, keep_alive, shutting_down);
                         detail::apply_response_filter(response_filter_, body_parser.get(), response);
                         bool const ka = response.keep_alive();
-                        co_await detail::async_write(stream, std::move(response));
+                        co_await detail::write_response(stream, std::move(response), body_parser.get().method() == http::verb::head);
                         co_return ka;
                     }
                 }
@@ -1201,6 +1301,7 @@ public:
         matcher::operand operand {std::forward<MatcherType>(matcher)};
         needs_parsed_target_ |= decltype(operand)::with_parsed_target;
         needs_parsed_cookies_ |= decltype(operand)::with_parsed_cookies;
+        record_route_methods(operand);
 
         matcher_handlers_.emplace_back(
             [this, operand = std::move(operand)](
@@ -1267,7 +1368,7 @@ public:
                 detail::finish_response(response, request_header.version(), detail::header_keep_alive(request_header), false);
                 detail::apply_response_filter(response_filter_, request_header, response);
                 bool keep_alive = response.keep_alive();
-                co_await detail::async_write(stream, std::move(response));
+                co_await detail::write_response(stream, std::move(response), request_header.method() == boost::beast::http::verb::head);
                 co_return keep_alive;
             };
     }
@@ -1296,6 +1397,79 @@ private:
     soft_error_handler_wrapper_type wrapped_soft_error_handler_;
     hard_error_handler_type hard_error_handler_ = [](std::exception_ptr){};
     detail::response_filter_type response_filter_;
+
+    /// Methods a route accepts, with a matcher for its path alone (for 405 and HEAD).
+    struct route_methods_type
+    {
+        std::function<bool(
+            boost::beast::http::request_header<> const&,
+            matcher::context&,
+            boost::urls::url_view const&,
+            cookies const&)> target_matches;
+        std::vector<std::string> methods;
+    };
+    std::vector<route_methods_type> route_methods_;
+    bool method_not_allowed_enabled_ = true;
+    bool head_from_get_ = true;
+
+    template <typename Operand>
+    void record_route_methods(Operand const& operand)
+    {
+        if constexpr (matcher::route_expressible_v<typename Operand::metadata_type>)
+        {
+            auto summary = matcher::summarize_route(operand);
+            auto path_only = matcher::operand {matcher::target == std::string_view {summary.template_str}};
+            route_methods_.push_back({
+                [path_only = std::move(path_only)](
+                    boost::beast::http::request_header<> const& request,
+                    matcher::context& context,
+                    boost::urls::url_view const& parsed_target,
+                    cookies const& parsed_cookies) mutable
+                {
+                    return path_only(request, context, parsed_target, parsed_cookies);
+                },
+                std::move(summary.methods)});
+            needs_parsed_target_ = true;
+        }
+    }
+
+    /// `Allow` header value for @a request's path, empty if no route knows the path.
+    std::string allowed_methods(
+        boost::beast::http::request_header<> const& request,
+        boost::urls::url_view const& parsed_target,
+        cookies const& parsed_cookies)
+    {
+        std::vector<std::string> methods;
+        matcher::context scratch;
+        for (auto& route : route_methods_)
+        {
+            scratch.path_args.clear();
+            if (!route.target_matches(request, scratch, parsed_target, parsed_cookies)) continue;
+            for (auto const& m : route.methods)
+            {
+                if (std::ranges::find(methods, m) == methods.end()) methods.push_back(m);
+            }
+        }
+        if (head_from_get_ &&
+            std::ranges::find(methods, "GET") != methods.end() &&
+            std::ranges::find(methods, "HEAD") == methods.end())
+        {
+            methods.push_back("HEAD");
+        }
+        // The method itself is fine but another constraint (header, cookie,
+        // version) rejected the request: that is a 404, not a 405.
+        if (std::ranges::find(methods, std::string {request.method_string()}) != methods.end())
+        {
+            return {};
+        }
+        std::string allow;
+        for (auto const& m : methods)
+        {
+            if (!allow.empty()) allow += ", ";
+            allow += m;
+        }
+        return allow;
+    }
     std::uint32_t request_header_limit_ = 8192;
     boost::optional<std::uint64_t> request_body_limit_ = 1 * 1024 * 1024;
     bool needs_parsed_target_ = false;
