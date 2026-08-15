@@ -357,6 +357,16 @@ Where the specifications leave room, Taar makes these choices:
   Deleting or sweeping the session ends the stream. `notify` does not
   refresh the session's idle timer. A tool reaches its own stream through
   the injected `session_info`.
+* Every stream event carries an `id`; a session keeps the last
+  `server_info::stream_history` events (100 by default). A `GET` with
+  `Last-Event-ID` replays the newer ones before continuing live, and the
+  copies still queued are skipped, so a reconnecting client sees each
+  event exactly once.
+* Tools return plain values (text plus `structuredContent`) or the typed
+  results in `mcp/content.hpp`: `image`, `audio`, `embedded_resource`,
+  `text`, or a full `tool_result` with several items and an explicit
+  `isError`. A resource callable may return `blob` for binary contents;
+  base64 is produced by `base64_encode` or the `from_bytes` helpers.
 * `notifications/cancelled` is handled before the session lock is taken,
   so it can reach a tool that is running; the tool's awaits are
   interrupted and, as the specification asks, no response is sent for the

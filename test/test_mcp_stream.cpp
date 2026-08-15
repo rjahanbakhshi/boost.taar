@@ -21,8 +21,10 @@
 #include <boost/beast/http/string_body.hpp>
 #include <boost/json/parse.hpp>
 #include <boost/test/unit_test.hpp>
+#include <cstdint>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -101,6 +103,13 @@ taar::chunked_response<std::string> open_stream(endpoint& e, std::string sid)
     return e.stream_handler()(req, mctx);
 }
 
+// The JSON payload of an "id: N\nevent: message\ndata: ...\n\n" frame.
+std::string frame_data(std::string const& frame)
+{
+    auto const start = frame.find("data: ") + 6;
+    return frame.substr(start, frame.size() - start - 2);
+}
+
 std::string header_value(taar::chunked_response<std::string> const& gen, http::field f)
 {
     for (auto const& h : gen.headers())
@@ -145,7 +154,8 @@ BOOST_AUTO_TEST_CASE(test_mcp_stream_delivers_notifications)
 
     auto queued = r.next();
     BOOST_REQUIRE(queued.has_value());
-    BOOST_TEST(*queued == "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}\n\n");
+    BOOST_TEST(queued->starts_with("id: 1\nevent: message\ndata: "));
+    BOOST_TEST(frame_data(*queued) == "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}");
 
     // Pushed while the stream is waiting.
     auto progress = r.next([&]
@@ -153,8 +163,7 @@ BOOST_AUTO_TEST_CASE(test_mcp_stream_delivers_notifications)
         BOOST_TEST(e.notify(sid, "notifications/progress", json::object {{"progress", 1}}));
     });
     BOOST_REQUIRE(progress.has_value());
-    auto const data = progress->substr(std::string {"event: message\ndata: "}.size());
-    auto const msg = json::parse(data.substr(0, data.size() - 2));
+    auto const msg = json::parse(frame_data(*progress));
     BOOST_TEST(msg.at("method").as_string() == "notifications/progress");
     BOOST_TEST(msg.at("params").at("progress").as_int64() == 1);
 }
@@ -258,8 +267,7 @@ BOOST_AUTO_TEST_CASE(test_mcp_progress_notifications_reach_the_stream)
         BOOST_TEST(res.at("result").at("structuredContent").at("result").as_int64() == 2);
     });
     BOOST_REQUIRE(first.has_value());
-    auto data = first->substr(std::string {"event: message\ndata: "}.size());
-    auto msg = json::parse(data.substr(0, data.size() - 2));
+    auto msg = json::parse(frame_data(*first));
     BOOST_TEST(msg.at("method").as_string() == "notifications/progress");
     BOOST_TEST(msg.at("params").at("progressToken").as_string() == "tok-1");
     BOOST_TEST(msg.at("params").at("progress").to_number<double>() == 1.0);
@@ -348,6 +356,53 @@ BOOST_AUTO_TEST_CASE(test_mcp_resource_subscriptions)
     BOOST_TEST(e.resource_updated("notes://all") == 0u);
     BOOST_TEST(e.resources_changed() == 2u);                    // list_changed reaches every session
     (void)b;
+}
+
+BOOST_AUTO_TEST_CASE(test_mcp_stream_resumes_from_last_event_id)
+{
+    endpoint e {{.name = "s", .version = "1", .stream_history = 10}};
+    auto sid = initialize(e);
+    auto last_id = [](std::string const& frame)
+    {
+        auto const pos = frame.find("id: ");
+        return std::stoull(frame.substr(pos + 4, frame.find('\n', pos) - pos - 4));
+    };
+
+    e.notify(sid, "notifications/message", json::object {{"n", 1}});
+    e.notify(sid, "notifications/message", json::object {{"n", 2}});
+    std::uint64_t seen = 0;
+    {
+        stream_reader r {open_stream(e, sid)};
+        BOOST_REQUIRE(r.next().has_value());                       // ": connected"
+        auto first = r.next();
+        BOOST_REQUIRE(first.has_value());
+        BOOST_TEST(first->starts_with("id: 1\nevent: message\n"));
+        seen = last_id(*first);                                     // the client saw event 1 only
+    }                                                               // ... then the connection dropped
+
+    // Events 2 (never delivered) and 3, 4 (pushed while disconnected) all
+    // arrive once, in order, when the client resumes after event 1.
+    e.notify(sid, "notifications/message", json::object {{"n", 3}});
+    e.notify(sid, "notifications/message", json::object {{"n", 4}});
+    http::request<http::empty_body> req {http::verb::get, "/mcp", 11};
+    req.set("Mcp-Session-Id", sid);
+    req.set("Last-Event-ID", std::to_string(seen));
+    taar::matcher::context mctx;
+    stream_reader r {e.stream_handler()(req, mctx)};
+    BOOST_REQUIRE(r.next().has_value());
+    std::vector<std::uint64_t> ids;
+    for (int i = 0; i < 3; ++i)
+    {
+        auto frame = r.next();
+        BOOST_REQUIRE(frame.has_value());
+        ids.push_back(last_id(*frame));
+        BOOST_TEST(frame->find("\"n\":" + std::to_string(i + 2)) != std::string::npos);
+    }
+    BOOST_TEST((ids == std::vector<std::uint64_t> {2, 3, 4}));
+    // Nothing duplicated: a fresh push is the only thing left to read.
+    auto next = r.next([&] { e.notify(sid, "notifications/message", json::object {{"n", 5}}); });
+    BOOST_REQUIRE(next.has_value());
+    BOOST_TEST(last_id(*next) == 5u);
 }
 
 } // namespace

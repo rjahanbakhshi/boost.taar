@@ -25,6 +25,7 @@
 #include <boost/taar/jsonrpc/response.hpp>
 #include <boost/taar/matcher/context.hpp>
 #include <boost/taar/mcp/arg.hpp>
+#include <boost/taar/mcp/content.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/posix/stream_descriptor.hpp>
@@ -46,6 +47,7 @@
 #include <boost/system/system_error.hpp>
 #include <array>
 #include <atomic>
+#include <deque>
 #include <mutex>
 #include <set>
 #include <chrono>
@@ -79,6 +81,8 @@ struct server_info
     std::chrono::steady_clock::duration session_idle_timeout = std::chrono::minutes {30};
     /// Items per page for `*/list` methods; 0 returns everything in one page.
     std::size_t page_size = 0;
+    /// Events kept per session for `Last-Event-ID` stream resumption.
+    std::size_t stream_history = 100;
 };
 
 /// The client's self-description from `initialize`.
@@ -186,15 +190,48 @@ using prompt_call = tool_call;
 
 namespace detail {
 
+/// One server-to-client message with its stream event id.
+struct sse_event
+{
+    std::uint64_t id;
+    std::string json;
+};
+
 /// Per-session bookkeeping stored next to the user's Session object.
 template <typename Session>
 struct session_slot
 {
     Session session {};
     session_info info {};
-    std::shared_ptr<async_channel<std::string>> mailbox = std::make_shared<async_channel<std::string>>();
+    std::shared_ptr<async_channel<sse_event>> mailbox = std::make_shared<async_channel<sse_event>>();
     std::mutex subscriptions_mutex;
     std::set<std::string> subscriptions;       ///< Resource URIs subscribed by this session.
+    std::mutex history_mutex;
+    std::deque<sse_event> history;             ///< Recent events, for resumption.
+    std::uint64_t next_event_id = 1;
+    std::size_t history_limit = 100;
+
+    /// Queue a message for the client, assigning the next event id.
+    bool push(std::string json)
+    {
+        sse_event event;
+        {
+            std::lock_guard<std::mutex> const g {history_mutex};
+            event = sse_event {next_event_id++, std::move(json)};
+            history.push_back(event);
+            while (history.size() > history_limit) history.pop_front();
+        }
+        return mailbox->push(std::move(event));
+    }
+
+    /// Events newer than @a last_event_id, for a resuming stream.
+    std::vector<sse_event> replay_after(std::uint64_t last_event_id)
+    {
+        std::lock_guard<std::mutex> const g {history_mutex};
+        std::vector<sse_event> out;
+        for (auto const& e : history) if (e.id > last_event_id) out.push_back(e);
+        return out;
+    }
     std::shared_ptr<std::atomic<bool>> stream_attached = std::make_shared<std::atomic<bool>>(false);
 
     ~session_slot()
@@ -332,7 +369,12 @@ public:
     endpoint(endpoint const&) = delete;
     endpoint& operator=(endpoint const&) = delete;
 
-    /// Register a tool. Leading context parameters are injected; the rest come from @ref mcp_arg providers.
+    /** Register a tool. Leading context parameters are injected; the rest
+        come from @ref mcp_arg providers. The callable may return a plain
+        value (rendered as text plus `structuredContent`) or one of the
+        typed results in `<boost/taar/mcp/content.hpp>`: @ref tool_result,
+        @ref image, @ref audio, @ref embedded_resource or @ref text.
+    */
     template <typename Callable, typename... Providers>
     endpoint& tool(std::string name, std::string description, Callable&& callable, Providers... providers)
     {
@@ -418,7 +460,7 @@ public:
                 std::lock_guard<std::mutex> const g {e->context()->subscriptions_mutex};
                 subscribed = e->context()->subscriptions.contains(uri);
             }
-            if (subscribed && e->context()->mailbox->push(text)) ++n;
+            if (subscribed && e->context()->push(text)) ++n;
         }
         return n;
     }
@@ -518,7 +560,7 @@ public:
     {
         auto e = sessions_.store.peek(session_id);
         if (!e) return false;
-        return e->context()->mailbox->push(notification(method, std::move(params)));
+        return e->context()->push(notification(method, std::move(params)));
     }
 
     /// Queue a notification for every live session (stateful mode). Returns the number queued.
@@ -529,7 +571,7 @@ public:
         std::size_t n = 0;
         for (auto const& key : sessions_.store.keys())
         {
-            if (auto e = sessions_.store.peek(key); e && e->context()->mailbox->push(text)) ++n;
+            if (auto e = sessions_.store.peek(key); e && e->context()->push(text)) ++n;
         }
         return n;
     }
@@ -575,7 +617,15 @@ public:
             {
                 return plain_stream(http::status::conflict, "A stream is already open for this session");
             }
-            return event_stream(slot.mailbox, slot.stream_attached);
+            std::vector<detail::sse_event> replay;
+            if (auto last = request.find("Last-Event-ID"); last != request.end())
+            {
+                char* end = nullptr;
+                std::string const text {last->value()};
+                auto const id = std::strtoull(text.c_str(), &end, 10);
+                if (!text.empty() && *end == '\0') replay = slot.replay_after(id);
+            }
+            return event_stream(slot.mailbox, slot.stream_attached, std::move(replay));
         };
     }
 
@@ -681,7 +731,7 @@ public:
                                 auto msg = co_await mailbox->async_receive(
                                     net::use_awaitable_t<net::io_context::executor_type> {});
                                 if (!msg) break;
-                                outbox->push(*msg + "\n");
+                                outbox->push(msg->json + "\n");
                             }
                         }, net::detached);
                     }
@@ -891,9 +941,9 @@ private:
         {
             auto entry = sessions_.store.peek(scope_key_of(ctxs));
             if (!entry) return {};
-            return [mailbox = entry->context()->mailbox](boost::json::value msg)
+            return [slot = entry->context()](boost::json::value msg)
             {
-                mailbox->push(boost::json::serialize(msg));
+                slot->push(boost::json::serialize(msg));
             };
         }
         else
@@ -1167,6 +1217,7 @@ private:
         {
             auto [sid, entry] = sessions_.store.create();
             entry->context()->info.id = sid;
+            entry->context()->history_limit = info_.stream_history;
             {
                 auto guard = co_await sessions_.store.lock(entry);
                 if (on_initialize_)
@@ -1461,6 +1512,23 @@ private:
 
     static boost::json::object tool_result(boost::json::value const& v)
     {
+        // Already in protocol shape (mcp::tool_result or hand-built): pass through.
+        if (auto const* obj = v.if_object(); obj && obj->contains("content") && obj->at("content").is_array())
+        {
+            boost::json::object out = *obj;
+            if (!out.contains("isError")) out["isError"] = false;
+            return out;
+        }
+        // A single typed content item.
+        if (auto const* obj = v.if_object(); obj && obj->contains("type") && obj->at("type").is_string() &&
+            (obj->at("type").as_string() == "image" || obj->at("type").as_string() == "audio" ||
+             obj->at("type").as_string() == "resource" || obj->at("type").as_string() == "text"))
+        {
+            boost::json::object out;
+            out["content"] = boost::json::array {v};
+            out["isError"] = false;
+            return out;
+        }
         boost::json::array content;
         if (!v.is_null())
         {
@@ -1635,7 +1703,19 @@ private:
         boost::json::object item;
         item["uri"] = uri;
         item["mimeType"] = match->info.mime_type;
-        item["text"] = detail::text_of(value);
+        if (auto const* obj = value.if_object(); obj && obj->contains("blob"))
+        {
+            // mcp::blob: binary contents, with its own mime type when given.
+            item["blob"] = obj->at("blob");
+            if (auto const* mt = obj->if_contains("mimeType"); mt && mt->is_string() && !mt->as_string().empty())
+            {
+                item["mimeType"] = *mt;
+            }
+        }
+        else
+        {
+            item["text"] = detail::text_of(value);
+        }
         boost::json::object result;
         result["contents"] = boost::json::array {std::move(item)};
         co_return jsonrpc::make_response(id, std::move(result));
@@ -1663,20 +1743,36 @@ private:
         ~attached_guard() { if (flag) flag->store(false); }
     };
 
+    static std::string sse_frame(detail::sse_event const& e)
+    {
+        return "id: " + std::to_string(e.id) + "\nevent: message\ndata: " + e.json + "\n\n";
+    }
+
     static chunked_response<std::string> event_stream(
-        std::shared_ptr<async_channel<std::string>> mailbox,
-        std::shared_ptr<std::atomic<bool>> attached)
+        std::shared_ptr<async_channel<detail::sse_event>> mailbox,
+        std::shared_ptr<std::atomic<bool>> attached,
+        std::vector<detail::sse_event> replay)
     {
         attached_guard const guard {std::move(attached)};
         co_yield set_header(boost::beast::http::field::content_type, "text/event-stream");
         co_yield set_header(boost::beast::http::field::cache_control, "no-cache");
         co_yield std::string {": connected\n\n"};
+        // Resumption: replay what the client missed, then skip the copies of
+        // those events still queued in the mailbox.
+        std::uint64_t delivered = 0;
+        for (auto const& e : replay)
+        {
+            delivered = e.id;
+            co_yield sse_frame(e);
+        }
         for (;;)
         {
             auto msg = co_await mailbox->async_receive(
                 boost::asio::use_awaitable_t<boost::asio::io_context::executor_type> {});
             if (!msg) break;
-            co_yield "event: message\ndata: " + *msg + "\n\n";
+            if (msg->id <= delivered) continue;
+            delivered = msg->id;
+            co_yield sse_frame(*msg);
         }
     }
 

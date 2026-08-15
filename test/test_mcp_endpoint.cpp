@@ -9,6 +9,8 @@
 
 #include <boost/taar/mcp/endpoint.hpp>
 #include <boost/taar/mcp/arg.hpp>
+#include <boost/taar/mcp/content.hpp>
+#include <boost/taar/core/base64.hpp>
 #include <boost/taar/handler/context_inject.hpp>
 #include <boost/taar/handler/rest_arg.hpp>
 #include <boost/describe.hpp>
@@ -638,6 +640,76 @@ BOOST_AUTO_TEST_CASE(test_mcp_list_pagination)
     auto res = body_json(post(e, R"({"jsonrpc":"2.0","id":6,"method":"resources/list"})")).at("result");
     BOOST_TEST(res.at("resources").as_array().size() == 1u);
     BOOST_TEST(!res.as_object().contains("nextCursor"));           // fits in one page
+}
+
+BOOST_AUTO_TEST_CASE(test_base64_round_trip)
+{
+    BOOST_TEST(taar::base64_encode("") == "");
+    BOOST_TEST(taar::base64_encode("f") == "Zg==");
+    BOOST_TEST(taar::base64_encode("fo") == "Zm8=");
+    BOOST_TEST(taar::base64_encode("foo") == "Zm9v");
+    BOOST_TEST(taar::base64_encode("foobar") == "Zm9vYmFy");
+    std::string bytes;
+    for (int i = 0; i < 256; ++i) bytes += static_cast<char>(i);
+    BOOST_TEST(taar::base64_decode(taar::base64_encode(bytes)).value() == bytes);
+    BOOST_TEST(taar::base64_decode("Zm8=").value() == "fo");
+    BOOST_TEST(!taar::base64_decode("Zm8").has_value());
+    BOOST_TEST(!taar::base64_decode("Zm=8").has_value());
+    BOOST_TEST(!taar::base64_decode("Zm9!").has_value());
+}
+
+BOOST_AUTO_TEST_CASE(test_mcp_binary_tool_results_and_blob_resources)
+{
+    stateless_endpoint e {{.name = "s", .version = "1"}};
+    std::string const png = std::string {"\x89PNG\r\n\x1a\n", 8} + "fake";
+    e.tool("picture", "An image", [png] { return mcp::image::from_bytes(png, "image/png"); });
+    e.tool("mixed", "Several items", [png]
+    {
+        mcp::tool_result r;
+        r.add(mcp::text {"here you go"});
+        r.add(mcp::image::from_bytes(png, "image/png"));
+        r.add(mcp::embedded_resource {.uri = "notes://1", .mime_type = "text/plain", .text = "note one"});
+        r.add(mcp::embedded_resource {.uri = "file://x.bin", .mime_type = "application/octet-stream", .data = taar::base64_encode(std::string {"\x00\x01", 2})});
+        r.structured = json::object {{"count", 4}};
+        return r;
+    });
+    e.tool("failed", "Explicit error", []
+    {
+        return mcp::tool_result {.content = {mcp::text {"nope"}}, .is_error = true};
+    });
+    e.resource("file://logo", "image/png", "Logo bytes", [png] { return mcp::blob::from_bytes(png, "image/png"); });
+    e.resource("file://note", "text/plain", "Text", [] { return std::string {"plain"}; });
+
+    auto pic = body_json(post(e, R"({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"picture"}})")).at("result");
+    auto const& item = pic.at("content").as_array()[0];
+    BOOST_TEST(item.at("type").as_string() == "image");
+    BOOST_TEST(item.at("mimeType").as_string() == "image/png");
+    BOOST_TEST(taar::base64_decode(std::string {item.at("data").as_string()}).value() == png);
+    BOOST_TEST(pic.at("isError").as_bool() == false);
+    BOOST_TEST(!pic.as_object().contains("structuredContent"));
+
+    auto mixed = body_json(post(e, R"({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"mixed"}})")).at("result");
+    auto const& items = mixed.at("content").as_array();
+    BOOST_REQUIRE(items.size() == 4u);
+    BOOST_TEST(items[0].at("type").as_string() == "text");
+    BOOST_TEST(items[0].at("text").as_string() == "here you go");
+    BOOST_TEST(items[1].at("type").as_string() == "image");
+    BOOST_TEST(items[2].at("type").as_string() == "resource");
+    BOOST_TEST(items[2].at("resource").at("text").as_string() == "note one");
+    BOOST_TEST(items[3].at("resource").at("blob").as_string() == "AAE=");
+    BOOST_TEST(mixed.at("structuredContent").at("count").as_int64() == 4);
+
+    auto failed = body_json(post(e, R"({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"failed"}})")).at("result");
+    BOOST_TEST(failed.at("isError").as_bool());
+    BOOST_TEST(failed.at("content").as_array()[0].at("text").as_string() == "nope");
+
+    auto logo = body_json(post(e, R"({"jsonrpc":"2.0","id":4,"method":"resources/read","params":{"uri":"file://logo"}})")).at("result").at("contents").as_array()[0];
+    BOOST_TEST(logo.at("mimeType").as_string() == "image/png");
+    BOOST_TEST(!logo.as_object().contains("text"));
+    BOOST_TEST(taar::base64_decode(std::string {logo.at("blob").as_string()}).value() == png);
+    auto note = body_json(post(e, R"({"jsonrpc":"2.0","id":5,"method":"resources/read","params":{"uri":"file://note"}})")).at("result").at("contents").as_array()[0];
+    BOOST_TEST(note.at("text").as_string() == "plain");
+    BOOST_TEST(!note.as_object().contains("blob"));
 }
 
 } // namespace

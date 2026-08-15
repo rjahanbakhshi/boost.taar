@@ -30,11 +30,9 @@ rather than planned.
 - Capabilities not implemented: `completion/complete`, `logging/setLevel`.
 - No server-to-client requests (sampling, elicitation, `roots/list`);
   client responses posted to the endpoint are acknowledged and dropped.
-- Tool results are text plus `structuredContent`; image, audio and
-  embedded resource content, `outputSchema` and tool annotations are not
-  emitted. Resources carry `text` only, no `blob`.
+- `outputSchema` and tool annotations are not emitted.
 - A POST never answers with an SSE stream; notifications go over the GET
-  stream (or stdout on stdio). No `Last-Event-ID` resumption.
+  stream (or stdout on stdio).
 - Resource templates support `{name}` placeholders only (no RFC 6570
   operators).
 - The stdio transport is POSIX-only (`posix::stream_descriptor`).
@@ -55,6 +53,8 @@ rather than planned.
 
 ## Recently closed
 
+- MCP binary content (image, audio, embedded resources, blob resources)
+  and SSE resumption with `Last-Event-ID`.
 - MCP prompts, resource subscriptions, list-changed notifications and list
   pagination.
 - Request cancellation (`request_scope`, `endpoint::cancel`, MCP

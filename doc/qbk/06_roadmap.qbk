@@ -15,8 +15,8 @@ in the repository and is updated as items close. In outline:
   types without a JSON representation cannot be RPC or MCP results; REST
   and MCP sessions are separate stores.
 * /Transport/: no HTTP/2 or compression.
-* /MCP/: no server-to-client requests, binary content or SSE resumption;
-  `{name}`-only resource templates; stdio is POSIX-only.
+* /MCP/: no server-to-client requests; `{name}`-only resource templates;
+  stdio is POSIX-only.
 * /OpenAPI/: no default values, security schemes, constraints or reusable
   components.
 * /REST/: no streaming handler under `with_session`; repeated query keys

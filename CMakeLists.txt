@@ -24,6 +24,7 @@ target_sources(
         include/boost/taar/core/async_generator.hpp
         include/boost/taar/core/async_channel.hpp
         include/boost/taar/core/awaitable.hpp
+        include/boost/taar/core/base64.hpp
         include/boost/taar/core/body_reader.hpp
         include/boost/taar/core/cancellation_signals.hpp
         include/boost/taar/core/chunk_body_from.hpp
@@ -79,6 +80,7 @@ target_sources(
         include/boost/taar/matcher/template_parser.hpp
         include/boost/taar/matcher/version.hpp
         include/boost/taar/mcp/arg.hpp
+        include/boost/taar/mcp/content.hpp
         include/boost/taar/mcp/endpoint.hpp
         include/boost/taar/openapi/generator.hpp
         include/boost/taar/server/tcp.hpp

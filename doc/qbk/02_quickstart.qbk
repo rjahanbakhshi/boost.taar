@@ -276,7 +276,9 @@ derived from the callable's parameter types:
 
 Prompts register the same way (`mcp.prompt(name, description, callable,
 mcp_arg...)`), and `mcp.resource_updated(uri)` notifies the sessions that
-subscribed to a resource. A stateful tool may ask for `taar::mcp::session_info const&` to learn its
+subscribed to a resource. A tool returning `taar::mcp::image::from_bytes(png,
+"image/png")` (or `audio`, `embedded_resource`, a full `tool_result`)
+emits binary content; a resource returning `taar::mcp::blob` carries bytes. A stateful tool may ask for `taar::mcp::session_info const&` to learn its
 own session id and push a notification to its caller, and REST request
 providers such as `header_arg` work on tools and JSON-RPC methods too:
 

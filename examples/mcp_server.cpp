@@ -27,6 +27,7 @@
 #include <boost/taar/matcher/method.hpp>
 #include <boost/taar/matcher/target.hpp>
 #include <boost/taar/mcp/arg.hpp>
+#include <boost/taar/mcp/content.hpp>
 #include <boost/taar/mcp/endpoint.hpp>
 #include <boost/taar/server/tcp.hpp>
 #include <boost/taar/session/http.hpp>
@@ -87,6 +88,23 @@ std::string all_notes(notes_session const& s)
     return out;
 }
 
+// A typed result: a text item plus the notes embedded as a resource, so a
+// client can show the summary and keep the file. Returning mcp::image or
+// mcp::audio works the same way for binary content.
+mcp::tool_result export_notes(notes_session const& s)
+{
+    mcp::tool_result r;
+    r.add(mcp::text {std::to_string(s.notes.size()) + " notes exported"});
+    r.add(mcp::embedded_resource {.uri = "notes://all", .mime_type = "text/plain", .text = all_notes(s)});
+    return r;
+}
+
+// Binary resource contents: the notes as a blob (base64 on the wire).
+mcp::blob notes_archive(notes_session const& s)
+{
+    return mcp::blob::from_bytes(all_notes(s), "application/octet-stream");
+}
+
 std::string now()
 {
     return std::format("{:%FT%TZ}", std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()));
@@ -134,6 +152,8 @@ int main(int argc, char* argv[])
         mcp_arg("text", "Reminder text"));
 
     server.resource("notes://all", "text/plain", "Every note, one per line", &all_notes);
+    server.resource("notes://archive", "application/octet-stream", "The notes as bytes", &notes_archive);
+    server.tool("notes/export", "The notes as text plus an embedded resource", &export_notes);
     server.prompt("notes/summarize", "A prompt asking the model to summarize the notes", &summarize_prompt,
         mcp_arg("style", "e.g. terse, friendly"));
     // Clients that subscribed to notes://all learn about changes.
