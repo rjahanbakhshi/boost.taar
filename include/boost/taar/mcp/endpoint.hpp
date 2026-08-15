@@ -29,6 +29,7 @@
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/posix/stream_descriptor.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <boost/asio/read_until.hpp>
 #include <boost/asio/streambuf.hpp>
 #include <boost/asio/this_coro.hpp>
@@ -48,6 +49,7 @@
 #include <array>
 #include <atomic>
 #include <deque>
+#include <map>
 #include <mutex>
 #include <set>
 #include <chrono>
@@ -92,13 +94,46 @@ struct client_info
     std::string version;
 };
 
+/// What the client declared in `initialize` that the server may ask of it.
+struct client_capabilities
+{
+    bool roots = false;                 ///< Answers `roots/list`.
+    bool roots_list_changed = false;    ///< Sends `notifications/roots/list_changed`.
+    bool sampling = false;              ///< Answers `sampling/createMessage`.
+    bool elicitation = false;           ///< Answers `elicitation/create`.
+};
+
+/** The client answered a server-to-client request with a JSON-RPC error.
+    Thrown by @ref endpoint::request and the helpers built on it.
+*/
+class client_error : public std::runtime_error
+{
+public:
+    client_error(int code, std::string message, boost::json::value data)
+        : std::runtime_error {std::move(message)}
+        , code_ {code}
+        , data_ {std::move(data)}
+    {}
+
+    int code() const noexcept { return code_; }
+    boost::json::value const& data() const noexcept { return data_; }
+
+private:
+    int code_;
+    boost::json::value data_;
+};
+
 /** Identity of the current MCP session, injectable into stateful tools and
     resources by declaring a `session_info const&` parameter. Lets a tool
-    address its own client: `endpoint.notify(info.id, "notifications/...")`.
+    address its own client: `endpoint.notify(info.id, "notifications/...")`
+    or `co_await endpoint.elicit(info.id, ...)`, after checking
+    `info.capabilities`.
 */
 struct session_info
 {
     std::string id;
+    client_info client {};
+    client_capabilities capabilities {};
 };
 
 /// Parsed `initialize` parameters handed to the @ref endpoint::on_initialize hook.
@@ -234,10 +269,49 @@ struct session_slot
     }
     std::shared_ptr<std::atomic<bool>> stream_attached = std::make_shared<std::atomic<bool>>(false);
 
+    using reply_channel = async_channel<boost::json::value>;
+    std::mutex pending_mutex;
+    std::map<std::string, std::shared_ptr<reply_channel>> pending;  ///< Server requests awaiting a reply.
+    std::uint64_t next_request_id = 1;
+
+    /// Allocate an id and a channel for a server-to-client request.
+    std::pair<boost::json::value, std::shared_ptr<reply_channel>> begin_request()
+    {
+        std::lock_guard<std::mutex> const g {pending_mutex};
+        boost::json::value id {next_request_id++};
+        auto channel = std::make_shared<reply_channel>();
+        pending[boost::json::serialize(id)] = channel;
+        return {std::move(id), std::move(channel)};
+    }
+
+    void end_request(boost::json::value const& id)
+    {
+        std::lock_guard<std::mutex> const g {pending_mutex};
+        pending.erase(boost::json::serialize(id));
+    }
+
+    /// Hand a client's response to the request waiting for it; false if none is.
+    bool deliver_response(boost::json::value const& response)
+    {
+        auto const* obj = response.if_object();
+        auto const* id = obj ? obj->if_contains("id") : nullptr;
+        if (!id) return false;
+        std::shared_ptr<reply_channel> channel;
+        {
+            std::lock_guard<std::mutex> const g {pending_mutex};
+            auto it = pending.find(boost::json::serialize(*id));
+            if (it == pending.end()) return false;
+            channel = std::move(it->second);
+            pending.erase(it);
+        }
+        return channel->push(response);
+    }
+
     ~session_slot()
     {
-        // Ends any open event stream once the session is gone.
+        // Ends any open event stream and fails pending requests once the session is gone.
         mailbox->close();
+        for (auto& [_, channel] : pending) channel->close();
     }
 };
 
@@ -503,6 +577,138 @@ public:
         return *this;
     }
 
+    /** Send a JSON-RPC request to one session's client and await its reply (stateful mode).
+
+        The request travels over the session's `GET` stream (or stdout on
+        stdio); the client answers by posting a JSON-RPC response to the
+        endpoint. Returns the `result`. Throws @ref client_error when the
+        client answers with an error, `std::out_of_range` if the session is
+        unknown, `boost::system::system_error` with `errc::timed_out` after
+        @a timeout (zero means wait indefinitely) or `errc::operation_canceled`
+        if the session ends first. Cancelling the awaiting coroutine (for
+        instance through `request_scope`) abandons the request.
+
+        Usable from a tool: it does not need the session lock, which the
+        calling tool already holds.
+    */
+    awaitable<boost::json::value> request(
+        std::string const& session_id,
+        std::string method,
+        boost::json::value params = {},
+        std::chrono::steady_clock::duration timeout = {})
+        requires stateful
+    {
+        namespace net = boost::asio;
+        auto entry = sessions_.store.peek(session_id);
+        if (!entry) throw std::out_of_range {"unknown MCP session: " + session_id};
+        auto slot = entry->context();
+        auto [id, channel] = slot->begin_request();
+        struct cleanup
+        {
+            std::shared_ptr<detail::session_slot<Session>> slot;
+            boost::json::value id;
+            ~cleanup() { slot->end_request(id); }
+        } const guard {slot, id};
+
+        boost::json::object msg;
+        msg["jsonrpc"] = "2.0";
+        msg["id"] = id;
+        msg["method"] = std::move(method);
+        if (!params.is_null()) msg["params"] = std::move(params);
+        slot->push(boost::json::serialize(msg));
+
+        auto ex = co_await net::this_coro::executor;
+        net::steady_timer timer {ex};
+        auto timed_out = std::make_shared<std::atomic<bool>>(false);
+        if (timeout > std::chrono::steady_clock::duration::zero())
+        {
+            timer.expires_after(timeout);
+            timer.async_wait([channel, timed_out](boost::system::error_code const& ec)
+            {
+                if (!ec)
+                {
+                    timed_out->store(true);
+                    channel->close();
+                }
+            });
+        }
+        auto reply = co_await channel->async_receive(
+            net::use_awaitable_t<net::io_context::executor_type> {});
+        timer.cancel();
+        if (!reply)
+        {
+            throw boost::system::system_error {
+                timed_out->load() ? boost::system::errc::timed_out : boost::system::errc::operation_canceled,
+                boost::system::generic_category(),
+                "MCP request " + std::string {msg.at("method").as_string()} + " to session " + session_id};
+        }
+        auto const& obj = reply->as_object();
+        if (auto const* err = obj.if_contains("error"))
+        {
+            int code = 0;
+            std::string message = "client error";
+            boost::json::value data;
+            if (auto const* eo = err->if_object())
+            {
+                if (auto const* c = eo->if_contains("code"); c && c->is_int64()) code = static_cast<int>(c->as_int64());
+                if (auto const* m = eo->if_contains("message"); m && m->is_string()) message = std::string {m->as_string()};
+                if (auto const* d = eo->if_contains("data")) data = *d;
+            }
+            throw client_error {code, std::move(message), std::move(data)};
+        }
+        if (auto const* result = obj.if_contains("result")) co_return *result;
+        co_return boost::json::value {nullptr};
+    }
+
+    /// `sampling/createMessage`: ask the client's model for a completion. @a params is the protocol's request object.
+    awaitable<boost::json::value> create_message(
+        std::string const& session_id,
+        boost::json::object params,
+        std::chrono::steady_clock::duration timeout = {})
+        requires stateful
+    {
+        return request(session_id, "sampling/createMessage", std::move(params), timeout);
+    }
+
+    /** `elicitation/create`: ask the user for structured input.
+
+        @a requested_schema is a flat JSON Schema object describing the
+        fields. The result is the protocol's `{action, content}` object,
+        where `action` is `accept`, `decline` or `cancel`.
+    */
+    awaitable<boost::json::value> elicit(
+        std::string const& session_id,
+        std::string message,
+        boost::json::object requested_schema,
+        std::chrono::steady_clock::duration timeout = {})
+        requires stateful
+    {
+        boost::json::object params;
+        params["message"] = std::move(message);
+        params["requestedSchema"] = std::move(requested_schema);
+        return request(session_id, "elicitation/create", std::move(params), timeout);
+    }
+
+    /// `roots/list`: the client's filesystem roots, as the protocol's `{roots: [...]}` object.
+    awaitable<boost::json::value> list_roots(
+        std::string const& session_id,
+        std::chrono::steady_clock::duration timeout = {})
+        requires stateful
+    {
+        return request(session_id, "roots/list", {}, timeout);
+    }
+
+    /** Handle a notification sent by the client, such as
+        `notifications/roots/list_changed`. Runs under the session lock
+        with the session contexts; the second argument is `params`.
+    */
+    void on_client_notification(
+        std::string method,
+        std::function<void(contexts_type const&, boost::json::value const&)> handler)
+    {
+        client_notifications_[std::move(method)] = std::move(handler);
+    }
+
     /// Replace how tool exceptions are reported. See @ref default_tool_error_handler.
     void set_tool_error_handler(tool_error_handler h)
     {
@@ -705,7 +911,12 @@ public:
             if (auto const* obj = body.if_object();
                 obj != nullptr && !obj->contains("method") && (obj->contains("result") || obj->contains("error")))
             {
-                continue;   // a response from the client
+                // A response from the client to a server request.
+                if constexpr (stateful)
+                {
+                    if (session) session->context()->deliver_response(body);
+                }
+                continue;
             }
             auto env = jsonrpc::parse_envelope(body);
             if (env.has_error())
@@ -1052,7 +1263,18 @@ private:
         if (auto const* obj = body.if_object();
             obj != nullptr && !obj->contains("method") && (obj->contains("result") || obj->contains("error")))
         {
-            // A JSON-RPC response from the client (to a server request).
+            // A JSON-RPC response from the client to a server request. Routed
+            // without the session lock: the requesting tool may hold it.
+            if constexpr (stateful)
+            {
+                if (auto h = request.find("Mcp-Session-Id"); h != request.end())
+                {
+                    if (auto entry = sessions_.store.peek(std::string {h->value()}))
+                    {
+                        entry->context()->deliver_response(body);
+                    }
+                }
+            }
             co_return rpc_type::to_http(request, std::nullopt);
         }
 
@@ -1176,6 +1398,24 @@ private:
         return p;
     }
 
+    static client_capabilities parse_client_capabilities(boost::json::value const& v)
+    {
+        client_capabilities caps;
+        auto const* obj = v.if_object();
+        if (!obj) return caps;
+        if (auto const* roots = obj->if_contains("roots"); roots && roots->is_object())
+        {
+            caps.roots = true;
+            if (auto const* lc = roots->as_object().if_contains("listChanged"); lc && lc->is_bool())
+            {
+                caps.roots_list_changed = lc->as_bool();
+            }
+        }
+        caps.sampling = obj->contains("sampling") && obj->at("sampling").is_object();
+        caps.elicitation = obj->contains("elicitation") && obj->at("elicitation").is_object();
+        return caps;
+    }
+
     boost::json::object initialize_result(std::string_view negotiated) const
     {
         boost::json::object capabilities;
@@ -1217,6 +1457,8 @@ private:
         {
             auto [sid, entry] = sessions_.store.create();
             entry->context()->info.id = sid;
+            entry->context()->info.client = params.client;
+            entry->context()->info.capabilities = parse_client_capabilities(params.capabilities);
             entry->context()->history_limit = info_.stream_history;
             {
                 auto guard = co_await sessions_.store.lock(entry);
@@ -1303,6 +1545,10 @@ private:
         }
         else if (env.method.starts_with("notifications/"))
         {
+            if (auto it = client_notifications_.find(env.method); it != client_notifications_.end())
+            {
+                it->second(ctxs, env.params.value_or(boost::json::value {nullptr}));
+            }
             co_return std::nullopt;
         }
         else if (env.method == "ping")
@@ -1785,6 +2031,7 @@ private:
     std::unordered_map<std::string, prompt_entry> prompts_;
     std::vector<std::string> prompt_order_;
     std::move_only_function<void(contexts_type const&, initialize_params const&)> on_initialize_;
+    std::unordered_map<std::string, std::function<void(contexts_type const&, boost::json::value const&)>> client_notifications_;
     tool_error_handler tool_error_ = default_tool_error_handler;
     std::function<bool(std::string_view)> origin_validator_;
 /// @endcond

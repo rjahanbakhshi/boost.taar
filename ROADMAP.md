@@ -28,8 +28,6 @@ rather than planned.
 ## MCP
 
 - Capabilities not implemented: `completion/complete`, `logging/setLevel`.
-- No server-to-client requests (sampling, elicitation, `roots/list`);
-  client responses posted to the endpoint are acknowledged and dropped.
 - `outputSchema` and tool annotations are not emitted.
 - A POST never answers with an SSE stream; notifications go over the GET
   stream (or stdout on stdio).
@@ -53,6 +51,9 @@ rather than planned.
 
 ## Recently closed
 
+- MCP server-to-client requests (`request`, `create_message`, `elicit`,
+  `list_roots`), client capabilities on `session_info`, and
+  `on_client_notification`.
 - MCP binary content (image, audio, embedded resources, blob resources)
   and SSE resumption with `Last-Event-ID`.
 - MCP prompts, resource subscriptions, list-changed notifications and list

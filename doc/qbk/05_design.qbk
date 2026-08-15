@@ -337,6 +337,17 @@ Where the specifications leave room, Taar makes these choices:
 * JSON-RPC batches are rejected (`-32600`), following the current
   transport. A JSON-RPC response or notification posted by the client is
   acknowledged with `202`.
+* Server-to-client requests (`request`, and `create_message`, `elicit`,
+  `list_roots` on top of it) go out over the session's event stream (or
+  stdout on stdio) with server-side ids; the client's response is matched
+  by id and routed to the awaiting coroutine without taking the session
+  lock, so a tool can await its own client while it holds the session.
+  Other requests from the same session wait meanwhile. An error reply
+  throws `client_error`; a timeout or the session ending throws
+  `system_error`. `session_info` carries the client's identity and
+  declared `capabilities`, so a tool can check before asking.
+  `on_client_notification` hooks notifications the client sends, such as
+  `notifications/roots/list_changed`.
 * Prompts are registered like tools (`prompt(name, description, callable,
   mcp_arg...)`); a string result becomes one user text message, an array
   is taken as the messages, an object with `messages` is passed through.

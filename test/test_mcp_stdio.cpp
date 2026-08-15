@@ -22,6 +22,7 @@
 #include <boost/asio/streambuf.hpp>
 #include <boost/asio/write.hpp>
 #include <boost/json/parse.hpp>
+#include <boost/json/serialize.hpp>
 #include <csignal>
 #include <string>
 #include <unistd.h>
@@ -177,6 +178,33 @@ BOOST_AUTO_TEST_CASE(test_mcp_stdio_cancelled_notification_interrupts_a_tool_cal
         auto pong = co_await receive();
         BOOST_TEST(pong.at("id").as_int64() == 3);
         BOOST_TEST((std::chrono::steady_clock::now() - started) < 1s);
+    });
+    BOOST_TEST(h.finished);
+}
+
+BOOST_AUTO_TEST_CASE(test_mcp_stdio_server_to_client_request)
+{
+    stdio_harness h;
+    h.server.tool("confirm", "Ask before acting", [&](mcp::session_info const& me) -> taar::awaitable<std::string>
+    {
+        auto reply = co_await h.server.elicit(me.id, "Sure?",
+            json::object {{"type", "object"}, {"properties", json::object {{"ok", json::object {{"type", "boolean"}}}}}});
+        co_return reply.at("content").at("ok").as_bool() ? "did it" : "skipped";
+    });
+    h.run([&](auto& send, auto& receive) -> taar::awaitable<void>
+    {
+        co_await send(R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{"elicitation":{}},"clientInfo":{"name":"t","version":"1"}}})");
+        (void)co_await receive();
+        co_await send(R"({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"confirm"}})");
+        auto request = co_await receive();
+        BOOST_TEST(request.at("method").as_string() == "elicitation/create");
+        BOOST_TEST(request.at("params").at("message").as_string() == "Sure?");
+        BOOST_TEST(!request.as_object().contains("result"));
+        co_await send(R"({"jsonrpc":"2.0","id":)" + json::serialize(request.at("id")) +
+            R"(,"result":{"action":"accept","content":{"ok":true}}})");
+        auto reply = co_await receive();
+        BOOST_TEST(reply.at("id").as_int64() == 2);
+        BOOST_TEST(reply.at("result").at("content").as_array()[0].at("text").as_string() == "did it");
     });
     BOOST_TEST(h.finished);
 }

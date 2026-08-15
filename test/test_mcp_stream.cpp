@@ -20,6 +20,8 @@
 #include <boost/beast/http/message.hpp>
 #include <boost/beast/http/string_body.hpp>
 #include <boost/json/parse.hpp>
+#include <boost/json/serialize.hpp>
+#include <boost/system/system_error.hpp>
 #include <boost/test/unit_test.hpp>
 #include <cstdint>
 #include <optional>
@@ -403,6 +405,162 @@ BOOST_AUTO_TEST_CASE(test_mcp_stream_resumes_from_last_event_id)
     auto next = r.next([&] { e.notify(sid, "notifications/message", json::object {{"n", 5}}); });
     BOOST_REQUIRE(next.has_value());
     BOOST_TEST(last_id(*next) == 5u);
+}
+
+BOOST_AUTO_TEST_CASE(test_mcp_server_to_client_requests)
+{
+    endpoint e {{.name = "s", .version = "1"}};
+    json::object const name_schema {
+        {"type", "object"}, {"properties", json::object {{"name", json::object {{"type", "string"}}}}}};
+    e.tool("ask", "Elicit a name", [&](mcp::session_info const& me) -> taar::awaitable<std::string>
+    {
+        BOOST_TEST(me.client.name == "agent");
+        BOOST_TEST(me.capabilities.elicitation);
+        BOOST_TEST(me.capabilities.roots);
+        BOOST_TEST(me.capabilities.roots_list_changed);
+        BOOST_TEST(!me.capabilities.sampling);
+        auto reply = co_await e.elicit(me.id, "Your name?", name_schema);
+        co_return std::string {reply.at("action").as_string()} + ":" + std::string {reply.at("content").at("name").as_string()};
+    });
+    e.tool("roots", "List roots", [&](mcp::session_info const& me) -> taar::awaitable<json::value>
+    {
+        co_return co_await e.list_roots(me.id);
+    });
+    e.tool("sample", "Sampling that the client refuses", [&](mcp::session_info const& me) -> taar::awaitable<std::string>
+    {
+        try
+        {
+            co_await e.create_message(me.id, json::object {{"maxTokens", 10}});
+        }
+        catch (mcp::client_error const& err)
+        {
+            co_return std::to_string(err.code()) + " " + err.what() + " " + json::serialize(err.data());
+        }
+        co_return "no error";
+    });
+    e.tool("impatient", "Gives up quickly", [&](mcp::session_info const& me) -> taar::awaitable<std::string>
+    {
+        try
+        {
+            co_await e.list_roots(me.id, std::chrono::milliseconds {20});
+        }
+        catch (boost::system::system_error const& err)
+        {
+            co_return err.code() == boost::system::errc::timed_out ? "timed out" : std::string {"other: "} + err.what();
+        }
+        co_return "answered";
+    });
+    int roots_changed = 0;
+    e.on_client_notification("notifications/roots/list_changed", [&](auto const&, json::value const& params)
+    {
+        ++roots_changed;
+        BOOST_TEST(params.is_null());
+    });
+
+    auto init = post(e, http::verb::post,
+        R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25",)"
+        R"("capabilities":{"elicitation":{},"roots":{"listChanged":true}},"clientInfo":{"name":"agent","version":"0.1"}}})");
+    std::string const sid {init["Mcp-Session-Id"]};
+
+    // Runs one tools/call and a scripted client on a shared io_context: the
+    // client reads the server's request off the stream and answers it with
+    // a POST (or does not), then the tool's reply comes back.
+    auto exchange = [&](std::string tool, auto responder) -> json::value
+    {
+        auto handler = e.handler();
+        auto gen = open_stream(e, sid);
+        net::io_context io;
+        gen.set_executor(io.get_executor());
+        taar::matcher::context mctx;
+        std::optional<json::value> tool_reply;
+        http::request<http::string_body> call {http::verb::post, "/mcp", 11};
+        call.set(http::field::content_type, "application/json");
+        call.set("Mcp-Session-Id", sid);
+        call.body() = R"({"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":")" + tool + R"("}})";
+        call.prepare_payload();
+        net::co_spawn(io, [&]() -> taar::awaitable<void>
+        {
+            auto res = co_await handler(taar::handler::contexts<> {}, call, mctx);
+            tool_reply = json::parse(res.body());
+        }, net::detached);
+        net::co_spawn(io, [&]() -> taar::awaitable<void>
+        {
+            auto [ec0, hello] = co_await gen.next();
+            BOOST_REQUIRE(hello.has_value());
+            auto [ec, frame] = co_await gen.next();
+            BOOST_REQUIRE(frame.has_value());
+            auto request = json::parse(frame_data(*frame));
+            BOOST_TEST(request.at("jsonrpc").as_string() == "2.0");
+            auto answer = responder(request);
+            if (answer.is_null()) co_return;
+            answer.as_object()["jsonrpc"] = "2.0";
+            answer.as_object()["id"] = request.at("id");
+            http::request<http::string_body> res {http::verb::post, "/mcp", 11};
+            res.set(http::field::content_type, "application/json");
+            res.set("Mcp-Session-Id", sid);
+            res.body() = json::serialize(answer);
+            res.prepare_payload();
+            auto ack = co_await handler(taar::handler::contexts<> {}, res, mctx);
+            BOOST_TEST(ack.result_int() == 202);
+        }, net::detached);
+        io.run();
+        BOOST_REQUIRE(tool_reply.has_value());
+        return tool_reply->at("result");
+    };
+    auto text_of = [](json::value const& result)
+    {
+        return std::string {result.at("content").as_array()[0].at("text").as_string()};
+    };
+
+    auto asked = exchange("ask", [&](json::value const& request) -> json::value
+    {
+        BOOST_TEST(request.at("method").as_string() == "elicitation/create");
+        BOOST_TEST(request.at("params").at("message").as_string() == "Your name?");
+        BOOST_TEST(request.at("params").at("requestedSchema") == name_schema);
+        return json::object {{"result", json::object {{"action", "accept"}, {"content", json::object {{"name", "Reza"}}}}}};
+    });
+    BOOST_TEST(text_of(asked) == "accept:Reza");
+    BOOST_TEST(asked.at("isError").as_bool() == false);
+
+    auto roots = exchange("roots", [&](json::value const& request) -> json::value
+    {
+        BOOST_TEST(request.at("method").as_string() == "roots/list");
+        BOOST_TEST(!request.as_object().contains("params"));
+        return json::object {{"result", json::object {{"roots", json::array {json::object {{"uri", "file:///home"}, {"name", "home"}}}}}}};
+    });
+    BOOST_TEST(roots.at("structuredContent").at("roots").as_array()[0].at("uri").as_string() == "file:///home");
+
+    auto refused = exchange("sample", [&](json::value const& request) -> json::value
+    {
+        BOOST_TEST(request.at("method").as_string() == "sampling/createMessage");
+        BOOST_TEST(request.at("params").at("maxTokens").as_int64() == 10);
+        return json::object {{"error", json::object {{"code", -1}, {"message", "User rejected"}, {"data", json::object {{"why", "no"}}}}}};
+    });
+    BOOST_TEST(text_of(refused) == "-1 User rejected {\"why\":\"no\"}");
+
+    auto late = exchange("impatient", [&](json::value const&) -> json::value { return nullptr; });
+    BOOST_TEST(text_of(late) == "timed out");
+
+    // Request ids are distinct across calls; nothing is left pending.
+    // An unknown session is rejected up front.
+    net::io_context io;
+    bool threw = false;
+    net::co_spawn(io, [&]() -> taar::awaitable<void>
+    {
+        try { co_await e.list_roots("nope"); }
+        catch (std::out_of_range const&) { threw = true; }
+    }, net::detached);
+    io.run();
+    BOOST_TEST(threw);
+
+    // A client notification reaches its hook.
+    auto ack = post(e, http::verb::post, R"({"jsonrpc":"2.0","method":"notifications/roots/list_changed"})", sid);
+    BOOST_TEST(ack.result_int() == 202);
+    BOOST_TEST(roots_changed == 1);
+
+    // A stray response (no request waiting) is still acknowledged.
+    auto stray = post(e, http::verb::post, R"({"jsonrpc":"2.0","id":999,"result":{}})", sid);
+    BOOST_TEST(stray.result_int() == 202);
 }
 
 } // namespace

@@ -292,6 +292,13 @@ providers such as `header_arg` work on tools and JSON-RPC methods too:
     rpc.method("whoami", [](std::string token) { return token; },
         taar::handler::header_arg(http::field::authorization));
 
+A stateful tool can also ask its client something and wait for the
+answer: `co_await mcp.elicit(me.id, "Delete everything?", schema)` sends
+an `elicitation/create` request over the client's stream and resumes with
+its reply (`create_message` and `list_roots` work the same way, and
+`request` sends any method). Check `me.capabilities` first; a client that
+did not declare the capability will not answer.
+
 A tool or method may also declare a `jsonrpc::request_scope const&`: it
 carries the request id, reports MCP progress when the client sent a
 `progressToken`, and is cancelled by `notifications/cancelled` (or

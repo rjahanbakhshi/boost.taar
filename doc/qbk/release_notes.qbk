@@ -44,6 +44,9 @@
   (buffered), `multipart_reader` and `multipart_stream_arg` (streamed).
 * JSON-RPC positional parameters: a `params` array binds to `rpc_arg`
   providers in order.
+* MCP server-to-client requests: `endpoint::request`, `create_message`
+  (sampling), `elicit`, `list_roots`; `client_capabilities` and
+  `client_info` on `session_info`; `client_error`; `on_client_notification`.
 * MCP binary content: `mcp::image`, `audio`, `embedded_resource`,
   `tool_result` and `blob` resources; `base64_encode`/`base64_decode`.
   SSE event ids with `Last-Event-ID` resumption.

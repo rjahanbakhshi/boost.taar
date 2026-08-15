@@ -154,6 +154,24 @@ int main(int argc, char* argv[])
     server.resource("notes://all", "text/plain", "Every note, one per line", &all_notes);
     server.resource("notes://archive", "application/octet-stream", "The notes as bytes", &notes_archive);
     server.tool("notes/export", "The notes as text plus an embedded resource", &export_notes);
+    // A server-to-client request: ask the user to confirm through the
+    // client's elicitation UI before clearing. The reply is routed back to
+    // this coroutine while it still holds the session.
+    server.tool("notes/clear_confirmed", "Clear the notes after the user confirms",
+        [&](notes_session& s, mcp::session_info const& me) -> taar::awaitable<std::string>
+        {
+            if (!me.capabilities.elicitation) co_return "this client cannot confirm; use notes/clear";
+            auto reply = co_await server.elicit(me.id, "Delete all " + std::to_string(s.notes.size()) + " notes?",
+                {{"type", "object"}, {"properties", {{"confirm", {{"type", "boolean"}}}}}, {"required", {"confirm"}}},
+                std::chrono::minutes {2});
+            auto const* content = reply.as_object().if_contains("content");
+            if (reply.at("action").as_string() == "accept" && content && content->at("confirm").as_bool())
+            {
+                s.notes.clear();
+                co_return "cleared";
+            }
+            co_return "kept";
+        });
     server.prompt("notes/summarize", "A prompt asking the model to summarize the notes", &summarize_prompt,
         mcp_arg("style", "e.g. terse, friendly"));
     // Clients that subscribed to notes://all learn about changes.
