@@ -60,6 +60,11 @@ std::string add_note(notes_session& s, std::string text)
     return "note " + std::to_string(s.notes.size() - 1) + " added";
 }
 
+std::string summarize_prompt(std::string style)
+{
+    return "Summarize my notes in a " + style + " style, one line each.";
+}
+
 json::array list_notes(notes_session const& s)
 {
     json::array out;
@@ -129,6 +134,10 @@ int main(int argc, char* argv[])
         mcp_arg("text", "Reminder text"));
 
     server.resource("notes://all", "text/plain", "Every note, one per line", &all_notes);
+    server.prompt("notes/summarize", "A prompt asking the model to summarize the notes", &summarize_prompt,
+        mcp_arg("style", "e.g. terse, friendly"));
+    // Clients that subscribed to notes://all learn about changes.
+    server.tool("notes/touch", "Signal that the notes changed", [&] { return server.resource_updated("notes://all"); });
     server.resource("notes://{index}", "text/plain", "A single note by index", &note_at, uri_arg("index", "zero-based"));
 
     // Browsers may only talk to this server from the local UI.

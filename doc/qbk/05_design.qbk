@@ -337,6 +337,17 @@ Where the specifications leave room, Taar makes these choices:
 * JSON-RPC batches are rejected (`-32600`), following the current
   transport. A JSON-RPC response or notification posted by the client is
   acknowledged with `202`.
+* Prompts are registered like tools (`prompt(name, description, callable,
+  mcp_arg...)`); a string result becomes one user text message, an array
+  is taken as the messages, an object with `messages` is passed through.
+  The `prompts` capability is advertised only when prompts exist.
+* `resources/subscribe` is stateful-only (the subscription lives in the
+  session); `resource_updated(uri)` notifies subscribed sessions, and the
+  `*_changed()` helpers broadcast `list_changed`. Stateless endpoints
+  answer subscribe with `-32601` and do not advertise it.
+* `*/list` methods paginate when `server_info::page_size` is set: cursors
+  are opaque strings (`-32602` when invalid), `nextCursor` is present
+  while more items remain.
 * `tools/call` renders scalar results as text and wraps them as
   `structuredContent: {"result": ...}`; object results are passed through
   as `structuredContent`; `void` yields an empty `content` array. Unknown

@@ -27,8 +27,7 @@ rather than planned.
 
 ## MCP
 
-- Capabilities not implemented: prompts, `resources/subscribe`,
-  `completion/complete`, `logging/setLevel`, list pagination cursors.
+- Capabilities not implemented: `completion/complete`, `logging/setLevel`.
 - No server-to-client requests (sampling, elicitation, `roots/list`);
   client responses posted to the endpoint are acknowledged and dropped.
 - Tool results are text plus `structuredContent`; image, audio and
@@ -56,6 +55,8 @@ rather than planned.
 
 ## Recently closed
 
+- MCP prompts, resource subscriptions, list-changed notifications and list
+  pagination.
 - Request cancellation (`request_scope`, `endpoint::cancel`, MCP
   `notifications/cancelled`) and MCP progress notifications.
 - JSON-RPC positional parameters.

@@ -274,7 +274,9 @@ derived from the callable's parameter types:
         method == http::verb::get && target == "/mcp", mcp.stream_handler());
     http_session.register_request_handler(target == "/mcp", mcp.handler());
 
-A stateful tool may ask for `taar::mcp::session_info const&` to learn its
+Prompts register the same way (`mcp.prompt(name, description, callable,
+mcp_arg...)`), and `mcp.resource_updated(uri)` notifies the sessions that
+subscribed to a resource. A stateful tool may ask for `taar::mcp::session_info const&` to learn its
 own session id and push a notification to its caller, and REST request
 providers such as `header_arg` work on tools and JSON-RPC methods too:
 

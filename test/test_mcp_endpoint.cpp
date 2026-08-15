@@ -564,4 +564,80 @@ BOOST_AUTO_TEST_CASE(test_mcp_tool_reads_http_headers_through_rest_providers)
     BOOST_TEST(missing.at("error").at("code").as_int64() == -32602);
 }
 
+BOOST_AUTO_TEST_CASE(test_mcp_prompts_list_and_get)
+{
+    stateless_endpoint e {{.name = "s", .version = "1"}};
+    e.prompt("summarize", "Summarize a text", [](std::string text, std::optional<std::string> tone)
+    {
+        return "Summarize" + (tone ? " in a " + *tone + " tone" : std::string {}) + ": " + text;
+    }, mcp_arg("text", "The text"), mcp_arg("tone"));
+    e.prompt("chat", "Two messages", [](std::string topic)
+    {
+        return json::array {
+            json::object {{"role", "user"}, {"content", json::object {{"type", "text"}, {"text", "Tell me about " + topic}}}},
+            json::object {{"role", "assistant"}, {"content", json::object {{"type", "text"}, {"text", "Sure."}}}}};
+    }, mcp_arg("topic"));
+
+    auto init = body_json(post(e, initialize_body));
+    BOOST_TEST(init.at("result").at("capabilities").at("prompts").at("listChanged").as_bool());
+    BOOST_TEST(init.at("result").at("capabilities").at("resources").at("subscribe").as_bool() == false);   // stateless
+
+    auto list = body_json(post(e, R"({"jsonrpc":"2.0","id":1,"method":"prompts/list"})")).at("result").at("prompts").as_array();
+    BOOST_REQUIRE(list.size() == 2u);
+    BOOST_TEST(list[0].at("name").as_string() == "summarize");
+    BOOST_TEST(list[0].at("description").as_string() == "Summarize a text");
+    auto const& args = list[0].at("arguments").as_array();
+    BOOST_TEST(args[0].at("name").as_string() == "text");
+    BOOST_TEST(args[0].at("description").as_string() == "The text");
+    BOOST_TEST(args[0].at("required").as_bool());
+    BOOST_TEST(!args[1].at("required").as_bool());
+
+    auto got = body_json(post(e, R"({"jsonrpc":"2.0","id":2,"method":"prompts/get","params":{"name":"summarize","arguments":{"text":"hello","tone":"formal"}}})")).at("result");
+    BOOST_TEST(got.at("description").as_string() == "Summarize a text");
+    auto const& msgs = got.at("messages").as_array();
+    BOOST_REQUIRE(msgs.size() == 1u);
+    BOOST_TEST(msgs[0].at("role").as_string() == "user");
+    BOOST_TEST(msgs[0].at("content").at("text").as_string() == "Summarize in a formal tone: hello");
+
+    auto chat = body_json(post(e, R"({"jsonrpc":"2.0","id":3,"method":"prompts/get","params":{"name":"chat","arguments":{"topic":"asio"}}})")).at("result");
+    BOOST_TEST(chat.at("messages").as_array().size() == 2u);
+
+    auto missing = body_json(post(e, R"({"jsonrpc":"2.0","id":4,"method":"prompts/get","params":{"name":"summarize","arguments":{}}})"));
+    BOOST_TEST(missing.at("error").at("code").as_int64() == -32602);
+    auto unknown = body_json(post(e, R"({"jsonrpc":"2.0","id":5,"method":"prompts/get","params":{"name":"nope"}})"));
+    BOOST_TEST(unknown.at("error").at("code").as_int64() == -32602);
+    BOOST_CHECK_THROW(e.prompt("chat", "dup", [] { return ""; }), std::logic_error);
+    BOOST_TEST(e.prompts().size() == 2u);
+
+    // Without prompts the capability is not advertised, and subscribe is unknown when stateless.
+    stateless_endpoint bare {{.name = "s", .version = "1"}};
+    auto bare_init = body_json(post(bare, initialize_body));
+    BOOST_TEST(!bare_init.at("result").at("capabilities").as_object().contains("prompts"));
+    auto sub = body_json(post(bare, R"({"jsonrpc":"2.0","id":6,"method":"resources/subscribe","params":{"uri":"x://y"}})"));
+    BOOST_TEST(sub.at("error").at("code").as_int64() == -32601);
+}
+
+BOOST_AUTO_TEST_CASE(test_mcp_list_pagination)
+{
+    stateless_endpoint e {{.name = "s", .version = "1", .page_size = 2}};
+    build(e);       // 6 tools, 1 resource, 1 template
+    auto page1 = body_json(post(e, R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})")).at("result");
+    BOOST_TEST(page1.at("tools").as_array().size() == 2u);
+    BOOST_TEST(page1.at("tools").as_array()[0].at("name").as_string() == "add");
+    BOOST_TEST(page1.at("nextCursor").as_string() == "2");
+    auto page2 = body_json(post(e, R"({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{"cursor":"2"}})")).at("result");
+    BOOST_TEST(page2.at("tools").as_array()[0].at("name").as_string() == "shout");
+    BOOST_TEST(page2.at("nextCursor").as_string() == "4");
+    auto page3 = body_json(post(e, R"({"jsonrpc":"2.0","id":3,"method":"tools/list","params":{"cursor":"4"}})")).at("result");
+    BOOST_TEST(page3.at("tools").as_array().size() == 2u);
+    BOOST_TEST(!page3.as_object().contains("nextCursor"));
+    auto bad = body_json(post(e, R"({"jsonrpc":"2.0","id":4,"method":"tools/list","params":{"cursor":"zz"}})"));
+    BOOST_TEST(bad.at("error").at("code").as_int64() == -32602);
+    auto beyond = body_json(post(e, R"({"jsonrpc":"2.0","id":5,"method":"tools/list","params":{"cursor":"99"}})"));
+    BOOST_TEST(beyond.at("error").at("code").as_int64() == -32602);
+    auto res = body_json(post(e, R"({"jsonrpc":"2.0","id":6,"method":"resources/list"})")).at("result");
+    BOOST_TEST(res.at("resources").as_array().size() == 1u);
+    BOOST_TEST(!res.as_object().contains("nextCursor"));           // fits in one page
+}
+
 } // namespace

@@ -44,6 +44,9 @@
   (buffered), `multipart_reader` and `multipart_stream_arg` (streamed).
 * JSON-RPC positional parameters: a `params` array binds to `rpc_arg`
   providers in order.
+* MCP prompts (`prompt()`, `prompts/list`, `prompts/get`), resource
+  subscriptions (`resources/subscribe`, `resource_updated`), list-changed
+  broadcasts, and `*/list` pagination via `server_info::page_size`.
 * `jsonrpc::request_scope`: per-request id, cancellation and notification
   sink injectable into methods and tools; `endpoint::cancel(id)`; MCP
   `notifications/cancelled` and `notifications/progress`.

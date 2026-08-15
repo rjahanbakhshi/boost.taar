@@ -322,4 +322,32 @@ BOOST_AUTO_TEST_CASE(test_mcp_cancelled_notification_interrupts_a_tool_call)
     BOOST_TEST(slow_res->body().empty());
 }
 
+BOOST_AUTO_TEST_CASE(test_mcp_resource_subscriptions)
+{
+    endpoint e {{.name = "s", .version = "1"}};
+    e.resource("notes://all", "text/plain", "All notes", [] { return std::string {"x"}; });
+    auto a = initialize(e);
+    auto b = initialize(e);
+
+    auto ok = json::parse(post(e, http::verb::post, R"({"jsonrpc":"2.0","id":1,"method":"resources/subscribe","params":{"uri":"notes://all"}})", a).body());
+    BOOST_TEST(ok.at("result").as_object().empty());
+    auto bad = json::parse(post(e, http::verb::post, R"({"jsonrpc":"2.0","id":2,"method":"resources/subscribe","params":{}})", a).body());
+    BOOST_TEST(bad.at("error").at("code").as_int64() == -32602);
+
+    BOOST_TEST(e.resource_updated("notes://all") == 1u);       // only session a
+    BOOST_TEST(e.resource_updated("notes://other") == 0u);
+
+    stream_reader ra {open_stream(e, a)};
+    BOOST_REQUIRE(ra.next().has_value());
+    auto msg = ra.next();
+    BOOST_REQUIRE(msg.has_value());
+    BOOST_TEST(msg->find("notifications/resources/updated") != std::string::npos);
+    BOOST_TEST(msg->find("notes://all") != std::string::npos);
+
+    post(e, http::verb::post, R"({"jsonrpc":"2.0","id":3,"method":"resources/unsubscribe","params":{"uri":"notes://all"}})", a);
+    BOOST_TEST(e.resource_updated("notes://all") == 0u);
+    BOOST_TEST(e.resources_changed() == 2u);                    // list_changed reaches every session
+    (void)b;
+}
+
 } // namespace

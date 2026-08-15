@@ -46,7 +46,10 @@
 #include <boost/system/system_error.hpp>
 #include <array>
 #include <atomic>
+#include <mutex>
+#include <set>
 #include <chrono>
+#include <cstdlib>
 #include <exception>
 #include <functional>
 #include <optional>
@@ -74,6 +77,8 @@ struct server_info
     std::string version;
     std::string instructions {};
     std::chrono::steady_clock::duration session_idle_timeout = std::chrono::minutes {30};
+    /// Items per page for `*/list` methods; 0 returns everything in one page.
+    std::size_t page_size = 0;
 };
 
 /// The client's self-description from `initialize`.
@@ -126,6 +131,14 @@ struct tool_info
     std::vector<param_info> params;
 };
 
+/// Registration-time description of a prompt, for `prompts/list`.
+struct prompt_info
+{
+    std::string name;
+    std::string description;
+    std::vector<param_info> params;
+};
+
 /// Registration-time description of a resource, for `resources/list`.
 struct resource_info
 {
@@ -168,6 +181,9 @@ inline std::optional<std::string> default_tool_error_handler(std::exception_ptr 
     }
 }
 
+/// What an MCP prompt callable's argument providers receive (same shape as @ref tool_call).
+using prompt_call = tool_call;
+
 namespace detail {
 
 /// Per-session bookkeeping stored next to the user's Session object.
@@ -177,6 +193,8 @@ struct session_slot
     Session session {};
     session_info info {};
     std::shared_ptr<async_channel<std::string>> mailbox = std::make_shared<async_channel<std::string>>();
+    std::mutex subscriptions_mutex;
+    std::set<std::string> subscriptions;       ///< Resource URIs subscribed by this session.
     std::shared_ptr<std::atomic<bool>> stream_attached = std::make_shared<std::atomic<bool>>(false);
 
     ~session_slot()
@@ -354,6 +372,63 @@ public:
             std::move(bound.invoke)});
         return *this;
     }
+
+    /** Register a prompt. Arguments are bound with @ref mcp_arg from
+        `params.arguments` (prompt arguments are strings). The callable may
+        return a `std::string` (one user text message), a `boost::json::array`
+        of messages, or an object with `messages` (and optional
+        `description`).
+    */
+    template <typename Callable, typename... Providers>
+    endpoint& prompt(std::string name, std::string description, Callable&& callable, Providers... providers)
+    {
+        if (prompts_.contains(name))
+        {
+            throw std::logic_error {"mcp::endpoint: prompt already registered: " + name};
+        }
+        auto bound = jsonrpc::detail::bind_method<prompt_call, call_contexts>(
+            std::forward<Callable>(callable), std::move(providers)...);
+        prompt_order_.push_back(name);
+        prompts_.emplace(name, prompt_entry {
+            prompt_info {name, std::move(description), std::move(bound.params)},
+            std::move(bound.invoke)});
+        return *this;
+    }
+
+    std::vector<prompt_info> prompts() const
+    {
+        std::vector<prompt_info> out;
+        for (auto const& name : prompt_order_) out.push_back(prompts_.at(name).info);
+        return out;
+    }
+
+    /** Tell every session subscribed to @a uri that the resource changed
+        (`notifications/resources/updated`). Returns the number notified.
+    */
+    std::size_t resource_updated(std::string const& uri) requires stateful
+    {
+        auto const text = notification("notifications/resources/updated", boost::json::object {{"uri", uri}});
+        std::size_t n = 0;
+        for (auto const& key : sessions_.store.keys())
+        {
+            auto e = sessions_.store.peek(key);
+            if (!e) continue;
+            bool subscribed = false;
+            {
+                std::lock_guard<std::mutex> const g {e->context()->subscriptions_mutex};
+                subscribed = e->context()->subscriptions.contains(uri);
+            }
+            if (subscribed && e->context()->mailbox->push(text)) ++n;
+        }
+        return n;
+    }
+
+    /// Broadcast `notifications/tools/list_changed` to every session.
+    std::size_t tools_changed() requires stateful { return broadcast("notifications/tools/list_changed"); }
+    /// Broadcast `notifications/resources/list_changed` to every session.
+    std::size_t resources_changed() requires stateful { return broadcast("notifications/resources/list_changed"); }
+    /// Broadcast `notifications/prompts/list_changed` to every session.
+    std::size_t prompts_changed() requires stateful { return broadcast("notifications/prompts/list_changed"); }
 
     /** Hook run on every `initialize`.
 
@@ -758,6 +833,50 @@ private:
             call_contexts const&, resource_call const&, matcher::context const&)> invoke;
     };
 
+    struct prompt_entry
+    {
+        prompt_info info;
+        std::move_only_function<awaitable<boost::json::value>(
+            call_contexts const&, prompt_call const&, matcher::context const&)> invoke;
+    };
+
+    /// Slice @a items for `params.cursor`; sets `nextCursor` when more remain. Throws invalid_params on a bad cursor.
+    boost::json::object paginate(boost::json::array items, std::string_view key, jsonrpc::envelope const& env) const
+    {
+        std::size_t start = 0;
+        if (env.params)
+        {
+            if (auto const* obj = env.params->if_object())
+            {
+                if (auto const* c = obj->if_contains("cursor"))
+                {
+                    if (!c->is_string()) throw boost::system::system_error {jsonrpc::error::invalid_params, "cursor must be a string"};
+                    auto const text = std::string {c->as_string()};
+                    char* end = nullptr;
+                    auto const parsed = std::strtoull(text.c_str(), &end, 10);
+                    if (text.empty() || *end != '\0' || parsed > items.size())
+                    {
+                        throw boost::system::system_error {jsonrpc::error::invalid_params, "invalid cursor"};
+                    }
+                    start = static_cast<std::size_t>(parsed);
+                }
+            }
+        }
+        boost::json::object result;
+        if (info_.page_size == 0 || items.size() - start <= info_.page_size)
+        {
+            boost::json::array page;
+            for (std::size_t i = start; i < items.size(); ++i) page.push_back(std::move(items[i]));
+            result[key] = std::move(page);
+            return result;
+        }
+        boost::json::array page;
+        for (std::size_t i = start; i < start + info_.page_size; ++i) page.push_back(std::move(items[i]));
+        result[key] = std::move(page);
+        result["nextCursor"] = std::to_string(start + info_.page_size);
+        return result;
+    }
+
     /// The session id the contexts belong to (empty in stateless mode).
     static std::string scope_key_of(contexts_type const& ctxs)
     {
@@ -1010,8 +1129,12 @@ private:
     boost::json::object initialize_result(std::string_view negotiated) const
     {
         boost::json::object capabilities;
-        capabilities["tools"] = boost::json::object {};
-        capabilities["resources"] = boost::json::object {};
+        capabilities["tools"] = boost::json::object {{"listChanged", true}};
+        capabilities["resources"] = boost::json::object {{"subscribe", stateful}, {"listChanged", true}};
+        if (!prompts_.empty())
+        {
+            capabilities["prompts"] = boost::json::object {{"listChanged", true}};
+        }
 
         boost::json::object server;
         server["name"] = info_.name;
@@ -1100,6 +1223,27 @@ private:
     {
         auto const id = env.id.value_or(boost::json::value {nullptr});
         std::optional<boost::json::value> out;
+        try
+        {
+            out = co_await dispatch_impl(ctxs, env, request, mctx);
+        }
+        catch (boost::system::system_error const& e)
+        {
+            if (e.code().category() != jsonrpc::error_category()) throw;
+            if (jsonrpc::is_notification(env)) co_return std::nullopt;
+            co_return error_envelope(id, e.code().value(), e.what());
+        }
+        co_return out;
+    }
+
+    awaitable<std::optional<boost::json::value>> dispatch_impl(
+        contexts_type const& ctxs,
+        jsonrpc::envelope const& env,
+        request_type const& request,
+        matcher::context const& mctx)
+    {
+        auto const id = env.id.value_or(boost::json::value {nullptr});
+        std::optional<boost::json::value> out;
 
         if (env.method == "notifications/cancelled")
         {
@@ -1116,7 +1260,19 @@ private:
         }
         else if (env.method == "tools/list")
         {
-            out = jsonrpc::make_response(id, list_tools());
+            out = jsonrpc::make_response(id, list_tools(env));
+        }
+        else if (env.method == "prompts/list")
+        {
+            out = jsonrpc::make_response(id, list_prompts(env));
+        }
+        else if (env.method == "prompts/get")
+        {
+            out = co_await get_prompt(ctxs, env, request, mctx);
+        }
+        else if (env.method == "resources/subscribe" || env.method == "resources/unsubscribe")
+        {
+            out = subscribe(ctxs, env, env.method == "resources/subscribe");
         }
         else if (env.method == "tools/call")
         {
@@ -1124,11 +1280,11 @@ private:
         }
         else if (env.method == "resources/list")
         {
-            out = jsonrpc::make_response(id, list_resources(false));
+            out = jsonrpc::make_response(id, list_resources(false, env));
         }
         else if (env.method == "resources/templates/list")
         {
-            out = jsonrpc::make_response(id, list_resources(true));
+            out = jsonrpc::make_response(id, list_resources(true, env));
         }
         else if (env.method == "resources/read")
         {
@@ -1143,7 +1299,7 @@ private:
         co_return out;
     }
 
-    boost::json::object list_tools() const
+    boost::json::object list_tools(jsonrpc::envelope const& env) const
     {
         boost::json::array tools;
         for (auto const& name : tool_order_)
@@ -1155,12 +1311,34 @@ private:
             t["inputSchema"] = object_schema(info.params);
             tools.push_back(std::move(t));
         }
-        boost::json::object result;
-        result["tools"] = std::move(tools);
-        return result;
+        return paginate(std::move(tools), "tools", env);
     }
 
-    boost::json::object list_resources(bool templates) const
+    boost::json::object list_prompts(jsonrpc::envelope const& env) const
+    {
+        boost::json::array prompts;
+        for (auto const& name : prompt_order_)
+        {
+            auto const& info = prompts_.at(name).info;
+            boost::json::object p;
+            p["name"] = info.name;
+            if (!info.description.empty()) p["description"] = info.description;
+            boost::json::array args;
+            for (auto const& a : info.params)
+            {
+                boost::json::object arg;
+                arg["name"] = a.name;
+                if (!a.description.empty()) arg["description"] = a.description;
+                arg["required"] = a.required;
+                args.push_back(std::move(arg));
+            }
+            p["arguments"] = std::move(args);
+            prompts.push_back(std::move(p));
+        }
+        return paginate(std::move(prompts), "prompts", env);
+    }
+
+    boost::json::object list_resources(bool templates, jsonrpc::envelope const& env) const
     {
         boost::json::array items;
         for (auto const& r : resources_)
@@ -1173,9 +1351,112 @@ private:
             if (!r.info.description.empty()) item["description"] = r.info.description;
             items.push_back(std::move(item));
         }
+        return paginate(std::move(items), templates ? "resourceTemplates" : "resources", env);
+    }
+
+    /// Shape a prompt callable's result as `{description?, messages}`.
+    static boost::json::object prompt_result(boost::json::value const& v, std::string const& description)
+    {
         boost::json::object result;
-        result[templates ? "resourceTemplates" : "resources"] = std::move(items);
+        if (!description.empty()) result["description"] = description;
+        if (auto const* obj = v.if_object(); obj && obj->contains("messages"))
+        {
+            result = *obj;
+            if (!description.empty() && !result.contains("description")) result["description"] = description;
+            return result;
+        }
+        if (v.is_array())
+        {
+            result["messages"] = v;
+            return result;
+        }
+        boost::json::object content;
+        content["type"] = "text";
+        content["text"] = detail::text_of(v);
+        boost::json::object message;
+        message["role"] = "user";
+        message["content"] = std::move(content);
+        result["messages"] = boost::json::array {std::move(message)};
         return result;
+    }
+
+    awaitable<std::optional<boost::json::value>> get_prompt(
+        contexts_type const& ctxs,
+        jsonrpc::envelope const& env,
+        request_type const& request,
+        matcher::context const& mctx)
+    {
+        auto const id = env.id.value_or(boost::json::value {nullptr});
+        boost::json::object const* params = env.params ? env.params->if_object() : nullptr;
+        boost::json::value const* name = params ? params->if_contains("name") : nullptr;
+        if (name == nullptr || !name->is_string())
+        {
+            co_return error_envelope(id, static_cast<int>(jsonrpc::error::invalid_params), "prompts/get requires params.name");
+        }
+        auto it = prompts_.find(std::string {name->as_string()});
+        if (it == prompts_.end())
+        {
+            co_return error_envelope(id, static_cast<int>(jsonrpc::error::invalid_params),
+                "Unknown prompt: " + std::string {name->as_string()});
+        }
+        boost::json::object const empty;
+        boost::json::object const* arguments = &empty;
+        if (auto const* a = params->if_contains("arguments"))
+        {
+            if (!a->is_object())
+            {
+                co_return error_envelope(id, static_cast<int>(jsonrpc::error::invalid_params), "params.arguments must be an object");
+            }
+            arguments = &a->as_object();
+        }
+
+        auto scoped = begin_scope(ctxs, env, co_await boost::asio::this_coro::executor);
+        std::exception_ptr failure;
+        boost::json::value value;
+        try
+        {
+            value = co_await rpc_type::run_scoped(scoped.scope, it->second.invoke(
+                std::tuple_cat(ctxs, std::make_tuple(scoped.scope)), prompt_call {env, *arguments, request}, mctx));
+        }
+        catch (...)
+        {
+            failure = std::current_exception();
+        }
+        if (scoped.scope->cancelled()) co_return std::nullopt;
+        if (failure)
+        {
+            auto info = rpc_.map_exception(failure);
+            co_return jsonrpc::make_error_response(id, info.code, std::move(info.message), std::move(info.data));
+        }
+        co_return jsonrpc::make_response(id, prompt_result(value, it->second.info.description));
+    }
+
+    /// `resources/subscribe` and `resources/unsubscribe` (stateful only).
+    boost::json::value subscribe(contexts_type const& ctxs, jsonrpc::envelope const& env, bool on)
+    {
+        auto const id = env.id.value_or(boost::json::value {nullptr});
+        if constexpr (!stateful)
+        {
+            (void)ctxs; (void)on;
+            return error_envelope(id, jsonrpc::error::method_not_found);
+        }
+        else
+        {
+            boost::json::object const* params = env.params ? env.params->if_object() : nullptr;
+            boost::json::value const* uri = params ? params->if_contains("uri") : nullptr;
+            if (uri == nullptr || !uri->is_string())
+            {
+                return error_envelope(id, static_cast<int>(jsonrpc::error::invalid_params), "resources/subscribe requires params.uri");
+            }
+            auto entry = sessions_.store.peek(scope_key_of(ctxs));
+            if (!entry) return error_envelope(id, jsonrpc::error::invalid_request);
+            {
+                std::lock_guard<std::mutex> const g {entry->context()->subscriptions_mutex};
+                if (on) entry->context()->subscriptions.insert(std::string {uri->as_string()});
+                else entry->context()->subscriptions.erase(std::string {uri->as_string()});
+            }
+            return jsonrpc::make_response(id, boost::json::object {});
+        }
     }
 
     static boost::json::object tool_result(boost::json::value const& v)
@@ -1405,6 +1686,8 @@ private:
     std::unordered_map<std::string, tool_entry> tools_;
     std::vector<std::string> tool_order_;
     std::vector<resource_entry> resources_;
+    std::unordered_map<std::string, prompt_entry> prompts_;
+    std::vector<std::string> prompt_order_;
     std::move_only_function<void(contexts_type const&, initialize_params const&)> on_initialize_;
     tool_error_handler tool_error_ = default_tool_error_handler;
     std::function<bool(std::string_view)> origin_validator_;
