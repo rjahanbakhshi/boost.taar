@@ -223,13 +223,44 @@ BOOST_AUTO_TEST_CASE(test_jsonrpc_endpoint_wrong_type_param_is_invalid_params)
     BOOST_TEST(v.at("error").at("code").as_int64() == -32602);
 }
 
-BOOST_AUTO_TEST_CASE(test_jsonrpc_endpoint_positional_and_scalar_params_rejected)
+BOOST_AUTO_TEST_CASE(test_jsonrpc_endpoint_positional_params_bind_in_order_and_scalars_are_rejected)
 {
     auto rpc = make_endpoint();
     auto arr = body_json(post(*rpc, R"({"jsonrpc":"2.0","id":1,"method":"sub","params":[5,2]})"));
-    BOOST_TEST(arr.at("error").at("code").as_int64() == -32602);
-    auto scalar = body_json(post(*rpc, R"({"jsonrpc":"2.0","id":1,"method":"sub","params":5})"));
+    BOOST_TEST(arr.at("result").as_int64() == 3);
+    auto extra = body_json(post(*rpc, R"({"jsonrpc":"2.0","id":2,"method":"sub","params":[5,2,99]})"));
+    BOOST_TEST(extra.at("result").as_int64() == 3);                     // extra elements ignored
+    auto missing = body_json(post(*rpc, R"({"jsonrpc":"2.0","id":3,"method":"sub","params":[5]})"));
+    BOOST_TEST(missing.at("error").at("code").as_int64() == -32602);    // trailing parameter missing
+    auto typed = body_json(post(*rpc, R"({"jsonrpc":"2.0","id":4,"method":"sub","params":["x",2]})"));
+    BOOST_TEST(typed.at("error").at("code").as_int64() == -32602);
+    auto opt = body_json(post(*rpc, R"({"jsonrpc":"2.0","id":5,"method":"with_opt","params":[4]})"));
+    BOOST_TEST(opt.at("result").as_int64() == 47);                      // with_opt(4, b = 7)
+    auto scalar = body_json(post(*rpc, R"({"jsonrpc":"2.0","id":6,"method":"sub","params":5})"));
     BOOST_TEST(scalar.at("error").at("code").as_int64() == -32602);
+}
+
+BOOST_AUTO_TEST_CASE(test_jsonrpc_endpoint_positional_params_skip_http_providers)
+{
+    jsonrpc::endpoint<calc_session> rpc;
+    rpc.method("tagged", [](std::string token, int a, std::optional<std::string> trace, int b)
+    {
+        return token + ":" + std::to_string(a) + ":" + trace.value_or("-") + ":" + std::to_string(b);
+    }, taar::handler::header_arg("X-Token"), rpc_arg("a"), taar::handler::header_arg("X-Trace"), rpc_arg("b"));
+
+    http::request<http::string_body> req {http::verb::post, "/rpc", 11};
+    req.set(http::field::content_type, "application/json");
+    req.set("X-Token", "tok");
+    req.body() = R"({"jsonrpc":"2.0","id":1,"method":"tagged","params":[10,20]})";
+    req.prepare_payload();
+    contexts<calc_session> ctxs {std::make_shared<calc_session>()};
+    taar::matcher::context mctx;
+    auto handler = rpc.handler();
+    net::io_context io;
+    std::optional<http::response<http::string_body>> out;
+    net::co_spawn(io, [&]() -> taar::awaitable<void> { out = co_await handler(ctxs, req, mctx); }, net::detached);
+    io.run();
+    BOOST_TEST(body_json(*out).at("result").as_string() == "tok:10:-:20");   // a=params[0], b=params[1]
 }
 
 BOOST_AUTO_TEST_CASE(test_jsonrpc_endpoint_missing_params_for_no_arg_method_ok)

@@ -138,7 +138,8 @@ inline std::string message_for(error code)
     Behaviour notes:
     @li Method names are case-sensitive; registering a name twice throws
         `std::logic_error`.
-    @li Unknown members of `params` are ignored. Positional (array) params
+    @li Unknown members of `params` are ignored. A `params` array binds
+        positionally to the method's `rpc_arg` providers in order. Scalar params
         are reported as `-32602`.
     @li All responses, including error envelopes, use HTTP status 200 with
         `Content-Type: application/json`. Notifications (no `id`) produce

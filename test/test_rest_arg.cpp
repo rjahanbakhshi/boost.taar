@@ -358,27 +358,27 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_csv)
     context ctx;
     ctx.path_args = {{"csv", "7,8,9"}};
 
-    // query_arg → vector<int>
+    // query_arg -> vector<int>
     BOOST_TEST((get_rest_arg<std::vector<int>, query_arg>(query_arg("ids"), 0, req, ctx)
         == std::vector<int>{1, 2, 3}));
 
-    // query_arg → vector<string>
+    // query_arg -> vector<string>
     BOOST_TEST((get_rest_arg<std::vector<std::string>, query_arg>(query_arg("tags"), 0, req, ctx)
         == std::vector<std::string>{"a", "b"}));
 
-    // header_arg → vector<int>
+    // header_arg -> vector<int>
     BOOST_TEST((get_rest_arg<std::vector<int>, header_arg>(header_arg("x-nums"), 0, req, ctx)
         == std::vector<int>{10, 20, 30}));
 
-    // path_arg → vector<int>
+    // path_arg -> vector<int>
     BOOST_TEST((get_rest_arg<std::vector<int>, path_arg>(path_arg("csv"), 0, req, ctx)
         == std::vector<int>{7, 8, 9}));
 
-    // query_arg → set<int>
+    // query_arg -> set<int>
     BOOST_TEST((get_rest_arg<std::set<int>, query_arg>(query_arg("ids"), 0, req, ctx)
         == std::set<int>{1, 2, 3}));
 
-    // query_arg → list<int>
+    // query_arg -> list<int>
     BOOST_TEST((get_rest_arg<std::list<int>, query_arg>(query_arg("ids"), 0, req, ctx)
         == std::list<int>{1, 2, 3}));
 }

@@ -23,7 +23,7 @@ namespace boost::taar::jsonrpc {
 
     Mirrors the spec request object: a fixed `"jsonrpc"` version of `"2.0"`,
     a method name, optional structured parameters, and an optional id. An
-    envelope without an id is a *notification* — the server processes it
+    envelope without an id is a *notification* -- the server processes it
     but produces no response.
 
     The id field is stored as a `boost::json::value` because the spec
@@ -68,7 +68,7 @@ inline bool is_notification(envelope const& env) noexcept
     @returns A populated @ref envelope on success, or
              `boost::taar::jsonrpc::error::invalid_request` on any
              structural error. Note that JSON-level parse failure is
-             outside this function's scope — callers that hand-roll JSON
+             outside this function's scope -- callers that hand-roll JSON
              parsing should map `boost::json::parse` errors to
              `error::parse_error` themselves.
 

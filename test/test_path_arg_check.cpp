@@ -100,7 +100,7 @@ BOOST_AUTO_TEST_CASE(test_validate_unused_placeholder_is_allowed)
 
 BOOST_AUTO_TEST_CASE(test_validate_non_path_args_are_ignored)
 {
-    // query_arg is not a path_arg — it does not have to appear in the
+    // query_arg is not a path_arg -- it does not have to appear in the
     // target template.
     operand op {target == "/items"};
     auto handler = rest(
@@ -113,7 +113,7 @@ BOOST_AUTO_TEST_CASE(test_validate_non_path_args_are_ignored)
 
 BOOST_AUTO_TEST_CASE(test_validate_skips_when_no_target_in_matcher)
 {
-    // A matcher with no target_constraint — the validator has nothing to
+    // A matcher with no target_constraint -- the validator has nothing to
     // check against and must not throw, even with a path_arg present.
     operand op {method == http::verb::get};
     auto handler = rest([](std::string x) { return x; }, path_arg("x"));

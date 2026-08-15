@@ -53,7 +53,7 @@ namespace boost::taar::matcher {
 
     The produced operand carries @ref target_constraint metadata with the
     *raw* template string (unparsed) in its @ref operand::captures
-    "captures" tuple. Auxiliary generators (OpenAPI, MCP, …) read the
+    "captures" tuple. Auxiliary generators (OpenAPI, MCP, ...) read the
     template verbatim from the captures; the parsed-segment representation
     used for matching at runtime remains an implementation detail.
 

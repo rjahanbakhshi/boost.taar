@@ -105,7 +105,7 @@ BOOST_AUTO_TEST_CASE(test_parse_envelope_id_can_be_string_or_null)
         BOOST_TEST(result.value().id->as_string() == "abc");
     }
     {
-        // Explicit null id is *not* a notification — id is present and
+        // Explicit null id is *not* a notification -- id is present and
         // its value is null.
         auto value = json::parse(R"({"jsonrpc":"2.0","id":null,"method":"m"})");
         auto result = jsonrpc::parse_envelope(value);

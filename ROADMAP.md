@@ -27,7 +27,6 @@ rather than planned.
 
 ## JSON-RPC
 
-- Positional parameter arrays are rejected with -32602.
 - No cancellation of in-flight calls.
 
 ## MCP
@@ -63,6 +62,7 @@ rather than planned.
 
 ## Recently closed
 
+- JSON-RPC positional parameters.
 - `405 Method Not Allowed` with `Allow`, and `HEAD` served from `GET`.
 - `multipart/form-data`, buffered (`multipart_form_arg`) and streamed
   (`multipart_stream_arg`).

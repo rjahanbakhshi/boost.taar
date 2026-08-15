@@ -32,9 +32,17 @@ struct call
 {
     envelope const& env;
     boost::beast::http::request<boost::beast::http::string_body> const& request;
+    /// Index of the provider among the call-reading providers, for positional `params` arrays.
+    std::optional<std::size_t> position {};
 };
 
-/** Argument provider reading a named member of the envelope's `params` object.
+/** Argument provider reading one member of the envelope's `params`: by name
+    when `params` is an object, by position when it is an array.
+
+    Positions count only the `rpc_arg` providers of a method, in order, so
+    HTTP providers (`header_arg`, ...) mixed in do not shift them. A short
+    array leaves trailing parameters missing (an error unless they are
+    optional or defaulted); extra elements are ignored.
 
     The value is converted to the callable's parameter type through
     `rest_arg_cast` (so `int`, `double`, `bool`, `std::string`,
@@ -63,11 +71,18 @@ struct rpc_arg
         {
             return taar::error::argument_not_found;
         }
+        if (auto const* arr = c.env.params->if_array())
+        {
+            if (!c.position || *c.position >= arr->size())
+            {
+                return taar::error::argument_not_found;
+            }
+            return (*arr)[*c.position];
+        }
         auto const* obj = c.env.params->if_object();
         if (obj == nullptr)
         {
-            // Positional (array) or scalar params are not supported by
-            // named providers.
+            // Scalar params are not supported.
             return jsonrpc::error::invalid_params;
         }
         auto const* v = obj->if_contains(name_);

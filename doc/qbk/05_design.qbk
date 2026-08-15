@@ -313,8 +313,11 @@ Where the specifications leave room, Taar makes these choices:
   siblings. An empty batch is a single `-32600` object. An invalid element
   is answered with `-32600` and its `id` if that was a string, number or
   null.
-* Parameters are named; a positional array is `-32602`. Unknown parameters
-  are ignored. `std::optional<T>` and `with_default` make a parameter
+* Parameters bind by name from a `params` object or by position from a
+  `params` array; positions count only the `rpc_arg` providers, so HTTP
+  providers mixed into a method do not shift them. A short array leaves
+  trailing parameters missing; extra elements and unknown members are
+  ignored; a scalar `params` is `-32602`. `std::optional<T>` and `with_default` make a parameter
   optional. Method names are case-sensitive; registering a name twice
   throws at startup.
 

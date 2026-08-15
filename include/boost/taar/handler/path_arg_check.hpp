@@ -25,11 +25,11 @@
 
 namespace boost::taar::handler {
 
-/** Concept: true if @a T is a `path_arg` or a `with_default<path_arg, …>`.
+/** Concept: true if @a T is a `path_arg` or a `with_default<path_arg, ...>`.
 
     The check is by type identity rather than behaviour, because the
     distinguishing fact is *which kind of input* the provider reads (a path
-    placeholder) — something not visible in the call signature.
+    placeholder) -- something not visible in the call signature.
 */
 template <typename T>
 concept is_path_arg =
@@ -84,7 +84,7 @@ public:
 /** Find the first `target_constraint` leaf's index in an AST's flattened leaves.
 
     Returns `static_cast<std::size_t>(-1)` when no target leaf exists.
-    Most callers don't need this directly — use @ref find_target_template
+    Most callers don't need this directly -- use @ref find_target_template
     on an operand instead.
 */
 template <typename AST>
@@ -121,8 +121,8 @@ auto find_target_template(Operand const& op)
     Runs at handler-registration time. Every name declared by a
     @ref path_arg (or @ref with_default wrapping one) on @a handler must
     appear as a `{name}` or `{*name}` placeholder in the template string
-    captured by @a op's `target_constraint`. A mismatch — typo, dropped
-    placeholder, or wrong path — throws `boost::system::system_error`
+    captured by @a op's `target_constraint`. A mismatch -- typo, dropped
+    placeholder, or wrong path -- throws `boost::system::system_error`
     with a message naming the offending argument, so the failure surfaces
     at server startup instead of at the first request.
 
@@ -136,7 +136,7 @@ auto find_target_template(Operand const& op)
         handler).
 
     Path placeholders without a matching `path_arg` provider are
-    intentionally allowed — a handler may legitimately ignore part of the
+    intentionally allowed -- a handler may legitimately ignore part of the
     path.
 */
 template <typename Operand, typename Handler>

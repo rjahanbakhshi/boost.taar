@@ -75,6 +75,20 @@ decltype(auto) provider_input(CallType const& c)
     }
 }
 
+/// A call type that supports positional parameters exposes `position`.
+template <typename CallType>
+concept positional_call = requires(CallType c) { c.position = std::size_t {}; };
+
+/// Position of provider @a I among the call-reading providers of the tuple.
+template <typename CallType, typename ProvidersTuple, std::size_t I>
+constexpr std::size_t call_position()
+{
+    return []<std::size_t... Js>(std::index_sequence<Js...>)
+    {
+        return ((Js < I && call_provider_for<std::tuple_element_t<Js, ProvidersTuple>, CallType> ? 1 : 0) + ... + 0);
+    }(std::make_index_sequence<std::tuple_size_v<ProvidersTuple>> {});
+}
+
 template <typename P>
 std::string provider_description(P const& p)
 {
@@ -137,12 +151,29 @@ struct method_handler<Callable, ProvidersTuple, CallType, std::index_sequence<Ct
     callable_storage callable_;
     ProvidersTuple providers_;
 
+    /// The call as seen by provider @a I: positioned among the call providers.
+    template <std::size_t I>
+    static CallType call_for(CallType const& c)
+    {
+        if constexpr (positional_call<CallType>)
+        {
+            CallType positioned = c;
+            positioned.position = call_position<CallType, ProvidersTuple, I>();
+            return positioned;
+        }
+        else
+        {
+            return c;
+        }
+    }
+
     template <typename Contexts>
     awaitable<boost::json::value> operator()(
         Contexts const& ctxs,
         CallType const& c,
         matcher::context const& mctx)
     {
+        std::tuple<decltype(call_for<ArgIs>(c))...> calls {call_for<ArgIs>(c)...};
         auto invoke = [&]() -> decltype(auto)
         {
             return std::invoke(
@@ -152,7 +183,7 @@ struct method_handler<Callable, ProvidersTuple, CallType, std::index_sequence<Ct
                     type_traits::callable_arg<Callable, context_count + ArgIs>,
                     std::tuple_element_t<ArgIs, ProvidersTuple>
                 >(std::get<ArgIs>(providers_), ArgIs,
-                  provider_input<std::tuple_element_t<ArgIs, ProvidersTuple>>(c), mctx)...);
+                  provider_input<std::tuple_element_t<ArgIs, ProvidersTuple>>(std::get<ArgIs>(calls)), mctx)...);
         };
         using result_type = decltype(invoke());
 

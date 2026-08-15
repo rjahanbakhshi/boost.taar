@@ -42,6 +42,8 @@
   `stream_body_arg` provider; the body limit does not apply to them.
 * `multipart/form-data`: `parse_multipart` and `multipart_form_arg`
   (buffered), `multipart_reader` and `multipart_stream_arg` (streamed).
+* JSON-RPC positional parameters: a `params` array binds to `rpc_arg`
+  providers in order.
 * `405 Method Not Allowed` with `Allow` for known paths, and `HEAD` served
   from `GET` routes with the body stripped; `set_method_not_allowed` and
   `set_head_from_get` switch them off. `matcher::route_shape` exposes the

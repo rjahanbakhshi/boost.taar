@@ -1345,7 +1345,7 @@ BOOST_AUTO_TEST_CASE(test_chunked_response_destroy_clears_external_slot)
     gen.reset();
 
     // Now emit cancellation on the session signal: mimics server shutdown.
-    // Without the fix, this fires the dangling forwarder → UAF.
+    // Without the fix, this fires the dangling forwarder -> UAF.
     session_signal.emit(boost::asio::cancellation_type::all);
 
     // Drain remaining work
@@ -1364,7 +1364,7 @@ BOOST_AUTO_TEST_CASE(test_chunked_response_destroy_clears_external_slot)
 //   2. Session calls next() again: generator co_awaits a long timer
 //   3. Cancellation fires (server shutdown)
 //   4. Without the fix, the forwarder was cleared in step 1 and the timer
-//      co_spawn is never cancelled → session hangs → frame leaks.
+//      co_spawn is never cancelled -> session hangs -> frame leaks.
 BOOST_AUTO_TEST_CASE(test_chunked_response_cancel_after_first_next_completes)
 {
     boost::asio::io_context ioc;

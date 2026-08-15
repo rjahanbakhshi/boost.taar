@@ -15,7 +15,7 @@ in the repository and is updated as items close. In outline:
   types without a JSON representation cannot be RPC or MCP results; REST
   and MCP sessions are separate stores.
 * /Transport/: no HTTP/2 or compression.
-* /JSON-RPC/: positional parameters and cancellation are not supported.
+* /JSON-RPC/: no cancellation of in-flight calls.
 * /MCP/: no prompts, subscriptions, pagination, progress or cancellation
   notifications, server-to-client requests, binary content, SSE
   resumption; `{name}`-only resource templates; stdio is POSIX-only.

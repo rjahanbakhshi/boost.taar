@@ -23,19 +23,19 @@ namespace boost::taar::matcher {
 
     The metadata machinery gives `boost::taar::matcher::operand` a
     *protocol-independent description* of the constraints it enforces, so
-    that auxiliary generators (OpenAPI documents, MCP tool listings, …) can
+    that auxiliary generators (OpenAPI documents, MCP tool listings, ...) can
     introspect a registered route without re-implementing the matcher DSL.
 
     The description is split between the type level and the value level:
 
     @li Each matcher *kind* is a distinct tag type (`method_eq_constraint`,
-        `target_constraint`, `header_eq_constraint`, …) that carries no
+        `target_constraint`, `header_eq_constraint`, ...) that carries no
         captured value. Tag types compose with the boolean combinators
         `and_<L, R>`, `or_<L, R>`, and `not_<X>` to form an AST that
         describes a matcher's shape.
 
     @li The *value* a leaf captured at construction time (the matched verb,
-        the path template string, the required header value, …) lives in
+        the path template string, the required header value, ...) lives in
         the operand's runtime captures tuple. The tuple is keyed by the
         flattened leaf order in the AST and has type
         `data_tuple_t<Metadata>`.

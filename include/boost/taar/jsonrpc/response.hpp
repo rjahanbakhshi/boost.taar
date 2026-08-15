@@ -29,7 +29,7 @@ namespace boost::taar::jsonrpc {
 
     @param id     The id from the originating request. `null` is acceptable
                   and is emitted verbatim. Notifications do not get a
-                  response — callers should not invoke this builder for
+                  response -- callers should not invoke this builder for
                   notification envelopes.
     @param result The method's return value, already in JSON form.
  */
@@ -95,7 +95,7 @@ inline boost::json::value make_error_response(
 ///
 /// Callers that want the spec's default message for the code can pass
 /// `boost::taar::jsonrpc::error_category().message(static_cast<int>(code))`
-/// — kept out of the overload set to avoid an ambiguity between
+/// -- kept out of the overload set to avoid an ambiguity between
 /// "default-message + data" and "explicit message" when the third
 /// argument is a string literal.
 inline boost::json::value make_error_response(

@@ -138,7 +138,7 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_cast_csv)
     BOOST_TEST((rest_arg_cast<std::vector<int>>("1,2,3") == std::vector<int>{1, 2, 3}));
     // Single element
     BOOST_TEST((rest_arg_cast<std::vector<int>>("42") == std::vector<int>{42}));
-    // Empty input → empty container
+    // Empty input -> empty container
     BOOST_TEST((rest_arg_cast<std::vector<int>>("") == std::vector<int>{}));
     // String elements
     BOOST_TEST((rest_arg_cast<std::vector<std::string>>("a,b,c") == std::vector<std::string>{"a", "b", "c"}));

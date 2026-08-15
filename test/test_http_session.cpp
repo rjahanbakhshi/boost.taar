@@ -438,7 +438,7 @@ BOOST_AUTO_TEST_CASE(test_http_session_request_body_limit_no_match)
     net::io_context io;
     taar::session::http http_session;
     http_session.set_request_body_limit(16);
-    // No handlers registered → no-match path
+    // No handlers registered -> no-match path
 
     bool hard_error_called = false;
     http_session.set_hard_error_handler([&](std::exception_ptr) {

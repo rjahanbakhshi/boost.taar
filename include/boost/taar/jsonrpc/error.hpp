@@ -21,7 +21,7 @@ namespace boost::taar::jsonrpc {
     Values follow the spec's reserved range. The general-purpose pre-defined
     codes (`parse_error` through `internal_error`) cover protocol-level
     failures; the application-error range (`-32000`..`-32099`) is left to
-    the caller — the spec reserves it for "implementation-defined server
+    the caller -- the spec reserves it for "implementation-defined server
     errors" and we do not enumerate those here.
 
     The enum is wired to @ref error_category through @c make_error_code
