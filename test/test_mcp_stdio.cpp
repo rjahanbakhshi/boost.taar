@@ -17,6 +17,8 @@
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/posix/stream_descriptor.hpp>
 #include <boost/asio/read_until.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <chrono>
 #include <boost/asio/streambuf.hpp>
 #include <boost/asio/write.hpp>
 #include <boost/json/parse.hpp>
@@ -51,6 +53,13 @@ struct stdio_harness
         BOOST_REQUIRE(::pipe(out_pipe) == 0);
         server.tool("notes/add", "Add", [](notes& n, std::string text) { n.items.push_back(text); return n.items.size(); }, mcp_arg("text"));
         server.tool("notes/announce", "Broadcast", [this] { return server.broadcast("notifications/resources/updated", json::object {{"uri", "notes://all"}}); });
+        server.tool("slow", "Wait", [](int ms) -> taar::awaitable<std::string>
+        {
+            net::steady_timer timer {co_await net::this_coro::executor};
+            timer.expires_after(std::chrono::milliseconds {ms});
+            co_await timer.async_wait(token {});
+            co_return "done";
+        }, mcp_arg("ms"));
         std::signal(SIGPIPE, SIG_IGN);
         // The server owns the read end of stdin and the write end of stdout.
         net::co_spawn(io, [this]() -> taar::awaitable<void>
@@ -145,7 +154,29 @@ BOOST_AUTO_TEST_CASE(test_mcp_stdio_requires_initialize_first)
         BOOST_TEST(init.at("result").at("protocolVersion").as_string() == "2025-11-25");
         co_await send(R"({"jsonrpc":"2.0","id":3,"method":"tools/list"})");
         auto tools = co_await receive();
-        BOOST_TEST(tools.at("result").at("tools").as_array().size() == 2u);
+        BOOST_TEST(tools.at("result").at("tools").as_array().size() == 3u);
+    });
+    BOOST_TEST(h.finished);
+}
+
+BOOST_AUTO_TEST_CASE(test_mcp_stdio_cancelled_notification_interrupts_a_tool_call)
+{
+    using namespace std::chrono_literals;
+    stdio_harness h;
+    h.run([&](auto& send, auto& receive) -> taar::awaitable<void>
+    {
+        co_await send(R"({"jsonrpc":"2.0","id":1,"method":"initialize"})");
+        co_await receive();
+        auto const started = std::chrono::steady_clock::now();
+        co_await send(R"({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"slow","arguments":{"ms":2000}}})");
+        net::steady_timer pause {co_await net::this_coro::executor, 50ms};
+        co_await pause.async_wait(token {});
+        co_await send(R"({"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":2}})");
+        // The cancelled request yields no reply; the next request is answered promptly.
+        co_await send(R"({"jsonrpc":"2.0","id":3,"method":"ping"})");
+        auto pong = co_await receive();
+        BOOST_TEST(pong.at("id").as_int64() == 3);
+        BOOST_TEST((std::chrono::steady_clock::now() - started) < 1s);
     });
     BOOST_TEST(h.finished);
 }

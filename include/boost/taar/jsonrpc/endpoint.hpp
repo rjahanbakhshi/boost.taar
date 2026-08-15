@@ -18,8 +18,13 @@
 #include <boost/taar/jsonrpc/bind.hpp>
 #include <boost/taar/jsonrpc/envelope.hpp>
 #include <boost/taar/jsonrpc/error.hpp>
+#include <boost/taar/jsonrpc/request_scope.hpp>
 #include <boost/taar/jsonrpc/response.hpp>
 #include <boost/taar/matcher/context.hpp>
+#include <boost/asio/any_io_executor.hpp>
+#include <boost/asio/bind_cancellation_slot.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/this_coro.hpp>
 #include <boost/beast/http/field.hpp>
 #include <boost/beast/http/message.hpp>
 #include <boost/beast/http/status.hpp>
@@ -30,6 +35,8 @@
 #include <boost/system/system_error.hpp>
 #include <exception>
 #include <functional>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -154,6 +161,8 @@ class endpoint
 {
 public:
     using contexts_type = handler::contexts<Context...>;
+    /// Contexts a method callable may request: the endpoint's plus the per-request @ref request_scope.
+    using call_contexts = handler::contexts<Context..., request_scope>;
     using request_type = boost::beast::http::request<boost::beast::http::string_body>;
     using response_type = boost::beast::http::response<boost::beast::http::string_body>;
 
@@ -179,7 +188,7 @@ public:
             throw std::logic_error {"jsonrpc::endpoint: method already registered: " + name};
         }
 
-        auto bound = detail::bind_method<call, contexts_type>(
+        auto bound = detail::bind_method<call, call_contexts>(
             std::forward<Callable>(callable), std::move(providers)...);
 
         order_.push_back(name);
@@ -236,7 +245,8 @@ public:
         contexts_type const& ctxs,
         envelope const& env,
         request_type const& request,
-        matcher::context const& mctx)
+        matcher::context const& mctx,
+        std::string_view scope_key = {})
     {
         auto const id = env.id.value_or(boost::json::value {nullptr});
         auto it = methods_.find(env.method);
@@ -246,26 +256,103 @@ public:
             co_return make_error_response(id, error::method_not_found, message_for(error::method_not_found));
         }
 
+        auto scoped = begin_request(env, scope_key, co_await boost::asio::this_coro::executor);
         std::exception_ptr failure;
         boost::json::value result;
         try
         {
-            result = co_await it->second.invoke(ctxs, call {env, request}, mctx);
+            result = co_await run_scoped(scoped.scope, it->second.invoke(
+                std::tuple_cat(ctxs, std::make_tuple(scoped.scope)), call {env, request}, mctx));
         }
         catch (...)
         {
             failure = std::current_exception();
         }
 
+        std::optional<error_info> info;
         if (failure)
         {
-            auto info = map_exception(failure);
-            if (is_notification(env)) co_return std::nullopt;
-            co_return make_error_response(id, info.code, std::move(info.message), std::move(info.data));
+            info = map_exception(failure);      // also for notifications, so the mapper can log
         }
-
         if (is_notification(env)) co_return std::nullopt;
+        if (scoped.scope->cancelled())
+        {
+            co_return make_error_response(id, request_cancelled_code, "Request cancelled");
+        }
+        if (info)
+        {
+            co_return make_error_response(id, info->code, std::move(info->message), std::move(info->data));
+        }
         co_return make_response(id, std::move(result));
+    }
+
+    /// A registered in-flight request; unregisters on destruction.
+    class scoped_request
+    {
+    public:
+        std::shared_ptr<request_scope> scope;
+
+        scoped_request(endpoint* owner, std::string key, std::shared_ptr<request_scope> s)
+            : scope {std::move(s)}, owner_ {owner}, key_ {std::move(key)} {}
+        scoped_request(scoped_request&& o) noexcept
+            : scope {std::move(o.scope)}, owner_ {std::exchange(o.owner_, nullptr)}, key_ {std::move(o.key_)} {}
+        scoped_request(scoped_request const&) = delete;
+        scoped_request& operator=(scoped_request const&) = delete;
+        ~scoped_request() { if (owner_ && !key_.empty()) owner_->end_request(key_, scope.get()); }
+
+    private:
+        endpoint* owner_;
+        std::string key_;
+    };
+
+    /** Register a request as in flight and create its @ref request_scope.
+
+        @param env       The request envelope (notifications get a scope but are not registered).
+        @param scope_key Namespace for ids, e.g. the MCP session id, so that
+                         equal ids from different clients do not collide.
+        @param executor  Executor on which cancellation is emitted.
+    */
+    scoped_request begin_request(envelope const& env, std::string_view scope_key, boost::asio::any_io_executor executor)
+    {
+        auto scope = std::make_shared<request_scope>(env.id.value_or(boost::json::value {nullptr}), std::move(executor));
+        std::string key;
+        if (!is_notification(env))
+        {
+            key = in_flight_key(scope_key, *env.id);
+            std::lock_guard<std::mutex> const g {in_flight_mutex_};
+            in_flight_[key].push_back(scope);
+        }
+        return scoped_request {this, std::move(key), std::move(scope)};
+    }
+
+    /// Run @a op under @a scope's cancellation slot, so cancel() interrupts its awaits.
+    template <typename T>
+    static awaitable<T> run_scoped(std::shared_ptr<request_scope> const& scope, awaitable<T> op)
+    {
+        auto ex = co_await boost::asio::this_coro::executor;
+        co_return co_await boost::asio::co_spawn(ex, std::move(op),
+            boost::asio::bind_cancellation_slot(scope->slot(), use_awaitable));
+    }
+
+    /** Cancel every in-flight request with @a id under @a scope_key.
+
+        Awaits inside the callable are interrupted; the response is a
+        `-32800` error (JSON-RPC) or suppressed (MCP).
+        @returns The number of requests cancelled.
+    */
+    std::size_t cancel(boost::json::value const& id, std::string_view scope_key = {})
+    {
+        std::vector<std::shared_ptr<request_scope>> targets;
+        {
+            std::lock_guard<std::mutex> const g {in_flight_mutex_};
+            auto it = in_flight_.find(in_flight_key(scope_key, id));
+            if (it != in_flight_.end())
+            {
+                for (auto const& w : it->second) if (auto p = w.lock()) targets.push_back(p);
+            }
+        }
+        for (auto const& t : targets) t->cancel();
+        return targets.size();
     }
 
     /** Handle a parsed JSON body (single object or batch array).
@@ -410,8 +497,25 @@ private:
     {
         method_info info;
         std::move_only_function<awaitable<boost::json::value>(
-            contexts_type const&, call const&, matcher::context const&)> invoke;
+            call_contexts const&, call const&, matcher::context const&)> invoke;
     };
+
+    std::mutex in_flight_mutex_;
+    std::unordered_map<std::string, std::vector<std::weak_ptr<request_scope>>> in_flight_;
+
+    static std::string in_flight_key(std::string_view scope_key, boost::json::value const& id)
+    {
+        return std::string {scope_key} + "\n" + boost::json::serialize(id);
+    }
+
+    void end_request(std::string const& key, request_scope const* scope)
+    {
+        std::lock_guard<std::mutex> const g {in_flight_mutex_};
+        auto it = in_flight_.find(key);
+        if (it == in_flight_.end()) return;
+        std::erase_if(it->second, [&](auto const& w) { auto p = w.lock(); return !p || p.get() == scope; });
+        if (it->second.empty()) in_flight_.erase(it);
+    }
 
     std::unordered_map<std::string, entry> methods_;
     std::vector<std::string> order_;

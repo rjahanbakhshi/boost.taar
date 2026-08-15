@@ -63,6 +63,7 @@ target_sources(
         include/boost/taar/jsonrpc/endpoint.hpp
         include/boost/taar/jsonrpc/envelope.hpp
         include/boost/taar/jsonrpc/error.hpp
+        include/boost/taar/jsonrpc/request_scope.hpp
         include/boost/taar/jsonrpc/response.hpp
         include/boost/taar/matcher/detail/callable_with.hpp
         include/boost/taar/matcher/detail/join_with.hpp

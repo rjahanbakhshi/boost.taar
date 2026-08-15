@@ -317,7 +317,11 @@ Where the specifications leave room, Taar makes these choices:
   `params` array; positions count only the `rpc_arg` providers, so HTTP
   providers mixed into a method do not shift them. A short array leaves
   trailing parameters missing; extra elements and unknown members are
-  ignored; a scalar `params` is `-32602`. `std::optional<T>` and `with_default` make a parameter
+  ignored; a scalar `params` is `-32602`.
+* Every request runs under a `request_scope` registered by id (namespaced
+  by the MCP session when there is one). `endpoint::cancel(id)` fires its
+  cancellation slot, so awaits inside the callable are interrupted; a
+  cancelled JSON-RPC request answers `-32800`. `std::optional<T>` and `with_default` make a parameter
   optional. Method names are case-sensitive; registering a name twice
   throws at startup.
 
@@ -342,10 +346,17 @@ Where the specifications leave room, Taar makes these choices:
   Deleting or sweeping the session ends the stream. `notify` does not
   refresh the session's idle timer. A tool reaches its own stream through
   the injected `session_info`.
+* `notifications/cancelled` is handled before the session lock is taken,
+  so it can reach a tool that is running; the tool's awaits are
+  interrupted and, as the specification asks, no response is sent for the
+  cancelled request. `_meta.progressToken` on a request enables
+  `request_scope::report_progress`, which emits `notifications/progress`
+  on the session's stream; without a token the reports are dropped.
 * The stdio transport (`serve_stdio`) runs one implicit session: created
   on `initialize`, removed at end of input. Requests before `initialize`
-  are answered `-32600`. Replies and notifications share one writer so
-  lines never interleave.
+  are answered `-32600`. Requests run concurrently with reading (still
+  serialised per session) so a cancellation can arrive mid-call. Replies
+  and notifications share one writer so lines never interleave.
 
 [heading OpenAPI]
 

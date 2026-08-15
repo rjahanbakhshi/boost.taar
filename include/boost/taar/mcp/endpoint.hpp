@@ -299,6 +299,10 @@ public:
         jsonrpc::endpoint<Context...>>;
     /// Handle to a live session: the store entry in stateful mode, `nullptr` otherwise.
     using session_handle = detail::session_handle_t<Session>;
+    /// Contexts a tool or resource callable may request: the session ones plus the per-request @ref jsonrpc::request_scope.
+    using call_contexts = std::conditional_t<stateful,
+        handler::contexts<Context..., Session, session_info, jsonrpc::request_scope>,
+        handler::contexts<Context..., jsonrpc::request_scope>>;
     using request_type = boost::beast::http::request<boost::beast::http::string_body>;
     using response_type = boost::beast::http::response<boost::beast::http::string_body>;
 
@@ -318,7 +322,7 @@ public:
         {
             throw std::logic_error {"mcp::endpoint: tool already registered: " + name};
         }
-        auto bound = jsonrpc::detail::bind_method<tool_call, contexts_type>(
+        auto bound = jsonrpc::detail::bind_method<tool_call, call_contexts>(
             std::forward<Callable>(callable), std::move(providers)...);
         tool_order_.push_back(name);
         tools_.emplace(name, tool_entry {
@@ -343,7 +347,7 @@ public:
                 throw std::logic_error {"mcp::endpoint: resource already registered: " + uri};
             }
         }
-        auto bound = jsonrpc::detail::bind_method<resource_call, contexts_type>(
+        auto bound = jsonrpc::detail::bind_method<resource_call, call_contexts>(
             std::forward<Callable>(callable), std::move(providers)...);
         resources_.push_back(resource_entry {
             resource_info {uri, std::move(mime_type), std::move(description), is_uri_template(uri), std::move(bound.params)},
@@ -623,8 +627,22 @@ public:
                     continue;
                 }
             }
-            auto reply = co_await run(incoming, env.value(), session, request, mctx);
-            if (reply) send(*reply);
+            if (env->method == "notifications/cancelled")
+            {
+                std::string key;
+                if constexpr (stateful) key = session->key();
+                cancel_from(env.value(), key);
+                continue;
+            }
+            // Requests run concurrently with reading (the session lock still
+            // serialises them) so a cancellation can arrive mid-call.
+            net::co_spawn(ex,
+                [this, incoming, env = std::move(env.value()), session, &request, &mctx, send]() -> awaitable<void>
+                {
+                    auto reply = co_await run(incoming, env, session, request, mctx);
+                    if (reply) send(*reply);
+                },
+                net::detached);
         }
 
         if constexpr (stateful)
@@ -730,15 +748,76 @@ private:
     {
         tool_info info;
         std::move_only_function<awaitable<boost::json::value>(
-            contexts_type const&, tool_call const&, matcher::context const&)> invoke;
+            call_contexts const&, tool_call const&, matcher::context const&)> invoke;
     };
 
     struct resource_entry
     {
         resource_info info;
         std::move_only_function<awaitable<boost::json::value>(
-            contexts_type const&, resource_call const&, matcher::context const&)> invoke;
+            call_contexts const&, resource_call const&, matcher::context const&)> invoke;
     };
+
+    /// The session id the contexts belong to (empty in stateless mode).
+    static std::string scope_key_of(contexts_type const& ctxs)
+    {
+        if constexpr (stateful) return std::get<sizeof...(Context) + 1>(ctxs)->id;
+        else return {};
+    }
+
+    /// Notification sink for a request: the session's stream, if any.
+    std::function<void(boost::json::value)> notification_sink(contexts_type const& ctxs)
+    {
+        if constexpr (stateful)
+        {
+            auto entry = sessions_.store.peek(scope_key_of(ctxs));
+            if (!entry) return {};
+            return [mailbox = entry->context()->mailbox](boost::json::value msg)
+            {
+                mailbox->push(boost::json::serialize(msg));
+            };
+        }
+        else
+        {
+            return {};
+        }
+    }
+
+    /// Register the request, attach progress token and sink, and append the scope to the contexts.
+    typename rpc_type::scoped_request begin_scope(
+        contexts_type const& ctxs,
+        jsonrpc::envelope const& env,
+        boost::asio::any_io_executor executor)
+    {
+        auto scoped = rpc_.begin_request(env, scope_key_of(ctxs), std::move(executor));
+        if (env.params)
+        {
+            if (auto const* obj = env.params->if_object())
+            {
+                if (auto const* meta = obj->if_contains("_meta"); meta && meta->is_object())
+                {
+                    if (auto const* token = meta->as_object().if_contains("progressToken"))
+                    {
+                        scoped.scope->progress_token = *token;
+                    }
+                }
+            }
+        }
+        scoped.scope->notify = notification_sink(ctxs);
+        return scoped;
+    }
+
+    /// Cancel an in-flight request named by a `notifications/cancelled` envelope.
+    void cancel_from(jsonrpc::envelope const& env, std::string_view scope_key)
+    {
+        if (!env.params) return;
+        auto const* obj = env.params->if_object();
+        if (obj == nullptr) return;
+        if (auto const* id = obj->if_contains("requestId"))
+        {
+            rpc_.cancel(*id, scope_key);
+        }
+    }
 
     static response_type plain(request_type const& request, boost::beast::http::status status, std::string body)
     {
@@ -813,6 +892,19 @@ private:
         {
             co_return rpc_type::to_http(request,
                 error_envelope(rpc_type::recoverable_id(body), jsonrpc::error::invalid_request));
+        }
+
+        if (env->method == "notifications/cancelled")
+        {
+            // Must not wait for the session lock: the request to cancel holds it.
+            std::string_view sid;
+            if constexpr (stateful)
+            {
+                auto h = request.find("Mcp-Session-Id");
+                if (h != request.end()) sid = h->value();
+            }
+            cancel_from(env.value(), sid);
+            co_return rpc_type::to_http(request, std::nullopt);
         }
 
         if (env->method == "initialize")
@@ -1009,7 +1101,12 @@ private:
         auto const id = env.id.value_or(boost::json::value {nullptr});
         std::optional<boost::json::value> out;
 
-        if (env.method.starts_with("notifications/"))
+        if (env.method == "notifications/cancelled")
+        {
+            cancel_from(env, scope_key_of(ctxs));
+            co_return std::nullopt;
+        }
+        else if (env.method.starts_with("notifications/"))
         {
             co_return std::nullopt;
         }
@@ -1039,7 +1136,7 @@ private:
         }
         else
         {
-            co_return co_await rpc_.dispatch(ctxs, env, request, mctx);
+            co_return co_await rpc_.dispatch(ctxs, env, request, mctx, scope_key_of(ctxs));
         }
 
         if (jsonrpc::is_notification(env)) co_return std::nullopt;
@@ -1107,7 +1204,7 @@ private:
         return result;
     }
 
-    awaitable<boost::json::value> call_tool(
+    awaitable<std::optional<boost::json::value>> call_tool(
         contexts_type const& ctxs,
         jsonrpc::envelope const& env,
         request_type const& request,
@@ -1140,17 +1237,23 @@ private:
             arguments = &a->as_object();
         }
 
+        auto scoped = begin_scope(ctxs, env, co_await boost::asio::this_coro::executor);
         std::exception_ptr failure;
         boost::json::value value;
         try
         {
-            value = co_await it->second.invoke(ctxs, tool_call {env, *arguments, request}, mctx);
+            value = co_await rpc_type::run_scoped(scoped.scope, it->second.invoke(
+                std::tuple_cat(ctxs, std::make_tuple(scoped.scope)), tool_call {env, *arguments, request}, mctx));
         }
         catch (...)
         {
             failure = std::current_exception();
         }
 
+        if (scoped.scope->cancelled())
+        {
+            co_return std::nullopt;     // the client asked us to stop: no response
+        }
         if (failure)
         {
             if (auto text = map_tool_error(failure))
@@ -1182,7 +1285,7 @@ private:
         }
     }
 
-    awaitable<boost::json::value> read_resource(
+    awaitable<std::optional<boost::json::value>> read_resource(
         contexts_type const& ctxs,
         jsonrpc::envelope const& env,
         request_type const& request,
@@ -1226,15 +1329,21 @@ private:
             co_return error_envelope(id, resource_not_found_code, "Resource not found: " + uri);
         }
 
+        auto scoped = begin_scope(ctxs, env, co_await boost::asio::this_coro::executor);
         std::exception_ptr failure;
         boost::json::value value;
         try
         {
-            value = co_await match->invoke(ctxs, resource_call {env, uri, args, request}, mctx);
+            value = co_await rpc_type::run_scoped(scoped.scope, match->invoke(
+                std::tuple_cat(ctxs, std::make_tuple(scoped.scope)), resource_call {env, uri, args, request}, mctx));
         }
         catch (...)
         {
             failure = std::current_exception();
+        }
+        if (scoped.scope->cancelled())
+        {
+            co_return std::nullopt;
         }
         if (failure)
         {

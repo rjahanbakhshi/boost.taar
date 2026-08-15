@@ -16,6 +16,8 @@
 #include <boost/asio/detached.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
+#include <chrono>
+#include <boost/asio/steady_timer.hpp>
 #include <boost/beast/http/message.hpp>
 #include <boost/beast/http/string_body.hpp>
 #include <boost/json/parse.hpp>
@@ -515,6 +517,47 @@ BOOST_AUTO_TEST_CASE(test_jsonrpc_endpoint_http_providers_and_schemas)
     BOOST_TEST(!infos[0].params[1].required);
     BOOST_TEST(infos[1].params[0].schema.at("type").as_string() == "array");
     BOOST_TEST(infos[1].params[0].schema.at("items").at("type").as_string() == "integer");
+}
+
+BOOST_AUTO_TEST_CASE(test_jsonrpc_endpoint_request_scope_and_cancellation)
+{
+    using namespace std::chrono_literals;
+    jsonrpc::endpoint<calc_session> rpc;
+    rpc.method("whoami", [](jsonrpc::request_scope const& scope) { return scope.id(); });
+    rpc.method("slow", [](jsonrpc::request_scope const& scope, int ms) -> taar::awaitable<std::string>
+    {
+        net::steady_timer timer {co_await net::this_coro::executor};
+        timer.expires_after(std::chrono::milliseconds {ms});
+        co_await timer.async_wait(taar::use_awaitable);     // interrupted by cancel()
+        co_return scope.cancelled() ? "cancelled" : "done";
+    }, rpc_arg("ms"));
+
+    auto echoed = body_json(post(rpc, R"({"jsonrpc":"2.0","id":"abc","method":"whoami"})"));
+    BOOST_TEST(echoed.at("result").as_string() == "abc");
+    BOOST_TEST(body_json(post(rpc, R"({"jsonrpc":"2.0","id":1,"method":"slow","params":{"ms":1}})")).at("result").as_string() == "done");
+
+    // Cancel a call in flight: the method's wait is interrupted and the
+    // response is a -32800 error, well before the 2 s timer would fire.
+    http::request<http::string_body> req {http::verb::post, "/rpc", 11};
+    req.set(http::field::content_type, "application/json");
+    req.body() = R"({"jsonrpc":"2.0","id":7,"method":"slow","params":{"ms":2000}})";
+    req.prepare_payload();
+    contexts<calc_session> ctxs {std::make_shared<calc_session>()};
+    taar::matcher::context mctx;
+    auto handler = rpc.handler();
+    net::io_context io;
+    std::optional<http::response<http::string_body>> out;
+    auto const started = std::chrono::steady_clock::now();
+    net::co_spawn(io, [&]() -> taar::awaitable<void> { out = co_await handler(ctxs, req, mctx); }, net::detached);
+    net::steady_timer cancel_timer {io, 50ms};
+    cancel_timer.async_wait([&](auto) { BOOST_TEST(rpc.cancel(json::value {7}) == 1u); });
+    io.run();
+    auto const elapsed = std::chrono::steady_clock::now() - started;
+    BOOST_TEST(elapsed < 1s);
+    auto v = body_json(*out);
+    BOOST_TEST(v.at("error").at("code").as_int64() == -32800);
+    BOOST_TEST(v.at("id").as_int64() == 7);
+    BOOST_TEST(rpc.cancel(json::value {7}) == 0u);           // nothing left in flight
 }
 
 } // namespace

@@ -14,6 +14,8 @@
 #include <boost/asio/detached.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/post.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <chrono>
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/message.hpp>
 #include <boost/beast/http/string_body.hpp>
@@ -29,6 +31,7 @@ namespace http = boost::beast::http;
 namespace json = boost::json;
 namespace taar = boost::taar;
 namespace mcp = boost::taar::mcp;
+namespace jsonrpc = boost::taar::jsonrpc;
 
 struct chat_session { int messages = 0; };
 using endpoint = mcp::endpoint<chat_session>;
@@ -234,6 +237,89 @@ BOOST_AUTO_TEST_CASE(test_mcp_session_info_lets_a_tool_address_its_own_stream)
     BOOST_REQUIRE(msg.has_value());
     BOOST_TEST(msg->find("notifications/message") != std::string::npos);
     BOOST_TEST(msg->find("\"data\":1") != std::string::npos);
+}
+
+BOOST_AUTO_TEST_CASE(test_mcp_progress_notifications_reach_the_stream)
+{
+    endpoint e {{.name = "s", .version = "1"}};
+    e.tool("export", "Report progress", [](jsonrpc::request_scope const& scope, int items)
+    {
+        for (int i = 1; i <= items; ++i) scope.report_progress(i, items, "step " + std::to_string(i));
+        return items;
+    }, mcp::mcp_arg("items"));
+    auto sid = initialize(e);
+
+    stream_reader r {open_stream(e, sid)};
+    BOOST_REQUIRE(r.next().has_value());
+    auto first = r.next([&]
+    {
+        auto res = json::parse(post(e, http::verb::post,
+            R"({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"export","arguments":{"items":2},"_meta":{"progressToken":"tok-1"}}})", sid).body());
+        BOOST_TEST(res.at("result").at("structuredContent").at("result").as_int64() == 2);
+    });
+    BOOST_REQUIRE(first.has_value());
+    auto data = first->substr(std::string {"event: message\ndata: "}.size());
+    auto msg = json::parse(data.substr(0, data.size() - 2));
+    BOOST_TEST(msg.at("method").as_string() == "notifications/progress");
+    BOOST_TEST(msg.at("params").at("progressToken").as_string() == "tok-1");
+    BOOST_TEST(msg.at("params").at("progress").to_number<double>() == 1.0);
+    BOOST_TEST(msg.at("params").at("total").to_number<double>() == 2.0);
+    BOOST_TEST(msg.at("params").at("message").as_string() == "step 1");
+    auto second = r.next();
+    BOOST_REQUIRE(second.has_value());
+    BOOST_TEST(second->find("\"progress\":2") != std::string::npos);
+
+    // Without a progressToken the reports are dropped silently.
+    auto quiet = json::parse(post(e, http::verb::post,
+        R"({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"export","arguments":{"items":1}}})", sid).body());
+    BOOST_TEST(quiet.at("result").at("structuredContent").at("result").as_int64() == 1);
+}
+
+BOOST_AUTO_TEST_CASE(test_mcp_cancelled_notification_interrupts_a_tool_call)
+{
+    using namespace std::chrono_literals;
+    endpoint e {{.name = "s", .version = "1"}};
+    e.tool("slow", "Wait", [](jsonrpc::request_scope const&, int ms) -> taar::awaitable<std::string>
+    {
+        net::steady_timer timer {co_await net::this_coro::executor};
+        timer.expires_after(std::chrono::milliseconds {ms});
+        co_await timer.async_wait(taar::use_awaitable);
+        co_return "done";
+    }, mcp::mcp_arg("ms"));
+    auto sid = initialize(e);
+
+    // Start the slow call and, 50 ms later, post notifications/cancelled on
+    // the same session. The notification bypasses the session lock.
+    http::request<http::string_body> req {http::verb::post, "/mcp", 11};
+    req.set(http::field::content_type, "application/json");
+    req.set("Mcp-Session-Id", sid);
+    req.body() = R"({"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"slow","arguments":{"ms":2000}}})";
+    req.prepare_payload();
+    http::request<http::string_body> cancel {http::verb::post, "/mcp", 11};
+    cancel.set(http::field::content_type, "application/json");
+    cancel.set("Mcp-Session-Id", sid);
+    cancel.body() = R"({"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":9,"reason":"user"}})";
+    cancel.prepare_payload();
+
+    taar::matcher::context mctx;
+    auto handler = e.handler();
+    net::io_context io;
+    std::optional<http::response<http::string_body>> slow_res;
+    std::optional<http::response<http::string_body>> cancel_res;
+    auto const started = std::chrono::steady_clock::now();
+    net::co_spawn(io, [&]() -> taar::awaitable<void> { slow_res = co_await handler(taar::handler::contexts<> {}, req, mctx); }, net::detached);
+    net::steady_timer t {io, 50ms};
+    t.async_wait([&](auto)
+    {
+        net::co_spawn(io, [&]() -> taar::awaitable<void> { cancel_res = co_await handler(taar::handler::contexts<> {}, cancel, mctx); }, net::detached);
+    });
+    io.run();
+    BOOST_TEST((std::chrono::steady_clock::now() - started) < 1s);
+    BOOST_REQUIRE(cancel_res.has_value());
+    BOOST_TEST(cancel_res->result() == http::status::accepted);
+    BOOST_REQUIRE(slow_res.has_value());
+    BOOST_TEST(slow_res->result() == http::status::accepted);     // cancelled: no response envelope
+    BOOST_TEST(slow_res->body().empty());
 }
 
 } // namespace

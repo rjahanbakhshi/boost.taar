@@ -288,6 +288,23 @@ providers such as `header_arg` work on tools and JSON-RPC methods too:
     rpc.method("whoami", [](std::string token) { return token; },
         taar::handler::header_arg(http::field::authorization));
 
+A tool or method may also declare a `jsonrpc::request_scope const&`: it
+carries the request id, reports MCP progress when the client sent a
+`progressToken`, and is cancelled by `notifications/cancelled` (or
+`rpc.cancel(id)`), interrupting whatever the callable awaits:
+
+    mcp.tool("export", "Long running",
+        [](taar::jsonrpc::request_scope const& scope, int items) -> taar::awaitable<int>
+        {
+            for (int i = 1; i <= items && !scope.cancelled(); ++i)
+            {
+                co_await step(i);
+                scope.report_progress(i, items);
+            }
+            co_return items;
+        },
+        taar::mcp::mcp_arg("items"));
+
 The same endpoint serves the stdio transport that desktop clients launch
 locally:
 

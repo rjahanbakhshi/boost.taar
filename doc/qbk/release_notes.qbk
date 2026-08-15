@@ -44,6 +44,9 @@
   (buffered), `multipart_reader` and `multipart_stream_arg` (streamed).
 * JSON-RPC positional parameters: a `params` array binds to `rpc_arg`
   providers in order.
+* `jsonrpc::request_scope`: per-request id, cancellation and notification
+  sink injectable into methods and tools; `endpoint::cancel(id)`; MCP
+  `notifications/cancelled` and `notifications/progress`.
 * `405 Method Not Allowed` with `Allow` for known paths, and `HEAD` served
   from `GET` routes with the body stripped; `set_method_not_allowed` and
   `set_head_from_get` switch them off. `matcher::route_shape` exposes the

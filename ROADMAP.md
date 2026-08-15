@@ -25,16 +25,10 @@ rather than planned.
 
 - HTTP/2 and response compression are out of scope for now.
 
-## JSON-RPC
-
-- No cancellation of in-flight calls.
-
 ## MCP
 
 - Capabilities not implemented: prompts, `resources/subscribe`,
   `completion/complete`, `logging/setLevel`, list pagination cursors.
-- No `progressToken` progress notifications tied to a request, and no
-  `notifications/cancelled` handling.
 - No server-to-client requests (sampling, elicitation, `roots/list`);
   client responses posted to the endpoint are acknowledged and dropped.
 - Tool results are text plus `structuredContent`; image, audio and
@@ -62,6 +56,8 @@ rather than planned.
 
 ## Recently closed
 
+- Request cancellation (`request_scope`, `endpoint::cancel`, MCP
+  `notifications/cancelled`) and MCP progress notifications.
 - JSON-RPC positional parameters.
 - `405 Method Not Allowed` with `Allow`, and `HEAD` served from `GET`.
 - `multipart/form-data`, buffered (`multipart_form_arg`) and streamed
