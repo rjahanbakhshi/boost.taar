@@ -411,8 +411,8 @@ Where the specifications leave room, Taar makes these choices:
   (or `Authorization` for an `http` scheme) is documented as that
   requirement instead of a parameter. `anonymous` emits `security: []`.
 * `boost::describe`d types carry a `title` and are hoisted into
-  `components.schemas`, referenced by `$ref`; `set_inline_schemas` keeps
-  them in place.
+  `components.schemas`, where parameters and responses refer to them by
+  JSON Reference; `set_inline_schemas` keeps them in place.
 * The response schema is derived from the callable's return type when the
   built-in conversions apply; a hand-written `http::response` documents
   only a generic `200`. Per-operation `responses` override the default.

@@ -92,7 +92,7 @@ struct constraints
 
         rest(&list, constrained(with_default(query_arg("page"), 1), {.minimum = 1}))
 
-    A violation is reported as @ref error::constraint_violated with a
+    A violation is reported as `error::constraint_violated` with a
     message naming the argument and the rule (`400` on REST, `-32602` on
     JSON-RPC, a tool error on MCP). An absent optional value is not checked.
 */
@@ -201,9 +201,11 @@ private:
     }
 };
 
+/// @cond
 // CTAD
 template <typename T>
 constrained(T, constraints) -> constrained<std::remove_cvref_t<T>>;
+/// @endcond
 
 } // namespace boost::taar::handler
 

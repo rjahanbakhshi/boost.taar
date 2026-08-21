@@ -48,8 +48,9 @@
   JSON Schema keywords on REST, JSON-RPC and MCP; `error::constraint_violated`.
 * OpenAPI: `default` from `with_default`, security schemes
   (`add_security_scheme`, `set_security`, `operation::security`,
-  inferred from credential headers), `components.schemas` with `$ref`
-  for described types (`set_inline_schemas` to opt out).
+  inferred from credential headers), `components.schemas` holding the
+  described types, referenced from operations (`set_inline_schemas` to
+  opt out).
 * MCP server-to-client requests: `endpoint::request`, `create_message`
   (sampling), `elicit`, `list_roots`; `client_capabilities` and
   `client_info` on `session_info`; `client_error`; `on_client_notification`.
