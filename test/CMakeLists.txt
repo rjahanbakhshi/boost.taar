@@ -24,6 +24,7 @@ target_sources(
         test_chunk_body_from.cpp
         test_chunked_response.cpp
         test_connection_context.cpp
+        test_constrained.cpp
         test_constexpr_string.cpp
         test_context_store.cpp
         test_cookies.cpp

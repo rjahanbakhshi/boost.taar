@@ -37,9 +37,8 @@ rather than planned.
 
 ## OpenAPI
 
-- Default values from `with_default` are not emitted.
-- No security schemes, validation constraints (ranges, patterns), examples,
-  or `components` reuse; every schema is inlined.
+- Only `boost::describe`d types are hoisted into `components.schemas`;
+  parameters and responses are not shared as components.
 - Query parameters only bind scalars and CSV lists; repeated query keys
   (`?tag=a&tag=b`) are rejected as ambiguous.
 
@@ -47,10 +46,11 @@ rather than planned.
 
 - `with_session` cannot wrap a streaming handler, so a per-user SSE stream
   must read the session cookie by hand.
-- No declarative validation on arguments.
 
 ## Recently closed
 
+- `handler::constrained` (declarative validation on all surfaces), OpenAPI
+  defaults, security schemes and `components.schemas`.
 - MCP server-to-client requests (`request`, `create_message`, `elicit`,
   `list_roots`), client capabilities on `session_info`, and
   `on_client_notification`.

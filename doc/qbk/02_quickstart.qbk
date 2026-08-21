@@ -349,6 +349,21 @@ Describe routes as you register them and serve the generated document:
     http_session.register_request_handler(
         method == http::verb::get && target == "/openapi.json", openapi.handler());
 
+Wrap a provider in `constrained` to validate the value and document the
+rule in one place; defaults from `with_default` appear in the schema as
+well. Security schemes are registered once and inferred from the routes
+that read them:
+
+    openapi.add_security_scheme("bearer", taar::openapi::security_scheme::bearer("JWT"));
+
+    http_session.register_request_handler(
+        method == http::verb::get && target == "/api/items",
+        taar::handler::rest(&list_items,
+            taar::handler::constrained(
+                taar::handler::with_default(taar::handler::query_arg("page"), 1), {.minimum = 1}),
+            taar::handler::header_arg(http::field::authorization)),
+        openapi.describe("List items"));   // page: default 1, minimum 1; security: bearer
+
 [heading TLS]
 
 HTTPS is the same session over a TLS stream, accepted by `server::tls`,

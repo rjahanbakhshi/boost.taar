@@ -39,6 +39,7 @@ enum class error
     invalid_boolean_format,     ///< A boolean argument could not be parsed.
     invalid_number_format,      ///< A numeric argument could not be parsed.
     late_chunk_metadata,        ///< Chunked metadata was yielded after body data.
+    constraint_violated,        ///< An argument failed its declared constraints.
 };
 
 /// Singleton @c boost::system::error_category instance for the @c error enum.
@@ -84,6 +85,8 @@ inline boost::system::error_category const& error_category() noexcept
                 return "Invalid number format";
             case error::late_chunk_metadata:
                 return "Chunk metadata yielded after data.";
+            case error::constraint_violated:
+                return "Argument constraint violated";
             }
 
             return "(Unknown error)";

@@ -400,6 +400,19 @@ Where the specifications leave room, Taar makes these choices:
 * Header and cookie constraints become required parameters with a `const`
   schema. Path placeholders not bound by a `path_arg` are still declared;
   a greedy `{*name}` renders as `{name}` with a note.
+* `with_default` values render as `default`; `constrained(provider,
+  {...})` renders its rules as JSON Schema keywords (`minimum`,
+  `pattern`, `enum`, `minItems`, `format`, `examples`, ...) and enforces
+  them at request time on every surface (`400`, `-32602`, tool error),
+  so the document and the behaviour cannot drift apart.
+* `add_security_scheme` fills `components.securitySchemes`;
+  `set_security` and `operation::security` state requirements, and a
+  route or provider reading a scheme's header, cookie or query parameter
+  (or `Authorization` for an `http` scheme) is documented as that
+  requirement instead of a parameter. `anonymous` emits `security: []`.
+* `boost::describe`d types carry a `title` and are hoisted into
+  `components.schemas`, referenced by `$ref`; `set_inline_schemas` keeps
+  them in place.
 * The response schema is derived from the callable's return type when the
   built-in conversions apply; a hand-written `http::response` documents
   only a generic `200`. Per-operation `responses` override the default.

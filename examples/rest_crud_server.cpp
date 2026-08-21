@@ -174,6 +174,7 @@ int main(int argc, char* argv[])
     using taar::handler::json_body_arg;
     using taar::handler::multipart_form_arg;
     using taar::handler::with_default;
+    using taar::handler::constrained;
     using taar::handler::description;
 
     char const* port = argc > 1 ? argv[1] : "8080";
@@ -186,8 +187,8 @@ int main(int argc, char* argv[])
     session.register_request_handler(
         method == http::verb::get && target == "/todos",
         rest([&](int page, int per_page) { return store.list(page, per_page); },
-            with_default(query_arg("page", "1-based page number"), 1),
-            with_default(query_arg("per_page", "Items per page"), 20)),
+            constrained(with_default(query_arg("page", "1-based page number"), 1), {.minimum = 1}),
+            constrained(with_default(query_arg("per_page", "Items per page"), 20), {.minimum = 1, .maximum = 100})),
         openapi.describe({.summary = "List todos", .tags = {"todos"}}));
 
     session.register_request_handler(

@@ -9,6 +9,7 @@
 
 #include "e2e.hpp"
 #include <boost/taar/openapi/generator.hpp>
+#include <boost/taar/handler/constrained.hpp>
 #include <boost/taar/session/http.hpp>
 #include <boost/taar/handler/rest.hpp>
 #include <boost/taar/handler/rest_arg.hpp>
@@ -349,6 +350,7 @@ BOOST_AUTO_TEST_CASE(test_openapi_described_types_render_full_schemas)
 {
     taar::session::http session;
     openapi::generator gen {{.title = "t", .version = "1"}};
+    gen.set_inline_schemas();
     session.register_request_handler(
         method == http::verb::post && target == "/todos",
         rest(&create_todo, json_body_arg(description {"New todo"})),
@@ -372,6 +374,93 @@ BOOST_AUTO_TEST_CASE(test_openapi_described_types_render_full_schemas)
     auto const& listed = doc.at("paths").at("/todos").at("get").at("responses").at("200").at("content").at("application/json").at("schema");
     BOOST_TEST(listed.at("type").as_string() == "array");
     BOOST_TEST(listed.at("items").at("properties").at("title").at("type").as_string() == "string");
+    BOOST_TEST(listed.at("items").at("title").as_string().ends_with("todo"));
+    BOOST_TEST(!doc.contains("components"));
+}
+
+BOOST_AUTO_TEST_CASE(test_openapi_components_defaults_constraints_and_security)
+{
+    using taar::handler::constrained;
+    taar::session::http session;
+    openapi::generator gen {{.title = "t", .version = "1"}};
+    gen.add_security_scheme("bearer", openapi::security_scheme::bearer("JWT", "Access token"));
+    gen.add_security_scheme("api_key", openapi::security_scheme::api_key_header("X-Api-Key"));
+    gen.set_security({"bearer"});
+    BOOST_CHECK_THROW(gen.add_security_scheme("bearer", openapi::security_scheme::basic()), std::logic_error);
+
+    session.register_request_handler(
+        method == http::verb::get && target == "/todos",
+        rest([](int, std::string) { return list_todos(); },
+            constrained(with_default(query_arg("page", "Page"), 1), {.minimum = 1}),
+            constrained(query_arg("sort"), {.one_of = {"asc", "desc"}, .example = "asc"})),
+        gen.describe("List"));
+    session.register_request_handler(
+        method == http::verb::post && target == "/todos" && header("X-Api-Key") == "k",
+        rest(&create_todo, json_body_arg()),
+        gen.describe({.summary = "Create", .security = {"api_key"}}));
+    session.register_request_handler(
+        method == http::verb::delete_ && target == "/todos/{id}",
+        rest(&delete_user, path_arg("id"), header_arg(http::field::authorization, "Bearer token")),
+        gen.describe("Delete"));
+    session.register_request_handler(
+        method == http::verb::get && target == "/health",
+        rest([] { return 1; }),
+        gen.describe({.summary = "Health", .anonymous = true}));
+
+    auto doc = gen.document();
+    auto const& paths = doc.at("paths");
+
+    // Defaults and constraint keywords on parameters.
+    auto const& lp = paths.at("/todos").at("get").at("parameters").as_array();
+    BOOST_REQUIRE(lp.size() == 2u);
+    BOOST_TEST(lp[0].at("schema").at("default").as_int64() == 1);
+    BOOST_TEST(lp[0].at("schema").at("minimum").as_int64() == 1);
+    BOOST_TEST(!lp[0].as_object().contains("required"));
+    BOOST_TEST(lp[1].at("schema").at("enum").as_array().size() == 2u);
+    BOOST_TEST(lp[1].at("schema").at("examples").as_array()[0].as_string() == "asc");
+
+    // Described types are hoisted into components and referenced.
+    auto const& body_schema = paths.at("/todos").at("post").at("requestBody").at("content").at("application/json").at("schema");
+    BOOST_REQUIRE(body_schema.as_object().contains("$ref"));
+    std::string const ref {body_schema.at("$ref").as_string()};
+    BOOST_TEST(ref.starts_with("#/components/schemas/"));
+    BOOST_TEST(ref.ends_with("todo_input"));
+    auto const& schemas = doc.at("components").at("schemas").as_object();
+    auto const& input = schemas.at(ref.substr(std::string {"#/components/schemas/"}.size()));
+    BOOST_TEST(input.at("properties").at("title").at("type").as_string() == "string");
+    auto const& listed = paths.at("/todos").at("get").at("responses").at("200").at("content").at("application/json").at("schema");
+    BOOST_TEST(listed.at("type").as_string() == "array");
+    BOOST_TEST(std::string {listed.at("items").at("$ref").as_string()}.ends_with("todo"));
+    BOOST_TEST(schemas.size() == 2u);
+
+    // Security: document default, explicit, inferred from the Authorization header, and anonymous.
+    BOOST_TEST(doc.at("security").as_array()[0].as_object().contains("bearer"));
+    auto const& ss = doc.at("components").at("securitySchemes");
+    BOOST_TEST(ss.at("bearer").at("type").as_string() == "http");
+    BOOST_TEST(ss.at("bearer").at("scheme").as_string() == "bearer");
+    BOOST_TEST(ss.at("bearer").at("bearerFormat").as_string() == "JWT");
+    BOOST_TEST(ss.at("bearer").at("description").as_string() == "Access token");
+    BOOST_TEST(ss.at("api_key").at("type").as_string() == "apiKey");
+    BOOST_TEST(ss.at("api_key").at("in").as_string() == "header");
+    BOOST_TEST(ss.at("api_key").at("name").as_string() == "X-Api-Key");
+
+    auto const& post = paths.at("/todos").at("post");
+    BOOST_TEST(post.at("security").as_array()[0].as_object().contains("api_key"));
+    BOOST_TEST(!post.as_object().contains("parameters"));    // the X-Api-Key constraint is the credential
+    auto const& del = paths.at("/todos/{id}").at("delete");
+    BOOST_TEST(del.at("security").as_array()[0].as_object().contains("bearer"));
+    BOOST_REQUIRE(del.at("parameters").as_array().size() == 1u);
+    BOOST_TEST(del.at("parameters").as_array()[0].at("name").as_string() == "id");
+    BOOST_TEST(paths.at("/health").at("get").at("security").as_array().empty());
+    BOOST_TEST(!paths.at("/todos").at("get").as_object().contains("security"));   // inherits the document's
+
+    // Inline mode keeps schemas in place; an unknown scheme name is a configuration error.
+    gen.set_inline_schemas();
+    auto inlined = gen.document();
+    BOOST_TEST(inlined.at("paths").at("/todos").at("post").at("requestBody").at("content").at("application/json").at("schema").at("type").as_string() == "object");
+    BOOST_TEST(!inlined.at("components").as_object().contains("schemas"));
+    gen.set_security({"nope"});
+    BOOST_CHECK_THROW(gen.document(), std::logic_error);
 }
 
 } // namespace

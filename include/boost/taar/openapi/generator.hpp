@@ -70,6 +70,50 @@ struct operation
     /// Status code -> description. Replaces the generated default response when non-empty.
     std::map<std::string, std::string> responses {};
     bool deprecated = false;
+    /// Security scheme names this operation accepts (alternatives). Empty
+    /// inherits the document's `security`, or what the generator infers
+    /// from header/cookie constraints that match a registered scheme.
+    std::vector<std::string> security {};
+    /// Emit `security: []`: no credentials even when the document requires some.
+    bool anonymous = false;
+};
+
+/// An entry of `components.securitySchemes`. Use the factories or fill the fields.
+struct security_scheme
+{
+    std::string type;                   ///< "http", "apiKey", "oauth2", "openIdConnect" or "mutualTLS".
+    std::string description {};
+    std::string scheme {};              ///< http: "bearer", "basic", ...
+    std::string bearer_format {};       ///< http bearer: a hint such as "JWT".
+    std::string in {};                  ///< apiKey: "header", "query" or "cookie".
+    std::string name {};                ///< apiKey: the header, query or cookie name.
+    std::string open_id_connect_url {}; ///< openIdConnect.
+    boost::json::object flows {};       ///< oauth2: the flows object, passed through.
+
+    static security_scheme bearer(std::string bearer_format = {}, std::string description = {})
+    {
+        return {.type = "http", .description = std::move(description), .scheme = "bearer", .bearer_format = std::move(bearer_format)};
+    }
+
+    static security_scheme basic(std::string description = {})
+    {
+        return {.type = "http", .description = std::move(description), .scheme = "basic"};
+    }
+
+    static security_scheme api_key_header(std::string header_name, std::string description = {})
+    {
+        return {.type = "apiKey", .description = std::move(description), .in = "header", .name = std::move(header_name)};
+    }
+
+    static security_scheme api_key_cookie(std::string cookie_name, std::string description = {})
+    {
+        return {.type = "apiKey", .description = std::move(description), .in = "cookie", .name = std::move(cookie_name)};
+    }
+
+    static security_scheme api_key_query(std::string parameter_name, std::string description = {})
+    {
+        return {.type = "apiKey", .description = std::move(description), .in = "query", .name = std::move(parameter_name)};
+    }
 };
 
 namespace detail {
@@ -145,6 +189,40 @@ inline std::string lower(std::string s)
     return s;
 }
 
+inline bool iequals(std::string_view a, std::string_view b)
+{
+    return a.size() == b.size() && std::ranges::equal(a, b, [](char x, char y)
+    {
+        return std::tolower(static_cast<unsigned char>(x)) == std::tolower(static_cast<unsigned char>(y));
+    });
+}
+
+/// A `components.schemas` key from a schema `title` (a C++ type name): `ns::T` -> `ns.T`.
+inline std::string component_name(std::string_view title)
+{
+    std::string out;
+    for (std::size_t i = 0; i < title.size(); ++i)
+    {
+        char const c = title[i];
+        if (c == ':' && i + 1 < title.size() && title[i + 1] == ':')
+        {
+            out += '.';
+            ++i;
+        }
+        else if (std::isalnum(static_cast<unsigned char>(c)) || c == '.' || c == '_' || c == '-')
+        {
+            out += c;
+        }
+        else
+        {
+            out += '_';
+        }
+    }
+    while (!out.empty() && (out.front() == '_' || out.front() == '.')) out.erase(0, 1);
+    while (!out.empty() && (out.back() == '_' || out.back() == '.')) out.pop_back();
+    return out.empty() ? std::string {"Schema"} : out;
+}
+
 } // namespace detail
 
 /** Collects route descriptions at registration time and renders an
@@ -185,6 +263,41 @@ public:
     generator& add_server(std::string url, std::string description = {})
     {
         servers_.push_back({std::move(url), std::move(description)});
+        return *this;
+    }
+
+    /** Register a security scheme under @a name (`components.securitySchemes`).
+
+        Besides being available to `operation::security` and
+        @ref set_security, a scheme is inferred for any operation whose
+        route or `header_arg`/`cookie_arg`/`query_arg` reads the scheme's
+        `apiKey` location and name, or whose `Authorization` header is read
+        when an `http` scheme exists; the matching parameter is then not
+        listed separately, as the specification asks.
+    */
+    generator& add_security_scheme(std::string name, security_scheme scheme)
+    {
+        for (auto const& [existing, _] : security_schemes_)
+        {
+            if (existing == name) throw std::logic_error {"openapi::generator: security scheme already registered: " + name};
+        }
+        security_schemes_.emplace_back(std::move(name), std::move(scheme));
+        return *this;
+    }
+
+    /// Document-level `security`: scheme names accepted by every operation that declares none.
+    generator& set_security(std::vector<std::string> scheme_names)
+    {
+        security_ = std::move(scheme_names);
+        return *this;
+    }
+
+    /** Keep every schema inline instead of hoisting `boost::describe`d types
+        into `components.schemas` and referring to them with `$ref`.
+    */
+    generator& set_inline_schemas(bool inline_schemas = true)
+    {
+        inline_schemas_ = inline_schemas;
         return *this;
     }
 
@@ -268,21 +381,48 @@ public:
             doc["servers"] = std::move(servers);
         }
 
+        auto known_scheme = [&](std::string const& name)
+        {
+            return std::ranges::any_of(security_schemes_, [&](auto const& s) { return s.first == name; });
+        };
+        auto check_schemes = [&](std::vector<std::string> const& names, std::string const& where)
+        {
+            for (auto const& n : names)
+            {
+                if (!known_scheme(n)) throw std::logic_error {"openapi::generator: unknown security scheme '" + n + "' on " + where};
+            }
+        };
+        check_schemes(security_, "the document");
+
+        json::object schemas;
         json::object paths;
         for (auto const& rec : operations_)
         {
+            check_schemes(rec.op.security, rec.path);
             auto* item = paths.if_contains(rec.path);
             if (item == nullptr)
             {
                 item = &paths.emplace(rec.path, json::object {}).first->value();
             }
             auto op = render_operation(rec);
+            if (!inline_schemas_) hoist_operation(op, schemas);
             for (auto const& m : rec.methods)
             {
                 item->as_object()[detail::lower(m)] = op;
             }
         }
         doc["paths"] = std::move(paths);
+
+        json::object components;
+        if (!schemas.empty()) components["schemas"] = std::move(schemas);
+        if (!security_schemes_.empty())
+        {
+            json::object rendered;
+            for (auto const& [name, scheme] : security_schemes_) rendered[name] = render_scheme(scheme);
+            components["securitySchemes"] = std::move(rendered);
+        }
+        if (!components.empty()) doc["components"] = std::move(components);
+        if (!security_.empty()) doc["security"] = render_security(security_);
         return doc;
     }
 
@@ -360,7 +500,87 @@ private:
         operations_.push_back(std::move(rec));
     }
 
-    static boost::json::object render_operation(recorded const& rec)
+    static boost::json::object render_scheme(security_scheme const& s)
+    {
+        boost::json::object o;
+        o["type"] = s.type;
+        if (!s.description.empty()) o["description"] = s.description;
+        if (!s.scheme.empty()) o["scheme"] = s.scheme;
+        if (!s.bearer_format.empty()) o["bearerFormat"] = s.bearer_format;
+        if (!s.in.empty()) o["in"] = s.in;
+        if (!s.name.empty()) o["name"] = s.name;
+        if (!s.open_id_connect_url.empty()) o["openIdConnectUrl"] = s.open_id_connect_url;
+        if (!s.flows.empty()) o["flows"] = s.flows;
+        return o;
+    }
+
+    static boost::json::array render_security(std::vector<std::string> const& names)
+    {
+        boost::json::array out;
+        for (auto const& n : names) out.push_back(boost::json::object {{n, boost::json::array {}}});
+        return out;
+    }
+
+    /// The registered scheme that covers a parameter at @a location named @a name, or empty.
+    std::string scheme_for(std::string_view location, std::string_view name) const
+    {
+        for (auto const& [scheme_name, s] : security_schemes_)
+        {
+            if (s.type == "apiKey" && s.in == location && detail::iequals(s.name, name)) return scheme_name;
+            if (s.type == "http" && location == "header" && detail::iequals(name, "Authorization")) return scheme_name;
+        }
+        return {};
+    }
+
+    /// Replace described-struct schemas (those with a `title`) by `$ref`s into @a schemas.
+    static void hoist_schema(boost::json::value& v, boost::json::object& schemas)
+    {
+        auto* obj = v.if_object();
+        if (obj == nullptr) return;
+        if (auto* props = obj->if_contains("properties"); props && props->is_object())
+        {
+            for (auto& kv : props->as_object()) hoist_schema(kv.value(), schemas);
+        }
+        for (auto const* key : {"items", "additionalProperties"})
+        {
+            if (auto* sub = obj->if_contains(key)) hoist_schema(*sub, schemas);
+        }
+        auto const* title = obj->if_contains("title");
+        if (title && title->is_string() && obj->contains("properties"))
+        {
+            auto const name = detail::component_name(title->as_string());
+            if (!schemas.contains(name)) schemas[name] = *obj;
+            v = boost::json::object {{"$ref", "#/components/schemas/" + name}};
+        }
+    }
+
+    static void hoist_operation(boost::json::object& op, boost::json::object& schemas)
+    {
+        if (auto* params = op.if_contains("parameters"))
+        {
+            for (auto& p : params->as_array())
+            {
+                if (auto* s = p.as_object().if_contains("schema")) hoist_schema(*s, schemas);
+            }
+        }
+        auto hoist_content = [&](boost::json::object& holder)
+        {
+            if (auto* content = holder.if_contains("content"))
+            {
+                for (auto& kv : content->as_object())
+                {
+                    if (auto* s = kv.value().as_object().if_contains("schema")) hoist_schema(*s, schemas);
+                }
+            }
+        };
+        if (auto* body = op.if_contains("requestBody")) hoist_content(body->as_object());
+        if (auto* responses = op.if_contains("responses"))
+        {
+            for (auto& kv : responses->as_object()) hoist_content(kv.value().as_object());
+        }
+    }
+
+    boost::json::object render_operation(recorded const& rec) const
     {
         namespace json = boost::json;
         using handler::param_location;
@@ -382,7 +602,18 @@ private:
         {
             json::object schema = info.schema;
             if (schema.empty() && !info.json_type.empty()) schema["type"] = info.json_type;
+            if (info.default_value) schema["default"] = *info.default_value;
             return schema;
+        };
+        // Parameters that carry credentials for a registered scheme are
+        // documented as security requirements rather than parameters.
+        std::vector<std::string> inferred;
+        auto secured_by = [&](std::string_view location, std::string_view name)
+        {
+            auto scheme = scheme_for(location, name);
+            if (scheme.empty()) return false;
+            if (std::ranges::find(inferred, scheme) == inferred.end()) inferred.push_back(scheme);
+            return true;
         };
         auto add_param = [&](std::string const& name, std::string_view in, bool required,
                              std::string const& description, json::object schema)
@@ -425,13 +656,16 @@ private:
                 break;
             }
             case param_location::query:
-                add_param(p.info.name, "query", p.info.required, p.info.description, type_schema(p.info));
+                if (!secured_by("query", p.info.name))
+                    add_param(p.info.name, "query", p.info.required, p.info.description, type_schema(p.info));
                 break;
             case param_location::header:
-                add_param(p.info.name, "header", p.info.required, p.info.description, type_schema(p.info));
+                if (!secured_by("header", p.info.name))
+                    add_param(p.info.name, "header", p.info.required, p.info.description, type_schema(p.info));
                 break;
             case param_location::cookie:
-                add_param(p.info.name, "cookie", p.info.required, p.info.description, type_schema(p.info));
+                if (!secured_by("cookie", p.info.name))
+                    add_param(p.info.name, "cookie", p.info.required, p.info.description, type_schema(p.info));
                 break;
             case param_location::body:
             {
@@ -454,6 +688,7 @@ private:
 
         for (auto const& h : rec.route.headers)
         {
+            if (secured_by("header", h.name)) continue;
             json::object schema;
             schema["type"] = "string";
             if (!h.exists_only) schema["const"] = h.value;
@@ -461,6 +696,7 @@ private:
         }
         for (auto const& c : rec.route.cookies)
         {
+            if (secured_by("cookie", c.name)) continue;
             json::object schema;
             schema["type"] = "string";
             if (!c.exists_only) schema["const"] = c.value;
@@ -495,12 +731,19 @@ private:
             responses["200"] = std::move(ok);
         }
         op["responses"] = std::move(responses);
+
+        if (rec.op.anonymous) op["security"] = json::array {};
+        else if (!rec.op.security.empty()) op["security"] = render_security(rec.op.security);
+        else if (!inferred.empty()) op["security"] = render_security(inferred);
         return op;
     }
 
     info info_;
     std::vector<server> servers_;
     std::vector<recorded> operations_;
+    std::vector<std::pair<std::string, security_scheme>> security_schemes_;
+    std::vector<std::string> security_;
+    bool inline_schemas_ = false;
 /// @endcond
 };
 

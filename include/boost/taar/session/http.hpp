@@ -558,7 +558,10 @@ public:
                 {
                     if (e.code().category() == error_category())
                     {
-                        error_msg = e.code().message();
+                        // Constraint failures name the argument and the rule.
+                        error_msg = e.code() == taar::error::constraint_violated
+                            ? std::string {e.what()}
+                            : e.code().message();
                     }
                     else if (e.code() == boost::beast::http::error::body_limit)
                     {

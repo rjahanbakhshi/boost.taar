@@ -11,6 +11,7 @@
 #define BOOST_TAAR_CORE_JSON_SCHEMA_HPP
 
 #include <boost/taar/type_traits/string_like.hpp>
+#include <boost/core/type_name.hpp>
 #include <boost/describe/enumerators.hpp>
 #include <boost/describe/members.hpp>
 #include <boost/json/array.hpp>
@@ -37,6 +38,7 @@ struct param_info
     std::string json_type;              ///< JSON Schema type name, empty for "any".
     bool required = true;
     boost::json::object schema {};      ///< Full JSON Schema for the parameter type.
+    std::optional<boost::json::value> default_value {};   ///< From `with_default`, when representable.
 };
 
 namespace detail {
@@ -78,8 +80,10 @@ inline constexpr bool is_optional_v = detail::is_optional<std::remove_cvref_t<T>
         `items` from the element type.
     @li Maps with string keys -> `object` with `additionalProperties`.
     @li `BOOST_DESCRIBE_STRUCT`ed types -> `object` with `properties`
-        from the public members and `required` listing the non-optional
-        ones. `BOOST_DESCRIBE_ENUM`ed types -> `string` with `enum`.
+        from the public members, `required` listing the non-optional
+        ones and `title` naming the type (used by the OpenAPI generator
+        to hoist the schema into `components`). `BOOST_DESCRIBE_ENUM`ed
+        types -> `string` with `enum`.
     @li Anything else -> `{"type":"object"}`.
 */
 template <typename T>
@@ -144,6 +148,7 @@ boost::json::object json_schema_for()
             }
         });
         schema["type"] = "object";
+        schema["title"] = boost::core::type_name<U>();
         schema["properties"] = std::move(properties);
         if (!required.empty())
         {
@@ -192,13 +197,17 @@ param_info make_param_info(std::string name, std::string description, bool requi
     return p;
 }
 
-/// A JSON Schema fragment for one parameter: its schema plus `description`.
+/// A JSON Schema fragment for one parameter: its schema plus `description` and `default`.
 inline boost::json::object param_schema(param_info const& p)
 {
     boost::json::object schema = p.schema;
     if (schema.empty() && !p.json_type.empty())
     {
         schema["type"] = p.json_type;
+    }
+    if (p.default_value)
+    {
+        schema["default"] = *p.default_value;
     }
     if (!p.description.empty())
     {

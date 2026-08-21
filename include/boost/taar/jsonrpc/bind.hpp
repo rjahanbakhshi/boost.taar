@@ -15,6 +15,7 @@
 #include <boost/taar/core/json_schema.hpp>
 #include <boost/taar/handler/context_inject.hpp>
 #include <boost/taar/handler/rest_arg.hpp>
+#include <boost/taar/handler/rest_param.hpp>
 #include <boost/taar/matcher/context.hpp>
 #include <boost/taar/type_traits/callable.hpp>
 #include <boost/taar/type_traits/specialization_of.hpp>
@@ -110,12 +111,18 @@ template <typename Callable, std::size_t Offset, typename ProvidersTuple, std::s
 std::vector<param_info> describe_params(ProvidersTuple const& providers, std::index_sequence<Is...>)
 {
     std::vector<param_info> out;
-    (out.push_back(make_param_info<type_traits::callable_arg<Callable, Offset + Is>>(
-        std::get<Is>(providers).name(),
-        provider_description(std::get<Is>(providers)),
-        !is_optional_v<type_traits::callable_arg<Callable, Offset + Is>> &&
-            !type_traits::specialization_of<handler::with_default,
-                std::tuple_element_t<Is, ProvidersTuple>>)), ...);
+    auto describe_one = [&]<std::size_t I>()
+    {
+        using provider_type = std::remove_cvref_t<std::tuple_element_t<I, ProvidersTuple>>;
+        auto info = make_param_info<type_traits::callable_arg<Callable, Offset + I>>(
+            std::get<I>(providers).name(),
+            provider_description(std::get<I>(providers)),
+            !is_optional_v<type_traits::callable_arg<Callable, Offset + I>> &&
+                !handler::detail::strip_default<provider_type>::defaulted);
+        handler::detail::annotate_param(info, std::get<I>(providers));
+        out.push_back(std::move(info));
+    };
+    (describe_one.template operator()<Is>(), ...);
     return out;
 }
 

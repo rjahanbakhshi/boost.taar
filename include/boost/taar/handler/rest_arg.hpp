@@ -47,6 +47,7 @@
 namespace boost::taar::handler {
 
 struct description;
+template <typename ArgProviderType> struct constrained;
 
 namespace detail {
 
@@ -175,6 +176,10 @@ struct with_default
         static_assert(
             detail::is_rest_arg_provider<arg_provider_type>,
             "with_default must be used with an arg_provider as input!");
+        static_assert(
+            !type_traits::specialization_of<constrained, arg_provider_type>,
+            "Wrap with_default inside constrained, not the other way around: "
+            "constrained(with_default(provider, value), {...}).");
     }
 
     std::string name() const
@@ -216,6 +221,15 @@ decltype(auto) get_rest_arg(
     matcher::context const& context)
 {
     using handler_arg_no_cv_type = std::remove_cvref_t<HandlerArgType>;
+    if constexpr (type_traits::specialization_of<constrained, ArgProviderType>)
+    {
+        // Convert through the wrapped provider, then validate the value.
+        auto value = get_rest_arg<HandlerArgType, typename ArgProviderType::arg_provider_type>(
+            arg_provider.arg_provider_, index, request, context);
+        arg_provider.check(value);
+        return value;
+    }
+    else
     try
     {
         if constexpr (detail::is_rest_arg_provider<ArgProviderType>)

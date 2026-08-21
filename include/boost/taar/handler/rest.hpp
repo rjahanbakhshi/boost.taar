@@ -69,14 +69,10 @@ struct common_requests_type<>
 template <typename... T>
 using common_requests_type_t = typename common_requests_type<T...>::type;
 
-/// True if @a T is a `path_arg` or a `with_default<path_arg, ...>`.
+/// True if @a T is a `path_arg`, possibly wrapped in `with_default` and/or `constrained`.
 template <typename T>
 concept is_path_arg_provider =
-    std::is_same_v<std::remove_cvref_t<T>, path_arg> ||
-    (type_traits::specialization_of<with_default, std::remove_cvref_t<T>> &&
-     std::is_same_v<
-        typename std::remove_cvref_t<T>::arg_provider_type,
-        path_arg>);
+    std::is_same_v<typename strip_default<std::remove_cvref_t<T>>::type, path_arg>;
 
 template <typename ProvidersTupleType>
 auto collect_path_arg_names(ProvidersTupleType const& providers)
