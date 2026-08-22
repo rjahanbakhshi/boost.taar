@@ -255,8 +255,11 @@ parameters:
 * /keyed/: a `context_store<Key, T>` holds one `T` per key with idle
   expiry; `with_session` resolves the key from a cookie or header
   (minting one when allowed), locks the entry for the duration of the
-  request and injects the `T`. The MCP endpoint uses the same store for
-  its sessions keyed by `Mcp-Session-Id`.
+  request and injects the `T`. Under a streaming handler the lock covers
+  only the call that produces the stream; the chunks then flow unlocked,
+  so one client's open stream never blocks its other requests, and the
+  minted key travels in the stream's headers. The MCP endpoint uses the
+  same store for its sessions keyed by `Mcp-Session-Id`.
 * /none/: handlers without context parameters work in every scope.
 
 Contexts are matched by type, in any order, so adding a context parameter

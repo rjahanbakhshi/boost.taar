@@ -27,6 +27,8 @@
 #include <boost/taar/handler/rest_arg.hpp>
 #include <boost/taar/handler/session_key.hpp>
 #include <boost/taar/handler/with_session.hpp>
+#include <boost/taar/core/chunked_response.hpp>
+#include <boost/taar/core/chunked_response_meta.hpp>
 #include <boost/taar/matcher/method.hpp>
 #include <boost/taar/matcher/target.hpp>
 #include <boost/taar/server/tcp.hpp>
@@ -104,6 +106,20 @@ int main(int argc, char* argv[])
         method == http::verb::post && target == "/logout",
         with_session(sessions, sid, session_policy::require,
             rest([](user_session& s) { s.user.reset(); return "bye"; })));
+
+    // A streaming handler under with_session: the entry is locked only
+    // while the handler produces the stream, then the chunks flow unlocked.
+    session.register_request_handler(
+        method == http::verb::get && target == "/visits/stream",
+        with_session(sessions, sid, session_policy::require,
+            rest([](user_session const& s) -> taar::chunked_response<std::string>
+            {
+                co_yield taar::set_header(http::field::content_type, "text/event-stream");
+                for (int i = 1; i <= s.visits; ++i)
+                {
+                    co_yield "data: visit " + std::to_string(i) + "\n\n";
+                }
+            })));
 
     net::io_context io;
     taar::cancellation_signals signals;

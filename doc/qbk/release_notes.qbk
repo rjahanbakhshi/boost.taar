@@ -44,6 +44,8 @@
   (buffered), `multipart_reader` and `multipart_stream_arg` (streamed).
 * JSON-RPC positional parameters: a `params` array binds to `rpc_arg`
   providers in order.
+* `with_session` accepts streaming inner handlers (`chunked_response`,
+  `async_generator`); `session_key::*::key_header`.
 * `handler::constrained` argument wrapper: declarative validation with
   JSON Schema keywords on REST, JSON-RPC and MCP; `error::constraint_violated`.
 * OpenAPI: `default` from `with_default`, security schemes

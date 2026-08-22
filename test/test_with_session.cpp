@@ -11,6 +11,9 @@
 #include <boost/taar/handler/rest.hpp>
 #include <boost/taar/handler/rest_arg.hpp>
 #include <boost/taar/handler/session_key.hpp>
+#include <boost/taar/core/async_generator.hpp>
+#include <boost/taar/core/chunked_response.hpp>
+#include <boost/taar/core/chunked_response_meta.hpp>
 #include <boost/taar/core/context_store.hpp>
 #include <boost/taar/matcher/context.hpp>
 #include <boost/asio/co_spawn.hpp>
@@ -25,6 +28,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -70,6 +74,54 @@ http::request<http::empty_body> get_with_cookie(std::string const& cookie = {})
     http::request<http::empty_body> req {http::verb::get, "/x/1", 11};
     if (!cookie.empty()) req.set(http::field::cookie, cookie);
     return req;
+}
+
+struct streamed
+{
+    http::status status = http::status::unknown;
+    std::vector<taar::chunked_set_header> headers;
+    std::vector<std::string> chunks;
+
+    std::string header(http::field f) const
+    {
+        for (auto const& h : headers) if (h.field == f) return h.value;
+        return {};
+    }
+};
+
+// Runs a streaming handler to completion, collecting metadata and chunks.
+template <typename Handler, typename Contexts>
+streamed run_stream(Handler& handler, Contexts const& ctxs, http::request<http::empty_body> const& req)
+{
+    net::io_context io;
+    streamed out;
+    std::exception_ptr error;
+    taar::matcher::context mctx;
+    net::co_spawn(io, [&]() -> taar::awaitable<void>
+    {
+        try
+        {
+            auto gen = co_await handler(ctxs, req, mctx);
+            gen.set_executor(io.get_executor());
+            for (;;)
+            {
+                auto [ec, v] = co_await gen.next();
+                (void)ec;
+                if (!v) break;
+                out.chunks.push_back(std::move(*v));
+            }
+            gen.rethrow_if_exception();
+            out.status = gen.status();
+            out.headers = gen.headers();
+        }
+        catch (...)
+        {
+            error = std::current_exception();
+        }
+    }, net::detached);
+    io.run();
+    if (error) std::rethrow_exception(error);
+    return out;
 }
 
 std::string set_cookie_value(response_type const& res, std::string const& name)
@@ -227,6 +279,79 @@ BOOST_AUTO_TEST_CASE(test_with_session_exposes_inner_path_arg_names)
     auto names = handler.path_arg_names();
     BOOST_REQUIRE(names.size() == 1u);
     BOOST_TEST(names[0] == "x");
+}
+
+BOOST_AUTO_TEST_CASE(test_with_session_streams_chunked_response_with_minted_key)
+{
+    store_type store {5min};
+    auto handler = with_session(store, session_key::cookie {"sid"}, session_policy::create_if_missing,
+        rest([](sess_ctx& s) -> taar::chunked_response<std::string>
+        {
+            ++s.counter;
+            co_yield taar::set_status(http::status::accepted);
+            co_yield taar::set_header(http::field::content_type, "text/event-stream");
+            co_yield std::string {"one"};
+            co_yield std::string {"two"};
+        }));
+
+    auto first = run_stream(handler, contexts<> {}, get_with_cookie());
+    BOOST_TEST(first.status == http::status::accepted);
+    BOOST_TEST(first.header(http::field::content_type) == "text/event-stream");
+    auto const cookie = first.header(http::field::set_cookie);
+    BOOST_TEST(cookie.starts_with("sid="));
+    BOOST_REQUIRE(first.chunks.size() == 2u);
+    BOOST_TEST(first.chunks[0] == "one");
+    BOOST_TEST(first.chunks[1] == "two");
+    BOOST_TEST(store.size() == 1u);
+
+    // Presenting the key reuses the entry and mints nothing.
+    auto key = cookie.substr(4, cookie.find(';') - 4);
+    auto second = run_stream(handler, contexts<> {}, get_with_cookie("sid=" + key));
+    BOOST_TEST(second.header(http::field::set_cookie).empty());
+    BOOST_TEST(second.chunks.size() == 2u);
+    BOOST_TEST(store.peek(key)->context()->counter == 2);
+    // The entry is not left locked by the stream.
+    BOOST_TEST(run_stream(handler, contexts<> {}, get_with_cookie("sid=" + key)).chunks.size() == 2u);
+}
+
+BOOST_AUTO_TEST_CASE(test_with_session_streams_async_generator_and_rejects_without_key)
+{
+    store_type store {5min};
+    auto handler = with_session(store, session_key::header {"X-Session"}, session_policy::require,
+        rest([](sess_ctx const& s) -> taar::async_generator<std::string>
+        {
+            co_yield std::to_string(s.counter);
+            co_yield std::string {"end"};
+        }));
+
+    http::request<http::empty_body> anonymous {http::verb::get, "/x/1", 11};
+    auto denied = run_stream(handler, contexts<> {}, anonymous);
+    BOOST_TEST(denied.status == http::status::unauthorized);
+    BOOST_TEST(denied.chunks.empty());
+
+    auto [key, entry] = store.create();
+    entry->context()->counter = 7;
+    http::request<http::empty_body> keyed {http::verb::get, "/x/1", 11};
+    keyed.set("X-Session", key);
+    auto out = run_stream(handler, contexts<> {}, keyed);
+    BOOST_TEST(out.status == http::status::ok);
+    BOOST_TEST(out.headers.empty());                 // nothing minted, generator carries no headers
+    BOOST_REQUIRE(out.chunks.size() == 2u);
+    BOOST_TEST(out.chunks[0] == "7");
+    BOOST_TEST(out.chunks[1] == "end");
+}
+
+BOOST_AUTO_TEST_CASE(test_with_session_stream_exception_propagates)
+{
+    store_type store {5min};
+    auto handler = with_session(store, session_key::cookie {"sid"}, session_policy::create_if_missing,
+        rest([](sess_ctx&) -> taar::chunked_response<std::string>
+        {
+            co_yield std::string {"partial"};
+            throw std::runtime_error {"stream broke"};
+        }));
+    BOOST_CHECK_EXCEPTION(run_stream(handler, contexts<> {}, get_with_cookie()), std::runtime_error,
+        [](std::runtime_error const& e) { return std::string {e.what()} == "stream broke"; });
 }
 
 } // namespace

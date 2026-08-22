@@ -17,7 +17,6 @@ in the repository and is updated as items close. In outline:
 * /Transport/: no HTTP/2 or compression.
 * /MCP/: `{name}`-only resource templates; stdio is POSIX-only.
 * /OpenAPI/: `components.schemas` holds described types only.
-* /REST/: no streaming handler under `with_session`; repeated query keys
-  are ambiguous.
+* /REST/: repeated query keys are ambiguous.
 
 [endsect]

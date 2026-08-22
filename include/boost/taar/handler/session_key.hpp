@@ -10,6 +10,7 @@
 #ifndef BOOST_TAAR_HANDLER_SESSION_KEY_HPP
 #define BOOST_TAAR_HANDLER_SESSION_KEY_HPP
 
+#include <boost/taar/core/chunked_response_meta.hpp>
 #include <boost/taar/core/cookies.hpp>
 #include <boost/beast/http/field.hpp>
 #include <boost/beast/http/message.hpp>
@@ -77,12 +78,18 @@ struct cookie
         boost::beast::http::response<Body, Fields>& response,
         std::string const& key) const
     {
+        response.insert(boost::beast::http::field::set_cookie, key_header(key).value);
+    }
+
+    /// The same `Set-Cookie` header as a token for a @ref chunked_response.
+    chunked_set_header key_header(std::string const& key) const
+    {
         std::string value = name + "=" + key;
         if (!attributes.empty())
         {
             value += "; " + attributes;
         }
-        response.insert(boost::beast::http::field::set_cookie, value);
+        return set_header(boost::beast::http::field::set_cookie, std::move(value));
     }
 };
 
@@ -112,6 +119,12 @@ struct header
         std::string const& key) const
     {
         response.set(name, key);
+    }
+
+    /// The same header as a token for a @ref chunked_response.
+    chunked_set_header key_header(std::string const& key) const
+    {
+        return set_header(name, key);
     }
 };
 

@@ -44,11 +44,14 @@ rather than planned.
 
 ## REST
 
-- `with_session` cannot wrap a streaming handler, so a per-user SSE stream
-  must read the session cookie by hand.
+- A streaming handler under `with_session` runs its body without the
+  entry's lock; state it shares with other requests needs its own
+  synchronisation.
 
 ## Recently closed
 
+- `with_session` over streaming handlers (lock held until the stream is
+  produced; minted key on the stream's headers).
 - `handler::constrained` (declarative validation on all surfaces), OpenAPI
   defaults, security schemes and `components.schemas`.
 - MCP server-to-client requests (`request`, `create_message`, `elicit`,

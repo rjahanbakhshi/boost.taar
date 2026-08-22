@@ -10,17 +10,25 @@
 #ifndef BOOST_TAAR_HANDLER_WITH_SESSION_HPP
 #define BOOST_TAAR_HANDLER_WITH_SESSION_HPP
 
+#include <boost/taar/core/async_generator.hpp>
 #include <boost/taar/core/awaitable.hpp>
+#include <boost/taar/core/chunked_response.hpp>
+#include <boost/taar/core/chunked_response_meta.hpp>
 #include <boost/taar/core/context_store.hpp>
+#include <boost/taar/core/is_async_generator.hpp>
+#include <boost/taar/core/is_awaitable.hpp>
+#include <boost/taar/core/is_chunked_response.hpp>
 #include <boost/taar/core/is_http_response.hpp>
 #include <boost/taar/handler/context_inject.hpp>
 #include <boost/taar/handler/path_arg_check.hpp>
 #include <boost/taar/handler/rest_param.hpp>
 #include <boost/taar/handler/session_key.hpp>
 #include <boost/taar/matcher/context.hpp>
+#include <boost/asio/this_coro.hpp>
 #include <boost/beast/http/message.hpp>
 #include <boost/beast/http/status.hpp>
 #include <memory>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -44,6 +52,81 @@ Response unauthorized_response(Request const& request)
     return response;
 }
 
+template <typename T>
+chunked_response<T> unauthorized_stream()
+{
+    co_yield set_status(boost::beast::http::status::unauthorized);
+}
+
+/// What the inner handler produces once awaited (or directly, when synchronous).
+template <typename R, bool = is_awaitable<R>>
+struct produced { using type = R; };
+template <typename R>
+struct produced<R, true> { using type = typename R::value_type; };
+template <typename Inner, typename Contexts>
+using produced_t = typename produced<handler_result_t<Inner, Contexts>>::type;
+
+template <typename P>
+inline constexpr bool is_stream_v = is_chunked_response<P> || is_async_generator<P>;
+
+template <typename G> struct stream_value;
+template <typename T> struct stream_value<chunked_response<T>> { using type = T; };
+template <typename T> struct stream_value<async_generator<T>> { using type = T; };
+
+template <typename Inner, typename Contexts>
+auto with_session_result()
+{
+    using P = produced_t<Inner, Contexts>;
+    if constexpr (is_stream_v<P>)
+    {
+        return std::type_identity<awaitable<chunked_response<typename stream_value<P>::type>>> {};
+    }
+    else
+    {
+        return std::type_identity<awaitable<handler_response_t<Inner, Contexts>>> {};
+    }
+}
+
+/// The handler's result: a typed response, or a `chunked_response` for streaming inners.
+template <typename Inner, typename Contexts>
+using with_session_result_t = typename decltype(with_session_result<Inner, Contexts>())::type;
+
+/** Re-emit @a inner's stream with @a extra headers added to its metadata.
+
+    The inner is driven to its first chunk so that its status and headers
+    are known, which are then replayed on this stream ahead of the extra
+    headers (an `async_generator` carries none).
+*/
+template <typename T, typename Gen>
+chunked_response<T> relay_stream(Gen inner, std::vector<chunked_set_header> extra)
+{
+    auto [first_ec, first] = co_await inner.next();
+    (void)first_ec;
+    if constexpr (is_chunked_response<Gen>)
+    {
+        co_yield set_status(inner.status());
+        for (auto const& h : inner.headers()) co_yield h;
+    }
+    for (auto& h : extra) co_yield std::move(h);
+    if (!first.has_value())
+    {
+        inner.rethrow_if_exception();
+        co_return;
+    }
+    co_yield std::move(*first);
+    for (;;)
+    {
+        auto [ec, v] = co_await inner.next();
+        (void)ec;
+        if (!v.has_value())
+        {
+            inner.rethrow_if_exception();
+            co_return;
+        }
+        co_yield std::move(*v);
+    }
+}
+
 } // namespace detail
 
 /** Handler decorator that binds a keyed context from a @ref context_store.
@@ -55,8 +138,16 @@ Response unauthorized_response(Request const& request)
     added to the contexts in scope. When a key was minted the extractor
     writes it into the response.
 
-    The inner handler must produce a typed `boost::beast::http::response`
-    (the usual case for `rest` and raw handlers); streaming handlers and
+    The inner handler may produce a typed `boost::beast::http::response`
+    (the usual case for `rest` and raw handlers) or a stream: a
+    `chunked_response<T>` or `async_generator<T>`, directly or through an
+    awaitable. A stream is re-emitted as `chunked_response<T>` with the
+    minted key's header added. The entry's lock is held only while the
+    inner handler runs, that is until it has produced the stream; the
+    stream body then runs unlocked, so a long-lived stream does not block
+    the client's other requests. A streaming handler that keeps using the
+    keyed context must therefore synchronise that access itself (an
+    `async_channel` in the context is the usual shape).
     `message_generator` results are not supported under `with_session`.
 
     If the inner handler throws, the exception propagates to the session's
@@ -82,18 +173,11 @@ struct with_session_handler
         Contexts const& ctxs,
         request_type const& request,
         matcher::context const& mctx)
-        -> awaitable<detail::handler_response_t<
-            Inner, detail::with_session_contexts_t<Contexts, context_type>>>
+        -> detail::with_session_result_t<Inner, detail::with_session_contexts_t<Contexts, context_type>>
     {
-        using response_type = detail::handler_response_t<
-            Inner, detail::with_session_contexts_t<Contexts, context_type>>;
-
-        static_assert(
-            is_http_response<response_type>,
-            "with_session requires the inner handler to produce a typed "
-            "boost::beast::http::response so the session key can be attached. "
-            "Streaming handlers and message_generator results are not "
-            "supported under with_session.");
+        using extended_contexts = detail::with_session_contexts_t<Contexts, context_type>;
+        using produced_type = detail::produced_t<Inner, extended_contexts>;
+        constexpr bool streaming = detail::is_stream_v<produced_type>;
 
         auto key = key_.extract(request);
         typename Store::entry_ptr entry;
@@ -108,7 +192,15 @@ struct with_session_handler
         {
             if (policy_ == session_policy::require)
             {
-                co_return detail::unauthorized_response<response_type>(request);
+                if constexpr (streaming)
+                {
+                    co_return detail::unauthorized_stream<typename detail::stream_value<produced_type>::type>();
+                }
+                else
+                {
+                    co_return detail::unauthorized_response<
+                        detail::handler_response_t<Inner, extended_contexts>>(request);
+                }
             }
             auto created = store_->create();
             key = std::move(created.first);
@@ -116,17 +208,53 @@ struct with_session_handler
             minted = true;
         }
 
-        auto guard = co_await store_->lock(entry);
-
-        auto extended = std::tuple_cat(ctxs, std::make_tuple(entry->context()));
-        response_type response = co_await detail::response_from_invoke_handler(
-            inner_, extended, request, mctx);
-
-        if (minted)
+        if constexpr (streaming)
         {
-            key_.attach(response, *key);
+            using chunk_type = typename detail::stream_value<produced_type>::type;
+            std::optional<produced_type> stream;
+            {
+                // Locked only while the handler produces the stream.
+                auto guard = co_await store_->lock(entry);
+                auto extended = std::tuple_cat(ctxs, std::make_tuple(entry->context()));
+                if constexpr (is_awaitable<detail::handler_result_t<Inner, extended_contexts>>)
+                {
+                    stream.emplace(co_await detail::invoke_handler(inner_, extended, request, mctx));
+                }
+                else
+                {
+                    stream.emplace(detail::invoke_handler(inner_, extended, request, mctx));
+                }
+            }
+            std::vector<chunked_set_header> extra;
+            if (minted)
+            {
+                extra.push_back(key_.key_header(*key));
+            }
+            stream->set_executor(co_await boost::asio::this_coro::executor);
+            co_return detail::relay_stream<chunk_type>(std::move(*stream), std::move(extra));
         }
-        co_return response;
+        else
+        {
+            using response_type = detail::handler_response_t<Inner, extended_contexts>;
+            static_assert(
+                is_http_response<response_type>,
+                "with_session requires the inner handler to produce a typed "
+                "boost::beast::http::response, a chunked_response or an "
+                "async_generator. message_generator results are not supported "
+                "under with_session.");
+
+            auto guard = co_await store_->lock(entry);
+
+            auto extended = std::tuple_cat(ctxs, std::make_tuple(entry->context()));
+            response_type response = co_await detail::response_from_invoke_handler(
+                inner_, extended, request, mctx);
+
+            if (minted)
+            {
+                key_.attach(response, *key);
+            }
+            co_return response;
+        }
     }
 
     auto path_arg_names() const -> std::vector<std::string>

@@ -12,6 +12,9 @@
 #include "e2e.hpp"
 #include <boost/taar/session/http.hpp>
 #include <boost/taar/handler/rest.hpp>
+#include <boost/taar/handler/session_key.hpp>
+#include <boost/taar/handler/with_session.hpp>
+#include <boost/taar/core/context_store.hpp>
 #include <boost/taar/core/chunked_response.hpp>
 #include <boost/taar/core/chunked_response_meta.hpp>
 #include <boost/taar/core/rebind_executor.hpp>
@@ -341,6 +344,53 @@ BOOST_AUTO_TEST_CASE(test_e2e_streaming_websocket_echo_upgrade)
             BOOST_TEST(beast::buffers_to_string(buffer.data()) == msg);
         }
         co_await ws.async_close(websocket::close_code::normal, awaitable_token {});
+    });
+}
+
+BOOST_AUTO_TEST_CASE(test_e2e_streaming_under_with_session_sets_cookie)
+{
+    struct visitor { int streams = 0; };
+    net::io_context io;
+    taar::session::http session;
+    taar::context_store<std::string, visitor> store {std::chrono::minutes {5}};
+    session.register_request_handler(
+        method == http::verb::get && target == "/mine",
+        taar::handler::with_session(store, taar::handler::session_key::cookie {"sid"},
+            taar::handler::session_policy::create_if_missing,
+            rest([](visitor& v) -> taar::chunked_response<std::string>
+            {
+                ++v.streams;
+                co_yield taar::set_header(http::field::content_type, "text/plain");
+                co_yield std::string {"stream "};
+                co_yield std::to_string(v.streams);
+            })));
+
+    e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
+    {
+        auto socket = co_await connect(port);
+        co_await send_get(socket, "/mine");
+        beast::flat_buffer buffer;
+        parser_type first;
+        auto ec = co_await read_to_end(socket, buffer, first);
+        BOOST_TEST(!ec);
+        BOOST_TEST(first.get().result() == http::status::ok);
+        BOOST_TEST(first.get().chunked());
+        BOOST_TEST(first.get()[http::field::content_type] == "text/plain");
+        std::string const cookie {first.get()[http::field::set_cookie]};
+        BOOST_TEST(cookie.starts_with("sid="));
+        BOOST_TEST(first.get().body() == "stream 1");
+
+        // Same connection, key presented: same entry, no new cookie.
+        http::request<http::empty_body> req {http::verb::get, "/mine", 11};
+        req.set(http::field::host, "localhost");
+        req.set(http::field::cookie, cookie.substr(0, cookie.find(';')));
+        co_await http::async_write(socket, req);
+        parser_type second;
+        ec = co_await read_to_end(socket, buffer, second);
+        BOOST_TEST(!ec);
+        BOOST_TEST(second.get().body() == "stream 2");
+        BOOST_TEST(second.get().count(http::field::set_cookie) == 0u);
+        BOOST_TEST(store.size() == 1u);
     });
 }
 
