@@ -18,6 +18,7 @@
 #include <boost/json/value_from.hpp>
 #include <algorithm>
 #include <concepts>
+#include <optional>
 #include <ranges>
 #include <string>
 #include <type_traits>
@@ -42,6 +43,9 @@ struct rest_param_info
     param_info info;
     param_location in = param_location::none;
     std::vector<std::string> content_types;   ///< For body parameters, sorted.
+    /// OpenAPI `explode` for array query parameters: false for the CSV form
+    /// read by `query_arg`, unset (the default, true) for `query_list_arg`.
+    std::optional<bool> explode {};
 };
 
 /// Concept: handler exposes `params()` returning its @ref rest_param_info list.
@@ -103,7 +107,7 @@ constexpr param_location location_of()
 {
     using P = typename strip_default<std::remove_cvref_t<Provider>>::type;
     if constexpr (std::same_as<P, path_arg>) return param_location::path;
-    else if constexpr (std::same_as<P, query_arg>) return param_location::query;
+    else if constexpr (std::same_as<P, query_arg> || std::same_as<P, query_list_arg>) return param_location::query;
     else if constexpr (std::same_as<P, header_arg>) return param_location::header;
     else if constexpr (std::same_as<P, cookie_arg>) return param_location::cookie;
     else if constexpr (
@@ -158,6 +162,10 @@ rest_param_info describe_rest_param(Provider const& provider)
         arg_provider_description(provider),
         !strip_default<std::remove_cvref_t<Provider>>::defaulted && !is_optional_v<ArgType>);
     annotate_param(out.info, provider);
+    if constexpr (std::same_as<typename strip_default<std::remove_cvref_t<Provider>>::type, query_arg>)
+    {
+        if (out.info.json_type == "array") out.explode = false;
+    }
     if (out.in == param_location::body)
     {
         using P = typename strip_default<std::remove_cvref_t<Provider>>::type;

@@ -69,12 +69,14 @@ An /Argument Provider/ is an object that, given an HTTP request, produces
 exactly one argument for a wrapped callable. Argument providers are
 supplied as the trailing arguments to `taar::handler::rest`.
 
-The library exports `path_arg`, `query_arg`, `header_arg`, `cookie_arg`,
-`string_body_arg`, `json_body_arg`, `url_encoded_form_data_arg`,
-`multipart_form_arg`, `stream_body_arg`, `multipart_stream_arg`,
-`target_arg` and `body_size_arg`, plus `with_default` to substitute a
-value when a provider reports `argument_not_found`. User code can define
-new argument providers by satisfying the required expressions.
+The library exports `path_arg`, `query_arg`, `query_list_arg` (every
+occurrence of a query key, `?tag=a&tag=b`, into a container),
+`header_arg`, `cookie_arg`, `string_body_arg`, `json_body_arg`,
+`url_encoded_form_data_arg`, `multipart_form_arg`, `stream_body_arg`,
+`multipart_stream_arg`, `target_arg` and `body_size_arg`, plus
+`with_default` to substitute a value when a provider reports
+`argument_not_found` and `constrained` to validate the value. User code
+can define new argument providers by satisfying the required expressions.
 
 [heading Required expressions]
 

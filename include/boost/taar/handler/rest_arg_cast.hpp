@@ -246,6 +246,33 @@ inline ToType tag_invoke(rest_arg_cast_built_in_tag<ToType>, FromType const& fro
     return result;
 }
 
+// From a container of string-like values to a container of elements that
+// can be rest_arg_cast from string-like types, element by element. Feeds
+// query_list_arg (every occurrence of a query key) into std::vector<int>
+// and friends.
+template <typename FromType, typename ToType> requires (
+    type_traits::container_like<FromType> &&
+    !type_traits::string_like<FromType> &&
+    type_traits::string_like<typename FromType::value_type> &&
+    !std::is_convertible_v<FromType, ToType> &&
+    !type_traits::string_like<ToType> &&
+    type_traits::container_like<ToType> && (
+        type_traits::push_backable_container<ToType, typename ToType::value_type> ||
+        type_traits::insertable_container<ToType, typename ToType::value_type>))
+inline ToType tag_invoke(rest_arg_cast_built_in_tag<ToType>, FromType const& from)
+{
+    using value_type = typename ToType::value_type;
+    ToType result;
+    for (auto const& element : from)
+    {
+        if constexpr (type_traits::push_backable_container<ToType, value_type>)
+            result.push_back(rest_arg_cast<value_type>(std::string_view(element)));
+        else
+            result.insert(rest_arg_cast<value_type>(std::string_view(element)));
+    }
+    return result;
+}
+
 // Check if there is a user-defined rest_arg_cast from FromType to ToType.
 template <typename FromType, typename ToType>
 concept has_user_defined_rest_arg_cast = requires (FromType const& from)

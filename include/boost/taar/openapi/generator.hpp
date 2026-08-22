@@ -657,7 +657,10 @@ private:
             }
             case param_location::query:
                 if (!secured_by("query", p.info.name))
+                {
                     add_param(p.info.name, "query", p.info.required, p.info.description, type_schema(p.info));
+                    if (p.explode) parameters.back().as_object()["explode"] = *p.explode;
+                }
                 break;
             case param_location::header:
                 if (!secured_by("header", p.info.name))

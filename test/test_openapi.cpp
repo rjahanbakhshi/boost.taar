@@ -378,6 +378,27 @@ BOOST_AUTO_TEST_CASE(test_openapi_described_types_render_full_schemas)
     BOOST_TEST(!doc.contains("components"));
 }
 
+BOOST_AUTO_TEST_CASE(test_openapi_query_arrays_explode)
+{
+    taar::session::http session;
+    openapi::generator gen {{.title = "t", .version = "1"}};
+    session.register_request_handler(
+        method == http::verb::get && target == "/search",
+        rest([](std::vector<std::string>, std::vector<int>) { return 1; },
+            taar::handler::query_list_arg("tag", "Repeated"),
+            query_arg("ids", "Comma separated")),
+        gen.describe("Search"));
+    auto const doc = gen.document();     // keep the document alive while indexing into it
+    auto const& params = doc.at("paths").at("/search").at("get").at("parameters").as_array();
+    BOOST_REQUIRE(params.size() == 2u);
+    BOOST_TEST(params[0].at("name").as_string() == "tag");
+    BOOST_TEST(params[0].at("schema").at("type").as_string() == "array");
+    BOOST_TEST(params[0].at("schema").at("items").at("type").as_string() == "string");
+    BOOST_TEST(!params[0].as_object().contains("explode"));             // form/explode is the default
+    BOOST_TEST(params[1].at("schema").at("items").at("type").as_string() == "integer");
+    BOOST_TEST(params[1].at("explode").as_bool() == false);             // CSV in one occurrence
+}
+
 BOOST_AUTO_TEST_CASE(test_openapi_components_defaults_constraints_and_security)
 {
     using taar::handler::constrained;

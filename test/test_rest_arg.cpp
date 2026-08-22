@@ -11,6 +11,7 @@
 #include "boost/taar/core/form_kvp.hpp"
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/taar/handler/rest_arg.hpp>
+#include <optional>
 #include <boost/test/unit_test.hpp>
 #include <boost/json/value_from.hpp>
 #include <boost/system/system_error.hpp>
@@ -91,6 +92,28 @@ BOOST_AUTO_TEST_CASE(test_rest_arg)
     BOOST_TEST((get_rest_arg<int, query_arg>(query_arg("a"), 0, req, ctx) == 13));
     BOOST_TEST((get_rest_arg<std::string, query_arg>(query_arg("a"), 0, req, ctx) == "13"));
     BOOST_TEST((get_rest_arg<std::string_view, query_arg>(query_arg("a"), 0, req, ctx) == "13"));
+
+    {
+        using taar::handler::query_list_arg;
+        http::request<http::empty_body> multi {http::verb::get, "/?tag=x&n=1&tag=y&N=2&csv=3,4", 11};
+        auto tags = get_rest_arg<std::vector<std::string>, query_list_arg>(query_list_arg("tag"), 0, multi, ctx);
+        BOOST_TEST((tags == std::vector<std::string> {"x", "y"}));
+        auto ns = get_rest_arg<std::vector<int>, query_list_arg>(query_list_arg("n"), 0, multi, ctx);
+        BOOST_TEST((ns == std::vector<int> {1}));
+        auto both = get_rest_arg<std::set<int>, query_list_arg>(query_list_arg("n", boost::urls::ignore_case), 0, multi, ctx);
+        BOOST_TEST((both == std::set<int> {1, 2}));
+        // Each occurrence is one element; commas are not split here.
+        auto csv = get_rest_arg<std::vector<std::string>, query_list_arg>(query_list_arg("csv"), 0, multi, ctx);
+        BOOST_TEST((csv == std::vector<std::string> {"3,4"}));
+        // ... but query_arg still parses a single CSV occurrence.
+        BOOST_TEST((get_rest_arg<std::vector<int>, query_arg>(query_arg("csv"), 0, multi, ctx) == std::vector<int> {3, 4}));
+        // Absent: not found, or empty optional / default.
+        BOOST_CHECK_THROW((get_rest_arg<std::vector<int>, query_list_arg>(query_list_arg("zzz"), 0, multi, ctx)), boost::system::system_error);
+        BOOST_TEST(!(get_rest_arg<std::optional<std::vector<int>>, query_list_arg>(query_list_arg("zzz"), 0, multi, ctx)).has_value());
+        auto defaulted = get_rest_arg<std::vector<int>, taar::handler::with_default<query_list_arg, std::vector<int>>>(
+            taar::handler::with_default(query_list_arg("zzz"), std::vector<int> {9}), 0, multi, ctx);
+        BOOST_TEST((defaulted == std::vector<int> {9}));
+    }
 
     BOOST_TEST((get_rest_arg<int, path_arg>(path_arg("a"), 0, req, ctx) == 13));
     BOOST_TEST((get_rest_arg<int, path_arg>(path_arg("b"), 0, req, ctx) == 42));

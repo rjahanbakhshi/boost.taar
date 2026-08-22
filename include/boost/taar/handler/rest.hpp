@@ -347,6 +347,7 @@ inline auto rest_for_memfn(
 
     @li @ref path_arg pulls a captured path-template placeholder.
     @li @ref query_arg pulls a URL query parameter.
+    @li @ref query_list_arg pulls every occurrence of a query parameter into a container.
     @li @ref header_arg pulls a header value.
     @li @ref cookie_arg pulls a cookie value.
     @li @ref string_body_arg, @ref json_body_arg, and

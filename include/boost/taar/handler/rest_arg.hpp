@@ -25,6 +25,7 @@
 #include <boost/beast/http/string_body.hpp>
 #include <boost/beast/http/message.hpp>
 #include <boost/beast/http/field.hpp>
+#include <boost/url/grammar/ci_string.hpp>
 #include <boost/url/parse.hpp>
 #include <boost/url/parse_query.hpp>
 #include <boost/url/ignore_case.hpp>
@@ -37,6 +38,7 @@
 #include <unordered_set>
 #include <variant>
 #include <optional>
+#include <vector>
 #include <format>
 #include <string>
 #include <algorithm>
@@ -432,6 +434,74 @@ struct query_arg
             return std::string {param.value};
         }
         return error::argument_not_found;
+    }
+
+    std::string query_key_;
+    boost::urls::ignore_case_param ic_;
+    std::string description_;
+};
+
+/** Argument provider that reads every occurrence of a query parameter.
+
+    `?tag=a&tag=b` binds `{"a", "b"}`, in order, to a container parameter
+    (`std::vector<T>`, `std::set<T>`, ...) whose elements are cast one by
+    one; a single occurrence binds a one-element container. This is the
+    OpenAPI `form`/`explode` style. For comma-separated lists in a single
+    occurrence (`?tag=a,b`) use @ref query_arg with a container parameter.
+
+    Reports @ref error::argument_not_found if the parameter is absent.
+*/
+struct query_list_arg
+{
+    query_list_arg(
+            std::string query_key,
+            boost::urls::ignore_case_param ic = {})
+        : query_key_ {std::move(query_key)}
+        , ic_ {std::move(ic)}
+    {}
+
+    query_list_arg(
+            std::string query_key,
+            std::string description,
+            boost::urls::ignore_case_param ic = {})
+        : query_key_ {std::move(query_key)}
+        , ic_ {std::move(ic)}
+        , description_ {std::move(description)}
+    {}
+
+    std::string const& name() const
+    {
+        return query_key_;
+    }
+
+    std::string const& description() const
+    {
+        return description_;
+    }
+
+    boost::system::result<std::vector<std::string>> operator()(
+        boost::beast::http::request_header<> const& request,
+        matcher::context const&) const
+    {
+        auto url_view = boost::urls::parse_origin_form(request.target());
+        if (!url_view)
+        {
+            return error::invalid_url_format;
+        }
+
+        std::vector<std::string> values;
+        for (auto const& param : url_view->params())
+        {
+            if (ic_ ? boost::urls::grammar::ci_is_equal(param.key, query_key_) : param.key == query_key_)
+            {
+                values.emplace_back(param.value);
+            }
+        }
+        if (values.empty())
+        {
+            return error::argument_not_found;
+        }
+        return values;
     }
 
     std::string query_key_;

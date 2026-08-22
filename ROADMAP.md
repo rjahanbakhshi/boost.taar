@@ -39,8 +39,6 @@ rather than planned.
 
 - Only `boost::describe`d types are hoisted into `components.schemas`;
   parameters and responses are not shared as components.
-- Query parameters only bind scalars and CSV lists; repeated query keys
-  (`?tag=a&tag=b`) are rejected as ambiguous.
 
 ## REST
 
@@ -50,6 +48,8 @@ rather than planned.
 
 ## Recently closed
 
+- `query_list_arg` for repeated query keys (`?tag=a&tag=b`), with the
+  matching OpenAPI `explode` marking.
 - `with_session` over streaming handlers (lock held until the stream is
   produced; minted key on the stream's headers).
 - `handler::constrained` (declarative validation on all surfaces), OpenAPI

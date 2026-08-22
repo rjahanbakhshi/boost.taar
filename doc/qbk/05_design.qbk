@@ -403,6 +403,9 @@ Where the specifications leave room, Taar makes these choices:
 * Header and cookie constraints become required parameters with a `const`
   schema. Path placeholders not bound by a `path_arg` are still declared;
   a greedy `{*name}` renders as `{name}` with a note.
+* A container parameter fed by `query_arg` is a comma-separated list in
+  one occurrence (`explode: false`); `query_list_arg` collects repeated
+  keys, the `form`/`explode` default.
 * `with_default` values render as `default`; `constrained(provider,
   {...})` renders its rules as JSON Schema keywords (`minimum`,
   `pattern`, `enum`, `minItems`, `format`, `examples`, ...) and enforces
