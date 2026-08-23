@@ -25,6 +25,7 @@
 #include <boost/beast/http/read.hpp>
 #include <boost/json/parse.hpp>
 #include <boost/json/serialize.hpp>
+#include <memory>
 #include <boost/test/unit_test.hpp>
 #include <atomic>
 #include <chrono>
@@ -395,7 +396,7 @@ BOOST_AUTO_TEST_CASE(test_e2e_graceful_shutdown_completes_in_flight_request_and_
         io,
         taar::server::tcp("127.0.0.1", "0", session, signals,
             [&](net::ip::tcp::endpoint const& ep) { port = ep.port(); }),
-        net::bind_cancellation_slot(signals.slot(), net::detached));
+        net::detached);
 
     std::exception_ptr client_error;
     net::co_spawn(io, [&]() -> taar::awaitable<void>
@@ -471,7 +472,7 @@ BOOST_AUTO_TEST_CASE(test_e2e_multithreaded_concurrent_clients)
         io,
         taar::server::tcp("127.0.0.1", "0", session, signals,
             [&](net::ip::tcp::endpoint const& ep) { port = ep.port(); }),
-        net::bind_cancellation_slot(signals.slot(), net::detached));
+        net::detached);
 
     std::atomic<int> finished {0};
     std::atomic<int> failures {0};
@@ -528,6 +529,58 @@ BOOST_AUTO_TEST_CASE(test_e2e_multithreaded_concurrent_clients)
     BOOST_TEST(finished == clients);
     BOOST_TEST(failures == 0);
     for (auto const& e : errors) BOOST_TEST(e.empty(), e);
+}
+
+BOOST_AUTO_TEST_CASE(test_e2e_multithreaded_shutdown_from_foreign_thread)
+{
+    constexpr int threads = 4;
+    constexpr int clients = 16;
+
+    net::io_context io;
+    taar::session::http session;
+    session.register_request_handler(
+        method == http::verb::get && target == "/ping",
+        rest([] { return std::string {"pong"}; }));
+
+    taar::cancellation_signals signals;
+    std::atomic<unsigned short> port {0};
+    net::co_spawn(
+        io,
+        taar::server::tcp("127.0.0.1", "0", session, signals,
+            [&](net::ip::tcp::endpoint const& ep) { port = ep.port(); }),
+        net::detached);
+
+    // Clients keep their connections open and idle after one request.
+    std::atomic<int> served {0};
+    std::vector<std::unique_ptr<socket_type>> sockets(clients);
+    for (int c = 0; c < clients; ++c)
+    {
+        net::co_spawn(io, [&, c]() -> taar::awaitable<void>
+        {
+            net::steady_timer timer {co_await net::this_coro::executor};
+            while (port == 0)
+            {
+                timer.expires_after(1ms);
+                co_await timer.async_wait(taar::use_awaitable);
+            }
+            sockets[c] = std::make_unique<socket_type>(co_await connect(port));
+            beast::flat_buffer buffer;
+            co_await http::async_write(*sockets[c], e2e::make_request(http::verb::get, "/ping"));
+            if ((co_await read_response(*sockets[c], buffer)).body() == "pong") ++served;
+        }, net::detached);
+    }
+
+    std::vector<std::jthread> pool;
+    for (int i = 0; i < threads; ++i) pool.emplace_back([&] { io.run(); });
+
+    // The main thread is not running the io_context: emission must still be safe.
+    while (served < clients) std::this_thread::sleep_for(1ms);
+    std::this_thread::sleep_for(5ms);
+    signals.emit();
+    pool.clear();
+
+    BOOST_TEST(served == clients);
+    BOOST_TEST(io.stopped());
 }
 
 } // namespace

@@ -119,9 +119,12 @@ suspended coroutine frame, not a thread, so a single-threaded
 `io_context` from several threads scales it across cores.
 
 `taar::awaitable<T>` is a thin alias for
-`boost::asio::awaitable<T, io_context::executor_type>`: the executor is
-pinned because Taar uses an `io_context` throughout, which spares users
-from spelling the second template argument every time.
+`boost::asio::awaitable<T, any_io_executor>`, which spares users from
+spelling the second template argument every time and lets the same
+coroutine run on a plain `io_context` executor or on a strand. The
+servers spawn every connection on its own strand, so a multi-threaded
+`io.run()` needs no further care in handlers: one connection's
+operations never run concurrently with each other.
 
 [heading Synchronous or asynchronous handlers]
 
@@ -179,7 +182,13 @@ Shutdown is cooperative. A `taar::cancellation_signals` pool hands a
 cancellation slot to every spawned coroutine; emitting on the pool
 (typically from a `SIGINT`/`SIGTERM` handler) stops the acceptor and
 cancels the idle read on every keep-alive connection, so idle connections
-close at once.
+close at once. Asio requires a cancellation to be emitted within the
+strand of the operation it cancels, so the servers register each
+connection's slot together with its strand and `emit()` dispatches the
+emission there; it may therefore be called from any thread, including
+one that is not running the `io_context`. The plain `slot()` form, which
+emits inline, remains for single-threaded use. The server coroutine
+itself ignores a slot bound by its spawner and stops through the pool.
 
 A request whose handler is running when the signal arrives is allowed to
 finish: the session shields a plain (non-streaming) handler from

@@ -45,7 +45,7 @@ namespace boost::taar::server {
     @param tls                The TLS context holding certificate, key and
                               options. Must outlive the server.
     @param session_handler    Invoked as @c session_handler(tls_stream, signals).
-    @param signals            Cancellation pool shared with the sessions.
+    @param signals            Cancellation pool shared with the sessions; see @ref tcp for threading.
     @param local_endpoint_handler Optional callback with the bound endpoint.
     @param handshake_timeout  Upper bound for the TLS handshake.
 
@@ -63,7 +63,7 @@ template <typename SessionHandler>
 {
     namespace net = boost::asio;
 
-    co_await detail::accept_loop(
+    co_await detail::run_on_strand(signals, detail::accept_loop(
         std::move(bind_host),
         std::move(bind_port),
         signals,
@@ -71,8 +71,8 @@ template <typename SessionHandler>
         [&](rebind_executor<net::ip::tcp::socket> socket)
         {
             auto const executor = socket.get_executor();
-            net::co_spawn(
-                executor,
+            detail::spawn_session(
+                executor, signals,
                 [&tls, &session_handler, &signals, handshake_timeout, socket = std::move(socket)]() mutable
                     -> awaitable<void>
                 {
@@ -87,9 +87,8 @@ template <typename SessionHandler>
                     }
                     boost::beast::get_lowest_layer(stream).expires_never();
                     co_await session_handler(std::move(stream), signals);
-                },
-                net::bind_cancellation_slot(signals.slot(), net::detached));
-        });
+                });
+        }));
 }
 
 } // namespace boost::taar::server

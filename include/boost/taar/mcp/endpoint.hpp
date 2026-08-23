@@ -633,7 +633,7 @@ public:
             });
         }
         auto reply = co_await channel->async_receive(
-            net::use_awaitable_t<net::io_context::executor_type> {});
+            net::use_awaitable_t<net::any_io_executor> {});
         timer.cancel();
         if (!reply)
         {
@@ -867,10 +867,10 @@ public:
             for (;;)
             {
                 auto line = co_await outbox->async_receive(
-                    net::use_awaitable_t<net::io_context::executor_type> {});
+                    net::use_awaitable_t<net::any_io_executor> {});
                 if (!line) break;
                 auto [ec, n] = co_await net::async_write(out, net::buffer(*line),
-                    net::as_tuple(net::use_awaitable_t<net::io_context::executor_type> {}));
+                    net::as_tuple(net::use_awaitable_t<net::any_io_executor> {}));
                 if (ec) break;
             }
         }, net::detached);
@@ -888,7 +888,7 @@ public:
         for (;;)
         {
             auto [ec, n] = co_await net::async_read_until(in, buffer, '\n',
-                net::as_tuple(net::use_awaitable_t<net::io_context::executor_type> {}));
+                net::as_tuple(net::use_awaitable_t<net::any_io_executor> {}));
             if (ec) break;
             std::string line {net::buffers_begin(buffer.data()), net::buffers_begin(buffer.data()) + static_cast<std::ptrdiff_t>(n)};
             buffer.consume(n);
@@ -940,7 +940,7 @@ public:
                             for (;;)
                             {
                                 auto msg = co_await mailbox->async_receive(
-                                    net::use_awaitable_t<net::io_context::executor_type> {});
+                                    net::use_awaitable_t<net::any_io_executor> {});
                                 if (!msg) break;
                                 outbox->push(msg->json + "\n");
                             }
@@ -2014,7 +2014,7 @@ private:
         for (;;)
         {
             auto msg = co_await mailbox->async_receive(
-                boost::asio::use_awaitable_t<boost::asio::io_context::executor_type> {});
+                boost::asio::use_awaitable_t<boost::asio::any_io_executor> {});
             if (!msg) break;
             if (msg->id <= delivered) continue;
             delivered = msg->id;

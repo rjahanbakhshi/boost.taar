@@ -37,7 +37,7 @@ namespace mcp = boost::taar::mcp;
 using mcp::mcp_arg;
 
 struct notes { std::vector<std::string> items; };
-using token = net::use_awaitable_t<net::io_context::executor_type>;
+using token = net::use_awaitable_t<net::any_io_executor>;
 
 /// A stdio server wired to two pipes, driven from a test coroutine.
 struct stdio_harness

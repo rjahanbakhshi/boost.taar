@@ -399,7 +399,11 @@ connections close, and `io.run()` returns:
     boost::asio::co_spawn(
         io,
         taar::server::tcp("0.0.0.0", "8080", http_session, signals),
-        boost::asio::bind_cancellation_slot(signals.slot(), taar::ignore_and_rethrow));
+        taar::ignore_and_rethrow);
+
+The server registers itself and every connection with `signals`, so
+`emit()` may be called from any thread. Running `io.run()` on several
+threads is supported: each connection lives on its own strand.
 
 [endsect]
 

@@ -70,7 +70,7 @@ int main(int argc, char* argv[])
         io,
         taar::server::tls("0.0.0.0", argv[1], tls, session, signals,
             [](net::ip::tcp::endpoint const& ep) { std::clog << "Listening on https://" << ep << '\n'; }),
-        net::bind_cancellation_slot(signals.slot(), taar::ignore_and_rethrow));
+        taar::ignore_and_rethrow);
 
     io.run();
 }

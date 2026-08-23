@@ -48,6 +48,8 @@ rather than planned.
 
 ## Recently closed
 
+- Multi-threaded shutdown race: connections run on per-connection strands
+  and `cancellation_signals::emit` dispatches through them.
 - `query_list_arg` for repeated query keys (`?tag=a&tag=b`), with the
   matching OpenAPI `explode` marking.
 - `with_session` over streaming handlers (lock held until the stream is

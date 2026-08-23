@@ -194,7 +194,7 @@ int main(int argc, char* argv[])
         io,
         taar::server::tcp("0.0.0.0", argv[1], session, signals,
             [](net::ip::tcp::endpoint const& ep) { std::clog << "Listening on " << ep << '\n'; }),
-        net::bind_cancellation_slot(signals.slot(), taar::ignore_and_rethrow));
+        taar::ignore_and_rethrow);
 
     std::vector<std::jthread> threads;
     for (int i = 0; i < 4; ++i) threads.emplace_back([&] { io.run(); });

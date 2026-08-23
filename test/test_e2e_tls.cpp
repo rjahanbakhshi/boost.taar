@@ -108,7 +108,7 @@ void run_tls(net::io_context& io, net::ssl::context& tls, Session& session, Clie
     net::co_spawn(io,
         taar::server::tls("127.0.0.1", "0", tls, session, signals,
             [&](net::ip::tcp::endpoint const& ep) { port = ep.port(); }, 2s),
-        net::bind_cancellation_slot(signals.slot(), net::detached));
+        net::detached);
 
     net::co_spawn(io, [&]() -> taar::awaitable<void>
     {

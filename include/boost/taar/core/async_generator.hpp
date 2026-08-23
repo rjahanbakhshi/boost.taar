@@ -12,6 +12,7 @@
 
 #include <boost/taar/core/awaitable.hpp>
 #include <boost/system/error_code.hpp>
+#include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/as_tuple.hpp>
 #include <boost/asio/async_result.hpp>
 #include <boost/asio/bind_cancellation_slot.hpp>
@@ -64,7 +65,7 @@ class async_generator
 public:
     struct promise_type;
     using handle_type = std::coroutine_handle<promise_type>;
-    using executor_type = boost::asio::io_context::executor_type;
+    using executor_type = boost::asio::any_io_executor;
     using completion_handler_type = std::move_only_function<void(std::optional<T>)>;
 
     struct promise_type

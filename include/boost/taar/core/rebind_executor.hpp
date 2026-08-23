@@ -10,7 +10,7 @@
 #ifndef BOOST_TAAR_CORE_REBIND_EXECUTOR_HPP
 #define BOOST_TAAR_CORE_REBIND_EXECUTOR_HPP
 
-#include <boost/asio/io_context.hpp>
+#include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/asio/as_tuple.hpp>
 
@@ -20,7 +20,7 @@ namespace boost::taar {
 
     Given an Asio I/O object type @a T (e.g. `tcp::socket`,
     `beast::tcp_stream`, `tcp::acceptor`), this alias produces the
-    corresponding type using `io_context::executor_type` and bound to the
+    corresponding type using `any_io_executor` and bound to the
     @ref boost::taar::use_awaitable_tuple completion token. The result is
     the type Taar's coroutines use throughout, sparing the user from
     spelling out the rebind boilerplate.
@@ -30,9 +30,9 @@ using rebind_executor = typename T::template
     rebind_executor<
         boost::asio::as_tuple_t<
             boost::asio::use_awaitable_t<
-                boost::asio::io_context::executor_type
+                boost::asio::any_io_executor
             >
-        >::executor_with_default<boost::asio::io_context::executor_type>
+        >::executor_with_default<boost::asio::any_io_executor>
     >::other;
 
 } // namespace boost::taar

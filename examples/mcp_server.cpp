@@ -203,7 +203,7 @@ int main(int argc, char* argv[])
         io,
         taar::server::tcp("0.0.0.0", port, session, signals,
             [](net::ip::tcp::endpoint const& ep) { std::clog << "MCP endpoint at http://" << ep << "/mcp\n"; }),
-        net::bind_cancellation_slot(signals.slot(), taar::ignore_and_rethrow));
+        taar::ignore_and_rethrow);
 
     io.run();
 }

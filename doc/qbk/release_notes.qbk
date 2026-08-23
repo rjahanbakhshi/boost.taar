@@ -44,6 +44,12 @@
   (buffered), `multipart_reader` and `multipart_stream_arg` (streamed).
 * JSON-RPC positional parameters: a `params` array binds to `rpc_arg`
   providers in order.
+* Multi-threaded `io_context`: every connection runs on its own strand
+  and `cancellation_signals::emit` dispatches through it, fixing a crash
+  when shutting down a server driven by several threads. `taar::awaitable`
+  now uses `any_io_executor`; completion tokens spelled with
+  `io_context::executor_type` should use `taar::use_awaitable`.
+  Binding `signals.slot()` to the server coroutine is no longer needed.
 * `query_list_arg`: repeated query keys bind to a container, element by
   element; OpenAPI marks `query_arg` CSV lists as `explode: false`.
 * `with_session` accepts streaming inner handlers (`chunked_response`,

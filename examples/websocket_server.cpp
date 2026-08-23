@@ -59,7 +59,7 @@ int main(int argc, char* argv[])
     using taar::matcher::method;
     using taar::matcher::target;
     using taar::rebind_executor;
-    using awaitable_token = net::use_awaitable_t<net::io_context::executor_type>;
+    using awaitable_token = net::use_awaitable_t<net::any_io_executor>;
 
     net::io_context io_context;
 
@@ -141,8 +141,7 @@ int main(int argc, char* argv[])
                           << " (try ws://127.0.0.1:" << endpoint.port()
                           << "/echo)\n";
             }),
-        net::bind_cancellation_slot(cancellation_signals.slot(),
-                                    taar::ignore_and_rethrow));
+        taar::ignore_and_rethrow);
 
     std::vector<std::jthread> threads;
     for (int i = 0; i < 4; ++i)

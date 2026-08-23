@@ -300,7 +300,7 @@ BOOST_AUTO_TEST_CASE(test_e2e_streaming_websocket_echo_upgrade)
 {
     net::io_context io;
     taar::session::http session;
-    using awaitable_token = net::use_awaitable_t<net::io_context::executor_type>;
+    using awaitable_token = net::use_awaitable_t<net::any_io_executor>;
 
     session.register_raw_handler(
         method == http::verb::get && target == "/echo",

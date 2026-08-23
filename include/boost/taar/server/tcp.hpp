@@ -16,7 +16,10 @@
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/this_coro.hpp>
+#include <boost/asio/cancellation_state.hpp>
 #include <boost/asio/co_spawn.hpp>
+#include <boost/asio/strand.hpp>
+#include <boost/asio/this_coro.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/bind_cancellation_slot.hpp>
 #include <functional>
@@ -32,10 +35,15 @@ namespace boost::taar::server {
     starts listening on `max_listen_connections`, and then loops accepting
     connections until cancellation is requested through @a signals.
 
-    Each accepted socket is forwarded to @a session_handler on the executor
-    of the new socket. The handler is responsible for the full lifetime of
-    the connection, typically by invoking a
-    @ref boost::taar::session::http instance.
+    Each accepted socket is forwarded to @a session_handler on its own
+    strand, so the `io_context` may be run by several threads. The handler
+    is responsible for the full lifetime of the connection, typically by
+    invoking a @ref boost::taar::session::http instance.
+
+    The acceptor and every connection register themselves with @a signals,
+    and `signals.emit()` may be called from any thread. The coroutine
+    ignores a cancellation slot bound by its spawner; stop it through
+    @a signals.
 
     @param bind_host             Host or address to bind. `"0.0.0.0"` and
                                  `"::"` accept on all interfaces.
@@ -55,6 +63,35 @@ namespace boost::taar::server {
     @throws std::system_error if name resolution fails.
 */
 namespace detail {
+
+/// Run @a loop on a fresh strand, cancellable through @a signals only.
+template <typename Loop>
+awaitable<void> run_on_strand(cancellation_signals& signals, Loop loop)
+{
+    namespace net = boost::asio;
+    // The spawner's slot is not usable: its emission would run on the
+    // emitting thread, racing with this coroutine's operations. A filter
+    // that passes nothing keeps that emission from reaching them.
+    co_await net::this_coro::reset_cancellation_state(
+        net::cancellation_filter<net::cancellation_type::none> {});
+    auto strand = net::make_strand(co_await net::this_coro::executor);
+    auto bound = signals.slot(strand);
+    co_await net::co_spawn(strand, std::move(loop), net::bind_cancellation_slot(bound.slot(), use_awaitable));
+}
+
+/// Spawn @a session on its own strand with a shutdown slot from @a signals.
+template <typename Executor, typename Session>
+void spawn_session(Executor const& executor, cancellation_signals& signals, Session&& session)
+{
+    namespace net = boost::asio;
+    auto strand = net::make_strand(executor);
+    auto bound = signals.slot(strand);
+    auto const slot = bound.slot();
+    net::co_spawn(
+        strand,
+        std::forward<Session>(session),
+        net::bind_cancellation_slot(slot, [bound = std::move(bound)](std::exception_ptr) {}));
+}
 
 /// Bind, listen and call @a on_socket for every accepted connection until cancelled.
 template <typename OnSocket>
@@ -112,7 +149,7 @@ template <typename SessionHandler> // TODO: SessionHandler concept for callable 
 {
     namespace net = boost::asio;
 
-    co_await detail::accept_loop(
+    co_await detail::run_on_strand(signals, detail::accept_loop(
         std::move(bind_host),
         std::move(bind_port),
         signals,
@@ -120,11 +157,10 @@ template <typename SessionHandler> // TODO: SessionHandler concept for callable 
         [&](rebind_executor<net::ip::tcp::socket> socket)
         {
             auto const executor = socket.get_executor();
-            net::co_spawn(
-                executor,
-                std::forward<SessionHandler>(session_handler)(std::move(socket), signals),
-                net::bind_cancellation_slot(signals.slot(), net::detached));
-        });
+            detail::spawn_session(
+                executor, signals,
+                std::forward<SessionHandler>(session_handler)(std::move(socket), signals));
+        }));
 }
 
 } // namespace boost::taar::server

@@ -120,7 +120,7 @@ int main(int argc, char* argv[])
         io,
         taar::server::tcp("0.0.0.0", port, session, signals,
             [](net::ip::tcp::endpoint const& ep) { std::clog << "Listening on " << ep << '\n'; }),
-        net::bind_cancellation_slot(signals.slot(), taar::ignore_and_rethrow));
+        taar::ignore_and_rethrow);
 
     std::vector<std::jthread> threads;
     for (unsigned i = 0; i < std::thread::hardware_concurrency(); ++i) threads.emplace_back([&] { io.run(); });

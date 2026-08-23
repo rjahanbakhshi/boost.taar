@@ -46,7 +46,7 @@ using response = http::response<http::string_body>;
 class connection
 {
 public:
-    explicit connection(net::io_context::executor_type ex)
+    explicit connection(net::any_io_executor ex)
         : socket_ {ex}
     {}
 
@@ -120,7 +120,7 @@ void run(net::io_context& io, Session& session, Client client)
         taar::server::tcp(
             "127.0.0.1", "0", session, signals,
             [&](net::ip::tcp::endpoint const& ep) { port = ep.port(); }),
-        net::bind_cancellation_slot(signals.slot(), net::detached));
+        net::detached);
 
     net::co_spawn(io, [&]() -> taar::awaitable<void>
     {

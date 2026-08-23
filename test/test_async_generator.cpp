@@ -113,7 +113,7 @@ awaitable<void> async_delay(std::chrono::milliseconds ms)
     boost::asio::steady_timer timer{executor};
     timer.expires_after(ms);
     co_await timer.async_wait(
-        boost::asio::use_awaitable_t<boost::asio::io_context::executor_type>{});
+        boost::asio::use_awaitable_t<boost::asio::any_io_executor>{});
 }
 
 async_generator<int> generator_with_timer()
@@ -424,7 +424,7 @@ async_generator<std::string> generator_with_direct_timer()
 
     co_yield std::string{"first"};
     timer.expires_after(std::chrono::milliseconds{1});
-    co_await timer.async_wait(net::use_awaitable_t<net::io_context::executor_type>{});
+    co_await timer.async_wait(net::use_awaitable_t<net::any_io_executor>{});
     co_yield std::string{"second"};
 }
 
