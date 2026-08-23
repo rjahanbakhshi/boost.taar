@@ -27,8 +27,6 @@ rather than planned.
 
 ## MCP
 
-- Capabilities not implemented: `completion/complete`, `logging/setLevel`.
-- `outputSchema` and tool annotations are not emitted.
 - A POST never answers with an SSE stream; notifications go over the GET
   stream (or stdout on stdio).
 - Resource templates support `{name}` placeholders only (no RFC 6570
@@ -48,6 +46,8 @@ rather than planned.
 
 ## Recently closed
 
+- MCP `logging/setLevel` and `log()`, `completion/complete`, tool
+  `outputSchema`, `title` and `annotations` via `tool_spec`.
 - Multi-threaded shutdown race: connections run on per-connection strands
   and `cancellation_signals::emit` dispatches through them.
 - `query_list_arg` for repeated query keys (`?tag=a&tag=b`), with the

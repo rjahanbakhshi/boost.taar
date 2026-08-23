@@ -277,8 +277,12 @@ derived from the callable's parameter types:
     http_session.register_request_handler(target == "/mcp", mcp.handler());
 
 Prompts register the same way (`mcp.prompt(name, description, callable,
-mcp_arg...)`), and `mcp.resource_updated(uri)` notifies the sessions that
-subscribed to a resource. A tool returning `taar::mcp::image::from_bytes(png,
+mcp_arg...)`), `mcp.complete_prompt(name, argument, completer)` answers
+`completion/complete` for an argument, and `mcp.resource_updated(uri)`
+notifies the sessions that subscribed to a resource. Passing a
+`taar::mcp::tool_spec` instead of name and description adds a title,
+annotations such as `destructive_hint`, and an explicit `outputSchema`
+(one is derived from the return type otherwise). A tool returning `taar::mcp::image::from_bytes(png,
 "image/png")` (or `audio`, `embedded_resource`, a full `tool_result`)
 emits binary content; a resource returning `taar::mcp::blob` carries bytes. A stateful tool may ask for `taar::mcp::session_info const&` to learn its
 own session id and push a notification to its caller, and REST request

@@ -375,6 +375,21 @@ Where the specifications leave room, Taar makes these choices:
   `structuredContent: {"result": ...}`; object results are passed through
   as `structuredContent`; `void` yields an empty `content` array. Unknown
   tools and bad arguments are `-32602`; an unknown resource is `-32002`.
+* `tools/list` carries an `outputSchema` derived from the callable's
+  return type with the same wrapping (described structs and string maps
+  as is, scalars, strings, enums and sequences under `result`), unless
+  `tool_spec::output_schema` sets or disables it. `tool_spec` also adds
+  `title` and `annotations` (read-only, destructive, idempotent,
+  open-world hints).
+* `logging/setLevel` is stored per session (initially
+  `server_info::default_log_level`); `log()` and `log_all()` emit
+  `notifications/message` only at or above it. The `logging` capability
+  is always advertised.
+* `completion/complete` consults completers registered per prompt or
+  resource-template argument (`complete_prompt`, `complete_resource`);
+  an argument without one answers an empty list, an unknown ref is
+  `-32602`, and at most 100 values are returned with `hasMore` and
+  `total`. The `completions` capability appears once a completer exists.
 * The `GET` event stream is one per session (`409` for a second), fed by
   `notify`/`broadcast`; messages queued before a stream opens are kept.
   Deleting or sweeping the session ends the stream. `notify` does not

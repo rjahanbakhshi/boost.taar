@@ -41,6 +41,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -137,10 +138,16 @@ int main(int argc, char* argv[])
 
     server.tool("notes/add", "Append a note", &add_note, mcp_arg("text", "The note text"));
     server.tool("notes/list", "All notes in this session", &list_notes);
-    server.tool("notes/clear", "Delete all notes", &clear_notes);
+    // Annotations tell the client what a tool does to the world.
+    server.tool(mcp::tool_spec {
+            .name = "notes/clear", .description = "Delete all notes", .title = "Clear notes",
+            .annotations = mcp::tool_annotations {.destructive_hint = true, .idempotent_hint = true}},
+        &clear_notes);
     server.tool("time/now", "Current UTC time", &now);
     server.tool("notes/announce", "Tell every connected client that the notes changed", [&]
     {
+        // Log entries respect each session's logging/setLevel.
+        server.log_all(mcp::log_level::info, "notes announced", "notes");
         return server.broadcast("notifications/resources/updated", json::object {{"uri", "notes://all"}});
     });
     // session_info identifies the calling session, so a tool can notify its own client.
@@ -174,6 +181,16 @@ int main(int argc, char* argv[])
         });
     server.prompt("notes/summarize", "A prompt asking the model to summarize the notes", &summarize_prompt,
         mcp_arg("style", "e.g. terse, friendly"));
+    // Argument completion for the prompt (completion/complete).
+    server.complete_prompt("notes/summarize", "style", [](std::string_view typed)
+    {
+        std::vector<std::string> out;
+        for (std::string_view s : {"terse", "friendly", "formal", "bullet points"})
+        {
+            if (s.starts_with(typed)) out.emplace_back(s);
+        }
+        return out;
+    });
     // Clients that subscribed to notes://all learn about changes.
     server.tool("notes/touch", "Signal that the notes changed", [&] { return server.resource_updated("notes://all"); });
     server.resource("notes://{index}", "text/plain", "A single note by index", &note_at, uri_arg("index", "zero-based"));

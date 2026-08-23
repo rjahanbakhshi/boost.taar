@@ -712,4 +712,146 @@ BOOST_AUTO_TEST_CASE(test_mcp_binary_tool_results_and_blob_resources)
     BOOST_TEST(!note.as_object().contains("blob"));
 }
 
+BOOST_AUTO_TEST_CASE(test_mcp_logging_levels)
+{
+    stateful_endpoint e {{.name = "s", .version = "1"}};
+    auto init = post(e, initialize_body);
+    std::string const sid {init["Mcp-Session-Id"]};
+    BOOST_TEST(body_json(init).at("result").at("capabilities").as_object().contains("logging"));
+    BOOST_TEST(!body_json(init).at("result").at("capabilities").as_object().contains("completions"));
+
+    BOOST_TEST(e.log(sid, mcp::log_level::debug, "starting"));             // default level: everything
+    auto set = post(e, R"({"jsonrpc":"2.0","id":2,"method":"logging/setLevel","params":{"level":"warning"}})", {{"Mcp-Session-Id", sid}});
+    BOOST_TEST(body_json(set).at("result").as_object().empty());
+    BOOST_TEST(!e.log(sid, mcp::log_level::info, "chatty"));
+    BOOST_TEST(!e.log(sid, mcp::log_level::notice, "still chatty"));
+    BOOST_TEST(e.log(sid, mcp::log_level::warning, json::object {{"disk", "90%"}}, "storage"));
+    BOOST_TEST(e.log(sid, mcp::log_level::emergency, "fire"));
+    BOOST_TEST(e.log_all(mcp::log_level::error, "all") == 1u);
+    BOOST_TEST(e.log_all(mcp::log_level::info, "all") == 0u);
+    BOOST_TEST(!e.log("nope", mcp::log_level::error, "x"));
+
+    auto bad = post(e, R"({"jsonrpc":"2.0","id":3,"method":"logging/setLevel","params":{"level":"loud"}})", {{"Mcp-Session-Id", sid}});
+    BOOST_TEST(body_json(bad).at("error").at("code").as_int64() == -32602);
+    BOOST_TEST((mcp::parse_log_level("critical") == mcp::log_level::critical));
+    BOOST_TEST(mcp::to_string(mcp::log_level::alert) == "alert");
+
+    // Stateless endpoints accept the request too; there is just no stream to log to.
+    stateless_endpoint stateless {{.name = "s", .version = "1"}};
+    auto ok = post(stateless, R"({"jsonrpc":"2.0","id":1,"method":"logging/setLevel","params":{"level":"error"}})");
+    BOOST_TEST(body_json(ok).at("result").as_object().empty());
+}
+
+BOOST_AUTO_TEST_CASE(test_mcp_completion)
+{
+    stateless_endpoint e {{.name = "s", .version = "1"}};
+    e.prompt("greet", "Say hi", [](std::string style) { return "hi, " + style; }, mcp_arg("style", "tone"));
+    e.resource("calc://history/{index}", "text/plain", "entry", [](int index) { return std::to_string(index); }, uri_arg("index"));
+    BOOST_TEST(!body_json(post(e, initialize_body)).at("result").at("capabilities").as_object().contains("completions"));
+
+    e.complete_prompt("greet", "style", [](std::string_view value)
+    {
+        std::vector<std::string> out;
+        for (std::string_view s : {"terse", "friendly", "formal"})
+        {
+            if (s.starts_with(value)) out.emplace_back(s);
+        }
+        return out;
+    });
+    e.complete_resource("calc://history/{index}", "index", [](mcp::completion_request const& r)
+    {
+        mcp::completion_result out;
+        BOOST_TEST(r.ref_type == "ref/resource");
+        BOOST_TEST(r.ref == "calc://history/{index}");
+        BOOST_TEST(r.argument == "index");
+        std::size_t const n = r.context.contains("limit") ? 5 : 150;
+        for (std::size_t i = 0; i < n; ++i) out.values.push_back(std::to_string(i));
+        return out;
+    });
+    BOOST_CHECK_THROW(e.complete_prompt("nope", "x", [](std::string_view) { return std::vector<std::string> {}; }), std::logic_error);
+    BOOST_CHECK_THROW(e.complete_resource("calc://history/last", "x", [](std::string_view) { return std::vector<std::string> {}; }), std::logic_error);
+    BOOST_TEST(body_json(post(e, initialize_body)).at("result").at("capabilities").as_object().contains("completions"));
+
+    auto styles = body_json(post(e, R"({"jsonrpc":"2.0","id":1,"method":"completion/complete","params":{"ref":{"type":"ref/prompt","name":"greet"},"argument":{"name":"style","value":"f"}}})")).at("result").at("completion");
+    BOOST_REQUIRE(styles.at("values").as_array().size() == 2u);
+    BOOST_TEST(styles.at("values").as_array()[0].as_string() == "friendly");
+    BOOST_TEST(styles.at("hasMore").as_bool() == false);
+    BOOST_TEST(!styles.as_object().contains("total"));
+
+    auto many = body_json(post(e, R"({"jsonrpc":"2.0","id":2,"method":"completion/complete","params":{"ref":{"type":"ref/resource","uri":"calc://history/{index}"},"argument":{"name":"index","value":""}}})")).at("result").at("completion");
+    BOOST_TEST(many.at("values").as_array().size() == 100u);
+    BOOST_TEST(many.at("hasMore").as_bool());
+    BOOST_TEST(many.at("total").to_number<std::uint64_t>() == 150u);
+    auto few = body_json(post(e, R"({"jsonrpc":"2.0","id":3,"method":"completion/complete","params":{"ref":{"type":"ref/resource","uri":"calc://history/{index}"},"argument":{"name":"index","value":""},"context":{"arguments":{"limit":"yes"}}}})")).at("result").at("completion");
+    BOOST_TEST(few.at("values").as_array().size() == 5u);
+    BOOST_TEST(!few.at("hasMore").as_bool());
+
+    // No completer for the argument: an empty list, not an error.
+    auto none = body_json(post(e, R"({"jsonrpc":"2.0","id":4,"method":"completion/complete","params":{"ref":{"type":"ref/prompt","name":"greet"},"argument":{"name":"other","value":"x"}}})")).at("result").at("completion");
+    BOOST_TEST(none.at("values").as_array().empty());
+    // Invalid shapes and unknown targets are -32602.
+    for (std::string params : {
+        R"({"ref":{"type":"ref/other","name":"greet"},"argument":{"name":"style","value":""}})",
+        R"({"ref":{"type":"ref/prompt","name":"missing"},"argument":{"name":"style","value":""}})",
+        R"({"ref":{"type":"ref/resource","uri":"calc://nope/{x}"},"argument":{"name":"x","value":""}})",
+        R"({"ref":{"type":"ref/prompt","name":"greet"}})",
+        R"({"argument":{"name":"style","value":""}})"})
+    {
+        auto err = body_json(post(e, R"({"jsonrpc":"2.0","id":9,"method":"completion/complete","params":)" + params + "}"));
+        BOOST_TEST(err.at("error").at("code").as_int64() == -32602);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(test_mcp_output_schema_and_annotations)
+{
+    stateless_endpoint e {{.name = "s", .version = "1"}};
+    e.tool("sq", "Square", [](int n) { return n * n; }, mcp_arg("n"));
+    e.tool("mk", "Make a point", [](int x) { return point {x, x, "p"}; }, mcp_arg("x"));
+    e.tool("names", "Some names", [] { return std::vector<std::string> {"a", "b"}; });
+    e.tool("raw", "Untyped", [] { return json::value {1}; });
+    e.tool("typed", "Typed content", [] { return mcp::tool_result {.content = {mcp::text {"x"}}}; });
+    e.tool("async", "Async string", []() -> taar::awaitable<std::string> { co_return "s"; });
+    e.tool(mcp::tool_spec {
+            .name = "wipe", .description = "Delete everything", .title = "Wipe",
+            .annotations = mcp::tool_annotations {.title = "Wipe all", .destructive_hint = true, .idempotent_hint = false},
+            .output_schema = json::object {}},
+        [] { return 1; });
+    e.tool(mcp::tool_spec {.name = "custom", .description = "Own schema",
+            .output_schema = json::object {{"type", "object"}, {"properties", json::object {{"result", json::object {{"type", "number"}}}}}}},
+        [] { return 2; });
+
+    auto tools = body_json(post(e, R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})")).at("result").at("tools").as_array();
+    auto find = [&](std::string const& name) -> json::object const&
+    {
+        for (auto const& t : tools) if (t.at("name").as_string() == name) return t.as_object();
+        throw std::runtime_error {"no tool " + name};
+    };
+    auto const& sq = find("sq").at("outputSchema");
+    BOOST_TEST(sq.at("type").as_string() == "object");
+    BOOST_TEST(sq.at("properties").at("result").at("type").as_string() == "integer");
+    BOOST_TEST(sq.at("required").as_array()[0].as_string() == "result");
+    auto const& mk = find("mk").at("outputSchema");
+    BOOST_TEST(mk.at("type").as_string() == "object");
+    BOOST_TEST(mk.at("properties").at("label").at("type").as_string() == "string");
+    BOOST_TEST(find("names").at("outputSchema").at("properties").at("result").at("type").as_string() == "array");
+    BOOST_TEST(find("async").at("outputSchema").at("properties").at("result").at("type").as_string() == "string");
+    BOOST_TEST(!find("raw").contains("outputSchema"));
+    BOOST_TEST(!find("typed").contains("outputSchema"));
+    BOOST_TEST(!find("typed").contains("annotations"));
+
+    auto const& wipe = find("wipe");
+    BOOST_TEST(wipe.at("title").as_string() == "Wipe");
+    BOOST_TEST(!wipe.contains("outputSchema"));
+    BOOST_TEST(wipe.at("annotations").at("title").as_string() == "Wipe all");
+    BOOST_TEST(wipe.at("annotations").at("destructiveHint").as_bool());
+    BOOST_TEST(wipe.at("annotations").at("idempotentHint").as_bool() == false);
+    BOOST_TEST(!wipe.at("annotations").as_object().contains("readOnlyHint"));
+    BOOST_TEST(find("custom").at("outputSchema").at("properties").at("result").at("type").as_string() == "number");
+
+    // The declared shape matches what tools/call returns.
+    auto called = body_json(post(e, R"({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"mk","arguments":{"x":3}}})")).at("result");
+    BOOST_TEST(called.at("structuredContent").at("label").as_string() == "p");
+    BOOST_TEST(e.tools().back().output_schema.at("properties").at("result").at("type").as_string() == "number");
+}
+
 } // namespace

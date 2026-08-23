@@ -26,6 +26,10 @@
 #include <boost/taar/matcher/context.hpp>
 #include <boost/taar/mcp/arg.hpp>
 #include <boost/taar/mcp/content.hpp>
+#include <boost/taar/core/is_awaitable.hpp>
+#include <boost/taar/type_traits/callable.hpp>
+#include <boost/describe/members.hpp>
+#include <boost/describe/enumerators.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/posix/stream_descriptor.hpp>
@@ -74,6 +78,26 @@ namespace boost::taar::mcp {
 /// Session type for an endpoint without per-session state (no `Mcp-Session-Id`).
 struct stateless {};
 
+/// MCP logging levels (RFC 5424 names), least to most severe.
+enum class log_level { debug, info, notice, warning, error, critical, alert, emergency };
+
+inline constexpr std::array<std::string_view, 8> log_level_names {
+    "debug", "info", "notice", "warning", "error", "critical", "alert", "emergency"};
+
+inline std::string_view to_string(log_level level) noexcept
+{
+    return log_level_names[static_cast<std::size_t>(level)];
+}
+
+inline std::optional<log_level> parse_log_level(std::string_view name) noexcept
+{
+    for (std::size_t i = 0; i < log_level_names.size(); ++i)
+    {
+        if (log_level_names[i] == name) return static_cast<log_level>(i);
+    }
+    return std::nullopt;
+}
+
 /// Static information the server reports in `initialize`, plus session options.
 struct server_info
 {
@@ -85,6 +109,8 @@ struct server_info
     std::size_t page_size = 0;
     /// Events kept per session for `Last-Event-ID` stream resumption.
     std::size_t stream_history = 100;
+    /// Least severe `log()` message delivered before the client sets a level.
+    log_level default_log_level = log_level::debug;
 };
 
 /// The client's self-description from `initialize`.
@@ -162,12 +188,59 @@ inline bool is_supported_protocol_version(std::string_view v) noexcept
 /// JSON-RPC error code MCP assigns to an unknown resource URI.
 inline constexpr int resource_not_found_code = -32002;
 
+/// What a `completion/complete` request asks for.
+struct completion_request
+{
+    std::string ref_type;           ///< "ref/prompt" or "ref/resource".
+    std::string ref;                ///< Prompt name or resource URI template.
+    std::string argument;           ///< The argument being completed.
+    std::string value;              ///< What the user typed so far.
+    boost::json::object context;    ///< `params.context.arguments`: other arguments already filled in.
+};
+
+/// A completer's answer. At most 100 values are sent; the rest sets `hasMore`.
+struct completion_result
+{
+    std::vector<std::string> values;
+    std::optional<std::size_t> total {};
+    bool has_more = false;
+};
+
+/// Behavioural hints a tool may advertise (`tools/list` `annotations`).
+struct tool_annotations
+{
+    std::string title {};
+    std::optional<bool> read_only_hint {};
+    std::optional<bool> destructive_hint {};
+    std::optional<bool> idempotent_hint {};
+    std::optional<bool> open_world_hint {};
+};
+
+/** Everything `tool()` can say about a tool besides its callable.
+
+    `output_schema` left unset derives a schema from the callable's return
+    type (a described struct or string-keyed map as is; scalars, strings,
+    enums and sequences under a `result` property, matching how results
+    are wrapped); an empty object disables it.
+*/
+struct tool_spec
+{
+    std::string name;
+    std::string description {};
+    std::string title {};
+    std::optional<tool_annotations> annotations {};
+    std::optional<boost::json::object> output_schema {};
+};
+
 /// Registration-time description of a tool, for `tools/list`.
 struct tool_info
 {
     std::string name;
     std::string description;
     std::vector<param_info> params;
+    std::string title {};
+    std::optional<tool_annotations> annotations {};
+    boost::json::object output_schema {};
 };
 
 /// Registration-time description of a prompt, for `prompts/list`.
@@ -225,6 +298,43 @@ using prompt_call = tool_call;
 
 namespace detail {
 
+template <typename T> struct unwrap_awaitable { using type = T; };
+template <typename T, typename E> struct unwrap_awaitable<boost::asio::awaitable<T, E>> { using type = T; };
+
+/// The `outputSchema` implied by a tool callable's return type, or empty.
+template <typename Callable>
+boost::json::object output_schema_for()
+{
+    using R0 = std::remove_cvref_t<type_traits::callable_result<std::remove_cvref_t<Callable>>>;
+    using R = std::remove_cvref_t<typename unwrap_awaitable<R0>::type>;
+    if constexpr (
+        std::is_void_v<R> || is_optional_v<R> ||
+        std::same_as<R, boost::json::value> || std::same_as<R, boost::json::object> || std::same_as<R, boost::json::array> ||
+        std::same_as<R, tool_result> || std::same_as<R, text> || std::same_as<R, image> ||
+        std::same_as<R, audio> || std::same_as<R, embedded_resource>)
+    {
+        return {};
+    }
+    else if constexpr (boost::describe::has_describe_members<R>::value || taar::detail::string_map_like<R>)
+    {
+        return json_schema_for<R>();
+    }
+    else if constexpr (
+        std::is_arithmetic_v<R> || type_traits::string_like<R> ||
+        boost::describe::has_describe_enumerators<R>::value || taar::detail::sequence_like<R>)
+    {
+        boost::json::object schema;
+        schema["type"] = "object";
+        schema["properties"] = boost::json::object {{"result", json_schema_for<R>()}};
+        schema["required"] = boost::json::array {"result"};
+        return schema;
+    }
+    else
+    {
+        return {};
+    }
+}
+
 /// One server-to-client message with its stream event id.
 struct sse_event
 {
@@ -245,6 +355,7 @@ struct session_slot
     std::deque<sse_event> history;             ///< Recent events, for resumption.
     std::uint64_t next_event_id = 1;
     std::size_t history_limit = 100;
+    std::atomic<int> log_level {0};            ///< Least severe level delivered by `log()`.
 
     /// Queue a message for the client, assigning the next event id.
     bool push(std::string json)
@@ -452,16 +563,61 @@ public:
     template <typename Callable, typename... Providers>
     endpoint& tool(std::string name, std::string description, Callable&& callable, Providers... providers)
     {
-        if (tools_.contains(name))
+        return tool(tool_spec {std::move(name), std::move(description)},
+            std::forward<Callable>(callable), std::move(providers)...);
+    }
+
+    /// Register a tool with a full @ref tool_spec (title, annotations, output schema).
+    template <typename Callable, typename... Providers>
+    endpoint& tool(tool_spec spec, Callable&& callable, Providers... providers)
+    {
+        if (tools_.contains(spec.name))
         {
-            throw std::logic_error {"mcp::endpoint: tool already registered: " + name};
+            throw std::logic_error {"mcp::endpoint: tool already registered: " + spec.name};
         }
         auto bound = jsonrpc::detail::bind_method<tool_call, call_contexts>(
             std::forward<Callable>(callable), std::move(providers)...);
-        tool_order_.push_back(name);
-        tools_.emplace(name, tool_entry {
-            tool_info {name, std::move(description), std::move(bound.params)},
-            std::move(bound.invoke)});
+        tool_info info {spec.name, std::move(spec.description), std::move(bound.params)};
+        info.title = std::move(spec.title);
+        info.annotations = std::move(spec.annotations);
+        info.output_schema = spec.output_schema
+            ? std::move(*spec.output_schema)
+            : detail::output_schema_for<Callable>();
+        tool_order_.push_back(spec.name);
+        tools_.emplace(spec.name, tool_entry {std::move(info), std::move(bound.invoke)});
+        return *this;
+    }
+
+    /** Register a completer for a prompt argument (`completion/complete`
+        with `ref/prompt`). @a completer is called with a
+        @ref completion_request, or just the typed value as a
+        `std::string_view`, and returns a @ref completion_result or a
+        `std::vector<std::string>`.
+    */
+    template <typename Completer>
+    endpoint& complete_prompt(std::string prompt, std::string argument, Completer completer)
+    {
+        if (!prompts_.contains(prompt))
+        {
+            throw std::logic_error {"mcp::endpoint: no such prompt to complete: " + prompt};
+        }
+        completers_[completion_key("ref/prompt", prompt, argument)] = wrap_completer(std::move(completer));
+        return *this;
+    }
+
+    /// Register a completer for a resource template argument (`completion/complete` with `ref/resource`).
+    template <typename Completer>
+    endpoint& complete_resource(std::string uri_template, std::string argument, Completer completer)
+    {
+        bool const known = std::ranges::any_of(resources_, [&](auto const& r)
+        {
+            return r.info.is_template && r.info.uri == uri_template;
+        });
+        if (!known)
+        {
+            throw std::logic_error {"mcp::endpoint: no such resource template to complete: " + uri_template};
+        }
+        completers_[completion_key("ref/resource", uri_template, argument)] = wrap_completer(std::move(completer));
         return *this;
     }
 
@@ -770,6 +926,33 @@ public:
     }
 
     /// Queue a notification for every live session (stateful mode). Returns the number queued.
+    /** Send a `notifications/message` log entry to one session (stateful mode).
+
+        Dropped, returning false, when @a level is below the level the
+        client set with `logging/setLevel` (initially
+        `server_info::default_log_level`) or the session is unknown.
+    */
+    bool log(std::string const& session_id, log_level level, boost::json::value data, std::string logger = {})
+        requires stateful
+    {
+        auto entry = sessions_.store.peek(session_id);
+        if (!entry) return false;
+        if (static_cast<int>(level) < entry->context()->log_level.load()) return false;
+        return entry->context()->push(notification("notifications/message", log_params(level, std::move(data), std::move(logger))));
+    }
+
+    /// `log()` to every session; returns how many accepted the entry.
+    std::size_t log_all(log_level level, boost::json::value data, std::string logger = {})
+        requires stateful
+    {
+        std::size_t n = 0;
+        for (auto const& key : sessions_.store.keys())
+        {
+            if (log(key, level, data, logger)) ++n;
+        }
+        return n;
+    }
+
     std::size_t broadcast(std::string_view method, boost::json::value params = {})
         requires stateful
     {
@@ -1420,6 +1603,11 @@ private:
     {
         boost::json::object capabilities;
         capabilities["tools"] = boost::json::object {{"listChanged", true}};
+        capabilities["logging"] = boost::json::object {};
+        if (!completers_.empty())
+        {
+            capabilities["completions"] = boost::json::object {};
+        }
         capabilities["resources"] = boost::json::object {{"subscribe", stateful}, {"listChanged", true}};
         if (!prompts_.empty())
         {
@@ -1460,6 +1648,7 @@ private:
             entry->context()->info.client = params.client;
             entry->context()->info.capabilities = parse_client_capabilities(params.capabilities);
             entry->context()->history_limit = info_.stream_history;
+            entry->context()->log_level = static_cast<int>(info_.default_log_level);
             {
                 auto guard = co_await sessions_.store.lock(entry);
                 if (on_initialize_)
@@ -1555,6 +1744,33 @@ private:
         {
             out = jsonrpc::make_response(id, boost::json::object {});
         }
+        else if (env.method == "logging/setLevel")
+        {
+            auto const* params = env.params ? env.params->if_object() : nullptr;
+            auto const* level = params ? params->if_contains("level") : nullptr;
+            auto const parsed = level && level->is_string() ? parse_log_level(level->as_string()) : std::nullopt;
+            if (!parsed)
+            {
+                co_return error_envelope(id, static_cast<int>(jsonrpc::error::invalid_params),
+                    "logging/setLevel requires params.level: one of debug, info, notice, warning, error, critical, alert, emergency");
+            }
+            if constexpr (stateful)
+            {
+                if (auto entry = sessions_.store.peek(scope_key_of(ctxs)))
+                {
+                    entry->context()->log_level = static_cast<int>(*parsed);
+                }
+            }
+            else
+            {
+                stateless_log_level_ = static_cast<int>(*parsed);
+            }
+            out = jsonrpc::make_response(id, boost::json::object {});
+        }
+        else if (env.method == "completion/complete")
+        {
+            out = complete(env);
+        }
         else if (env.method == "tools/list")
         {
             out = jsonrpc::make_response(id, list_tools(env));
@@ -1604,8 +1820,20 @@ private:
             auto const& info = tools_.at(name).info;
             boost::json::object t;
             t["name"] = info.name;
+            if (!info.title.empty()) t["title"] = info.title;
             t["description"] = info.description;
             t["inputSchema"] = object_schema(info.params);
+            if (!info.output_schema.empty()) t["outputSchema"] = info.output_schema;
+            if (info.annotations)
+            {
+                boost::json::object a;
+                if (!info.annotations->title.empty()) a["title"] = info.annotations->title;
+                if (info.annotations->read_only_hint) a["readOnlyHint"] = *info.annotations->read_only_hint;
+                if (info.annotations->destructive_hint) a["destructiveHint"] = *info.annotations->destructive_hint;
+                if (info.annotations->idempotent_hint) a["idempotentHint"] = *info.annotations->idempotent_hint;
+                if (info.annotations->open_world_hint) a["openWorldHint"] = *info.annotations->open_world_hint;
+                t["annotations"] = std::move(a);
+            }
             tools.push_back(std::move(t));
         }
         return paginate(std::move(tools), "tools", env);
@@ -1967,6 +2195,112 @@ private:
         co_return jsonrpc::make_response(id, std::move(result));
     }
 
+    static boost::json::object log_params(log_level level, boost::json::value data, std::string logger)
+    {
+        boost::json::object params;
+        params["level"] = to_string(level);
+        if (!logger.empty()) params["logger"] = std::move(logger);
+        params["data"] = std::move(data);
+        return params;
+    }
+
+    using completer_fn = std::function<completion_result(completion_request const&)>;
+
+    static std::string completion_key(std::string_view ref_type, std::string_view ref, std::string_view argument)
+    {
+        return std::string {ref_type} + "\n" + std::string {ref} + "\n" + std::string {argument};
+    }
+
+    template <typename Completer>
+    static completer_fn wrap_completer(Completer completer)
+    {
+        return [c = std::move(completer)](completion_request const& request) mutable -> completion_result
+        {
+            auto to_result = [](auto&& value) -> completion_result
+            {
+                using V = std::remove_cvref_t<decltype(value)>;
+                if constexpr (std::same_as<V, completion_result>) return value;
+                else return completion_result {.values = std::vector<std::string>(value.begin(), value.end())};
+            };
+            if constexpr (std::invocable<Completer&, completion_request const&>)
+            {
+                return to_result(c(request));
+            }
+            else
+            {
+                static_assert(std::invocable<Completer&, std::string_view>,
+                    "A completer takes a completion_request const& or a std::string_view (the typed value).");
+                return to_result(c(std::string_view {request.value}));
+            }
+        };
+    }
+
+    /// Answer `completion/complete`.
+    boost::json::value complete(jsonrpc::envelope const& env) const
+    {
+        auto const id = env.id.value_or(boost::json::value {nullptr});
+        auto invalid = [&](char const* what)
+        {
+            return error_envelope(id, static_cast<int>(jsonrpc::error::invalid_params), what);
+        };
+        auto const* params = env.params ? env.params->if_object() : nullptr;
+        auto const* ref = params ? params->if_contains("ref") : nullptr;
+        auto const* argument = params ? params->if_contains("argument") : nullptr;
+        if (!ref || !ref->is_object() || !argument || !argument->is_object())
+        {
+            return invalid("completion/complete requires params.ref and params.argument");
+        }
+        completion_request request;
+        auto const& r = ref->as_object();
+        if (auto const* t = r.if_contains("type"); t && t->is_string()) request.ref_type = std::string {t->as_string()};
+        char const* ref_field = nullptr;
+        if (request.ref_type == "ref/prompt") ref_field = "name";
+        else if (request.ref_type == "ref/resource") ref_field = "uri";
+        else return invalid("params.ref.type must be ref/prompt or ref/resource");
+        if (auto const* n = r.if_contains(ref_field); n && n->is_string()) request.ref = std::string {n->as_string()};
+        if (request.ref.empty()) return invalid("params.ref is missing its name or uri");
+        auto const& a = argument->as_object();
+        if (auto const* n = a.if_contains("name"); n && n->is_string()) request.argument = std::string {n->as_string()};
+        if (auto const* v = a.if_contains("value"); v && v->is_string()) request.value = std::string {v->as_string()};
+        if (request.argument.empty()) return invalid("params.argument.name is required");
+        if (auto const* ctx = params->if_contains("context"); ctx && ctx->is_object())
+        {
+            if (auto const* args = ctx->as_object().if_contains("arguments"); args && args->is_object())
+            {
+                request.context = args->as_object();
+            }
+        }
+        if (request.ref_type == "ref/prompt" && !prompts_.contains(request.ref))
+        {
+            return invalid("Unknown prompt");
+        }
+        if (request.ref_type == "ref/resource" && !std::ranges::any_of(resources_,
+            [&](auto const& res) { return res.info.is_template && res.info.uri == request.ref; }))
+        {
+            return invalid("Unknown resource template");
+        }
+
+        completion_result result;
+        if (auto it = completers_.find(completion_key(request.ref_type, request.ref, request.argument)); it != completers_.end())
+        {
+            result = it->second(request);
+        }
+        constexpr std::size_t max_values = 100;
+        if (result.values.size() > max_values)
+        {
+            if (!result.total) result.total = result.values.size();
+            result.values.resize(max_values);
+            result.has_more = true;
+        }
+        boost::json::array values;
+        for (auto const& v : result.values) values.emplace_back(v);
+        boost::json::object completion;
+        completion["values"] = std::move(values);
+        if (result.total) completion["total"] = static_cast<std::uint64_t>(*result.total);
+        completion["hasMore"] = result.has_more;
+        return jsonrpc::make_response(id, boost::json::object {{"completion", std::move(completion)}});
+    }
+
     static std::string notification(std::string_view method, boost::json::value params)
     {
         boost::json::object msg;
@@ -2029,6 +2363,8 @@ private:
     std::vector<std::string> tool_order_;
     std::vector<resource_entry> resources_;
     std::unordered_map<std::string, prompt_entry> prompts_;
+    std::unordered_map<std::string, completer_fn> completers_;
+    std::atomic<int> stateless_log_level_ {static_cast<int>(log_level::debug)};
     std::vector<std::string> prompt_order_;
     std::move_only_function<void(contexts_type const&, initialize_params const&)> on_initialize_;
     std::unordered_map<std::string, std::function<void(contexts_type const&, boost::json::value const&)>> client_notifications_;
