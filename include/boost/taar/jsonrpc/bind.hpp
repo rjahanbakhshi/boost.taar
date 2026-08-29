@@ -111,7 +111,7 @@ template <typename Callable, std::size_t Offset, typename ProvidersTuple, std::s
 std::vector<param_info> describe_params(ProvidersTuple const& providers, std::index_sequence<Is...>)
 {
     std::vector<param_info> out;
-    auto describe_one = [&]<std::size_t I>()
+    [[maybe_unused]] auto describe_one = [&]<std::size_t I>()
     {
         using provider_type = std::remove_cvref_t<std::tuple_element_t<I, ProvidersTuple>>;
         auto info = make_param_info<type_traits::callable_arg<Callable, Offset + I>>(
