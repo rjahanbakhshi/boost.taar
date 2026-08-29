@@ -173,7 +173,54 @@ BOOST_AUTO_TEST_CASE(test_mcp_uri_template_matching)
 
     BOOST_TEST(!mcp::match_uri_template("calc://history/{index}", "calc://history/").has_value());
     BOOST_TEST(!mcp::match_uri_template("calc://history/{index}", "calc://other/3").has_value());
-    BOOST_TEST(mcp::match_uri_template("calc://history/{index}", "calc://history/3/x").has_value()); // slash allowed in capture
+    BOOST_TEST(!mcp::match_uri_template("calc://history/{index}", "calc://history/3/x").has_value()); // {var} stops at a slash
+
+    // RFC 6570 operators.
+    auto plus = mcp::match_uri_template("file://{+path}", "file://a/b/c.txt");
+    BOOST_REQUIRE(plus.has_value());
+    BOOST_TEST(plus->at("path") == "a/b/c.txt");
+    auto pair_match = mcp::match_uri_template("x://{a,b}/end", "x://1,2/end");
+    BOOST_REQUIRE(pair_match.has_value());
+    BOOST_TEST(pair_match->at("a") == "1");
+    BOOST_TEST(pair_match->at("b") == "2");
+    BOOST_TEST(!mcp::match_uri_template("x://{a,b}/end", "x://1/end").has_value());
+    auto frag = mcp::match_uri_template("doc://{id}{#section}", "doc://7#intro");
+    BOOST_REQUIRE(frag.has_value());
+    BOOST_TEST(frag->at("id") == "7");
+    BOOST_TEST(frag->at("section") == "intro");
+    auto nofrag = mcp::match_uri_template("doc://{id}{#section}", "doc://7");
+    BOOST_REQUIRE(nofrag.has_value());
+    BOOST_TEST(!nofrag->contains("section"));
+    auto dot = mcp::match_uri_template("img://{name}{.ext}", "img://logo.png");
+    BOOST_REQUIRE(dot.has_value());
+    BOOST_TEST(dot->at("ext") == "png");
+    auto segs = mcp::match_uri_template("repo://{owner}{/project,branch}", "repo://me/taar");
+    BOOST_REQUIRE(segs.has_value());
+    BOOST_TEST(segs->at("project") == "taar");
+    BOOST_TEST(!segs->contains("branch"));
+    auto exploded = mcp::match_uri_template("fs://{/path*}", "fs:///var/log/x");
+    BOOST_REQUIRE(exploded.has_value());
+    BOOST_TEST(exploded->at("path") == "var/log/x");
+    auto semi = mcp::match_uri_template("m://item{;v,flag}", "m://item;v=2;flag");
+    BOOST_REQUIRE(semi.has_value());
+    BOOST_TEST(semi->at("v") == "2");
+    BOOST_TEST(semi->at("flag") == "");
+    auto query = mcp::match_uri_template("calc://history/{index}{?format,page}", "calc://history/4?page=2&other=x&format=json");
+    BOOST_REQUIRE(query.has_value());
+    BOOST_TEST(query->at("index") == "4");
+    BOOST_TEST(query->at("format") == "json");
+    BOOST_TEST(query->at("page") == "2");
+    BOOST_TEST(!query->contains("other"));
+    auto noquery = mcp::match_uri_template("calc://history/{index}{?format}", "calc://history/4");
+    BOOST_REQUIRE(noquery.has_value());
+    BOOST_TEST(!noquery->contains("format"));
+    auto cont = mcp::match_uri_template("s://x?fixed=1{&tag}", "s://x?fixed=1&tag=a&tag=b");
+    BOOST_REQUIRE(cont.has_value());
+    BOOST_TEST(cont->at("tag") == "a,b");
+    BOOST_TEST(mcp::match_uri_template("c://{code:3}", "c://abc").has_value());
+    BOOST_TEST(!mcp::match_uri_template("c://{code:3}", "c://abcd").has_value());
+    BOOST_TEST(!mcp::match_uri_template("c://{", "c://x").has_value());
+    BOOST_TEST(!mcp::match_uri_template("c://{%}", "c://x").has_value());
     auto two = mcp::match_uri_template("db://{table}/rows/{id}", "db://users/rows/42");
     BOOST_REQUIRE(two.has_value());
     BOOST_TEST(two->at("table") == "users");
@@ -852,6 +899,28 @@ BOOST_AUTO_TEST_CASE(test_mcp_output_schema_and_annotations)
     auto called = body_json(post(e, R"({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"mk","arguments":{"x":3}}})")).at("result");
     BOOST_TEST(called.at("structuredContent").at("label").as_string() == "p");
     BOOST_TEST(e.tools().back().output_schema.at("properties").at("result").at("type").as_string() == "number");
+}
+
+BOOST_AUTO_TEST_CASE(test_mcp_resource_templates_with_operators)
+{
+    stateless_endpoint e {{.name = "s", .version = "1"}};
+    e.resource("file://{+path}", "text/plain", "A file", [](std::string path) { return "contents of " + path; }, uri_arg("path"));
+    e.resource("calc://history/{index}{?format}", "text/plain", "Entry", [](int index, std::optional<std::string> format)
+    {
+        return std::to_string(index) + " as " + format.value_or("text");
+    }, uri_arg("index"), uri_arg("format"));
+
+    auto file = body_json(post(e, R"({"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"file://etc/hosts"}})")).at("result").at("contents").as_array()[0];
+    BOOST_TEST(file.at("text").as_string() == "contents of etc/hosts");
+    auto plain = body_json(post(e, R"({"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"calc://history/2"}})")).at("result").at("contents").as_array()[0];
+    BOOST_TEST(plain.at("text").as_string() == "2 as text");
+    auto json_fmt = body_json(post(e, R"({"jsonrpc":"2.0","id":3,"method":"resources/read","params":{"uri":"calc://history/2?format=json"}})")).at("result").at("contents").as_array()[0];
+    BOOST_TEST(json_fmt.at("text").as_string() == "2 as json");
+    auto missing = body_json(post(e, R"({"jsonrpc":"2.0","id":4,"method":"resources/read","params":{"uri":"calc://history/2/3"}})"));
+    BOOST_TEST(missing.at("error").at("code").as_int64() == -32002);
+    auto templates = body_json(post(e, R"({"jsonrpc":"2.0","id":5,"method":"resources/templates/list"})")).at("result").at("resourceTemplates").as_array();
+    BOOST_TEST(templates.size() == 2u);
+    BOOST_TEST(templates[0].at("uriTemplate").as_string() == "file://{+path}");
 }
 
 } // namespace

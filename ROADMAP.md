@@ -29,8 +29,8 @@ rather than planned.
 
 - A POST never answers with an SSE stream; notifications go over the GET
   stream (or stdout on stdio).
-- Resource templates support `{name}` placeholders only (no RFC 6570
-  operators).
+- Resource templates: RFC 6570 values are matched raw (no percent
+  decoding); list values are joined with commas.
 - The stdio transport is POSIX-only (`posix::stream_descriptor`).
 
 ## OpenAPI
@@ -46,6 +46,8 @@ rather than planned.
 
 ## Recently closed
 
+- RFC 6570 operators in MCP resource templates (`{+path}`, `{#frag}`,
+  `{.ext}`, `{/seg}`, `{;p}`, `{?q}`, `{&q}`, comma lists, `*` and `:n`).
 - MCP `logging/setLevel` and `log()`, `completion/complete`, tool
   `outputSchema`, `title` and `annotations` via `tool_spec`.
 - Multi-threaded shutdown race: connections run on per-connection strands

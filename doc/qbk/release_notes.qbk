@@ -44,6 +44,9 @@
   (buffered), `multipart_reader` and `multipart_stream_arg` (streamed).
 * JSON-RPC positional parameters: a `params` array binds to `rpc_arg`
   providers in order.
+* MCP resource templates accept RFC 6570 operators (`{+path}`, `{#f}`,
+  `{.e}`, `{/s}`, `{;p}`, `{?q}`, `{&q}`, lists, `*`, `:n`); plain `{var}`
+  no longer spans a slash.
 * MCP `logging/setLevel` with `log()`/`log_all()`, `completion/complete`
   with `complete_prompt`/`complete_resource`, and `tool_spec` for tool
   `title`, `annotations` and `outputSchema` (derived from the return type

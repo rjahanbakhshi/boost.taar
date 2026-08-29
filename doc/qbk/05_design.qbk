@@ -375,6 +375,12 @@ Where the specifications leave room, Taar makes these choices:
   `structuredContent: {"result": ...}`; object results are passed through
   as `structuredContent`; `void` yields an empty `content` array. Unknown
   tools and bad arguments are `-32602`; an unknown resource is `-32002`.
+* Resource templates follow RFC 6570: `{var}` stops at `/`, `?`, `#`
+  and `,`; `{+var}` spans them; `{#var}`, `{.var}`, `{/var}`, `{;var}`,
+  `{?a,b}` and `{&a,b}` are optional when their prefix is absent, so one
+  template serves `calc://x/{i}` and `calc://x/{i}?format=json`. `uri_arg`
+  binds the captured values; an absent optional one is `argument_not_found`,
+  which a `std::optional` or `with_default` parameter absorbs.
 * `tools/list` carries an `outputSchema` derived from the callable's
   return type with the same wrapping (described structs and string maps
   as is, scalars, strings, enums and sequences under `result`), unless
