@@ -24,6 +24,8 @@
 #include <boost/json/parse.hpp>
 #include <boost/json/serialize.hpp>
 #include <csignal>
+#include <optional>
+#include <string_view>
 #include <string>
 #include <unistd.h>
 #include <vector>
@@ -207,6 +209,106 @@ BOOST_AUTO_TEST_CASE(test_mcp_stdio_server_to_client_request)
         BOOST_TEST(reply.at("result").at("content").as_array()[0].at("text").as_string() == "did it");
     });
     BOOST_TEST(h.finished);
+}
+
+BOOST_AUTO_TEST_CASE(test_mcp_stdio_full_session_scenario)
+{
+    using namespace std::chrono_literals;
+    stdio_harness h;
+    h.server.tool("confirm", "Ask before acting", [&](mcp::session_info const& me) -> taar::awaitable<std::string>
+    {
+        auto reply = co_await h.server.elicit(me.id, "Sure?",
+            json::object {{"type", "object"}, {"properties", json::object {{"ok", json::object {{"type", "boolean"}}}}}});
+        co_return reply.at("content").at("ok").as_bool() ? "did it" : "skipped";
+    });
+    h.server.tool("logged", "Logs at info", [&](mcp::session_info const& me)
+    {
+        return h.server.log(me.id, mcp::log_level::info, "hello", "test");
+    });
+    h.server.resource("notes://{index}{?format}", "text/plain", "One note",
+        [](notes const& n, int index, std::optional<std::string> format)
+        {
+            return (format.value_or("plain") == "upper" ? "NOTE " : "note ") + std::to_string(index) + ": " + n.items.at(index);
+        }, mcp::uri_arg("index"), mcp::uri_arg("format"));
+    h.server.prompt("summarize", "Summarize", [](std::string style) { return "Summarize " + style; }, mcp_arg("style"));
+    h.server.complete_prompt("summarize", "style", [](std::string_view v)
+    {
+        std::vector<std::string> out;
+        for (std::string_view s : {"brief", "bullets"}) if (s.starts_with(v)) out.emplace_back(s);
+        return out;
+    });
+
+    h.run([&](auto& send, auto& receive) -> taar::awaitable<void>
+    {
+        co_await send(R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{"elicitation":{}},"clientInfo":{"name":"t","version":"1"}}})");
+        auto init = co_await receive();
+        auto const& caps = init.at("result").at("capabilities").as_object();
+        BOOST_TEST(caps.contains("logging"));
+        BOOST_TEST(caps.contains("completions"));
+        co_await send(R"({"jsonrpc":"2.0","method":"notifications/initialized"})");
+
+        // tools/list carries the derived output schema of notes/add (size_t -> integer under result).
+        co_await send(R"({"jsonrpc":"2.0","id":2,"method":"tools/list"})");
+        auto tools = co_await receive();
+        bool saw_schema = false;
+        for (auto const& t : tools.at("result").at("tools").as_array())
+        {
+            if (t.at("name").as_string() == "notes/add")
+            {
+                saw_schema = t.at("outputSchema").at("properties").at("result").at("type").as_string() == "integer";
+            }
+        }
+        BOOST_TEST(saw_schema);
+
+        co_await send(R"({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"notes/add","arguments":{"text":"milk"}}})");
+        BOOST_TEST((co_await receive()).at("result").at("structuredContent").at("result").as_int64() == 1);
+
+        // Logging honours the level the client sets.
+        co_await send(R"({"jsonrpc":"2.0","id":4,"method":"logging/setLevel","params":{"level":"warning"}})");
+        (void)co_await receive();
+        co_await send(R"({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"logged"}})");
+        BOOST_TEST((co_await receive()).at("result").at("structuredContent").at("result").as_bool() == false);
+        co_await send(R"({"jsonrpc":"2.0","id":6,"method":"logging/setLevel","params":{"level":"debug"}})");
+        (void)co_await receive();
+        co_await send(R"({"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"logged"}})");
+        // The result and the notifications/message line both arrive, in either order.
+        bool got_result = false, got_log = false;
+        for (int i = 0; i < 2; ++i)
+        {
+            auto line = co_await receive();
+            if (line.as_object().contains("id")) got_result = line.at("result").at("structuredContent").at("result").as_bool();
+            else
+            {
+                got_log = line.at("method").as_string() == "notifications/message";
+                BOOST_TEST(line.at("params").at("level").as_string() == "info");
+                BOOST_TEST(line.at("params").at("logger").as_string() == "test");
+            }
+        }
+        BOOST_TEST(got_result);
+        BOOST_TEST(got_log);
+
+        // Server-to-client request answered over stdin.
+        co_await send(R"({"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"confirm"}})");
+        auto request = co_await receive();
+        BOOST_TEST(request.at("method").as_string() == "elicitation/create");
+        co_await send(R"({"jsonrpc":"2.0","id":)" + json::serialize(request.at("id")) + R"(,"result":{"action":"accept","content":{"ok":true}}})");
+        BOOST_TEST((co_await receive()).at("result").at("content").as_array()[0].at("text").as_string() == "did it");
+
+        // Completion and a templated resource with an optional query operator.
+        co_await send(R"({"jsonrpc":"2.0","id":9,"method":"completion/complete","params":{"ref":{"type":"ref/prompt","name":"summarize"},"argument":{"name":"style","value":"b"}}})");
+        BOOST_TEST((co_await receive()).at("result").at("completion").at("values").as_array().size() == 2u);
+        co_await send(R"({"jsonrpc":"2.0","id":10,"method":"resources/read","params":{"uri":"notes://0?format=upper"}})");
+        BOOST_TEST((co_await receive()).at("result").at("contents").as_array()[0].at("text").as_string() == "NOTE 0: milk");
+
+        // A slow call cancelled mid-flight produces no response; the session goes on.
+        co_await send(R"({"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"slow","arguments":{"ms":5000}}})");
+        co_await send(R"({"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":11}})");
+        co_await send(R"({"jsonrpc":"2.0","id":12,"method":"ping"})");
+        auto pong = co_await receive();
+        BOOST_TEST(pong.at("id").as_int64() == 12);
+    });
+    BOOST_TEST(h.finished);
+    BOOST_TEST(h.server.session_count() == 0u);
 }
 
 } // namespace

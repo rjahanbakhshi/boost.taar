@@ -14,6 +14,7 @@ set(TAAR_EXAMPLES
     proxy_server
     rest_crud_server
     streaming_server
+    taskboard_server
     tls_server
     websocket_server
 )

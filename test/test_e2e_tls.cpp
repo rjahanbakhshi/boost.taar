@@ -9,6 +9,10 @@
 
 #include "e2e.hpp"
 #include <boost/taar/core/chunked_response.hpp>
+#include <boost/taar/core/context_store.hpp>
+#include <boost/taar/handler/session_key.hpp>
+#include <boost/taar/handler/with_session.hpp>
+#include <boost/taar/core/chunked_response_meta.hpp>
 #include <boost/taar/handler/rest.hpp>
 #include <boost/taar/handler/rest_arg.hpp>
 #include <boost/taar/matcher/method.hpp>
@@ -238,6 +242,58 @@ BOOST_AUTO_TEST_CASE(test_e2e_tls_client_can_verify_the_server_certificate)
         beast::flat_buffer buffer;
         auto a = co_await send(stream, buffer, e2e::make_request(http::verb::get, "/hello"));
         BOOST_TEST(a.body() == "hello over TLS");
+    });
+}
+
+BOOST_AUTO_TEST_CASE(test_e2e_tls_cookie_session_and_stream_on_one_connection)
+{
+    struct visitor { int visits = 0; };
+    net::io_context io;
+    auto tls = server_tls();
+    taar::session::https session;
+    taar::context_store<std::string, visitor> store {std::chrono::minutes {5}};
+    session.register_request_handler(
+        method == http::verb::get && target == "/visit",
+        taar::handler::with_session(store, taar::handler::session_key::cookie {"sid", "Path=/; Secure; HttpOnly"},
+            taar::handler::session_policy::create_if_missing,
+            rest([](visitor& v) { return ++v.visits; })));
+    session.register_request_handler(
+        method == http::verb::get && target == "/visits/stream",
+        taar::handler::with_session(store, taar::handler::session_key::cookie {"sid"},
+            taar::handler::session_policy::require,
+            rest([](visitor const& v) -> taar::chunked_response<std::string>
+            {
+                co_yield taar::set_header(http::field::content_type, "text/plain");
+                for (int i = 1; i <= v.visits; ++i) co_yield std::to_string(i);
+            })));
+
+    run_tls(io, tls, session, [&](unsigned short port) -> taar::awaitable<void>
+    {
+        net::ssl::context client_ctx {net::ssl::context::tls_client};
+        client_ctx.set_verify_mode(net::ssl::verify_none);
+        auto stream = co_await connect_tls(client_ctx, port);
+        beast::flat_buffer buffer;
+
+        auto denied = co_await send(stream, buffer, e2e::make_request(http::verb::get, "/visits/stream"));
+        BOOST_TEST(denied.result() == http::status::unauthorized);
+
+        auto first = co_await send(stream, buffer, e2e::make_request(http::verb::get, "/visit"));
+        BOOST_TEST(first.body() == "1");
+        std::string const cookie {first[http::field::set_cookie]};
+        BOOST_TEST(cookie.find("Secure") != std::string::npos);
+        auto const pair = cookie.substr(0, cookie.find(';'));
+
+        auto second = e2e::make_request(http::verb::get, "/visit");
+        second.set(http::field::cookie, pair);
+        BOOST_TEST((co_await send(stream, buffer, second)).body() == "2");
+
+        auto streamed = e2e::make_request(http::verb::get, "/visits/stream");
+        streamed.set(http::field::cookie, pair);
+        auto res = co_await send(stream, buffer, streamed);
+        BOOST_TEST(res.chunked());
+        BOOST_TEST(res.body() == "12");
+        BOOST_TEST(res.count(http::field::set_cookie) == 0u);
+        BOOST_TEST(store.size() == 1u);
     });
 }
 

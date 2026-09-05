@@ -370,12 +370,19 @@ struct session_slot
         return mailbox->push(std::move(event));
     }
 
-    /// Events newer than @a last_event_id, for a resuming stream.
+    /// Highest event id a stream has taken from the mailbox (handed to a client).
+    std::shared_ptr<std::atomic<std::uint64_t>> last_taken = std::make_shared<std::atomic<std::uint64_t>>(0);
+
+    /** Events a resuming client missed: newer than @a last_event_id and
+        already taken by an earlier stream. Events still queued in the
+        mailbox are not replayed, they follow in order anyway.
+    */
     std::vector<sse_event> replay_after(std::uint64_t last_event_id)
     {
+        auto const taken = last_taken->load();
         std::lock_guard<std::mutex> const g {history_mutex};
         std::vector<sse_event> out;
-        for (auto const& e : history) if (e.id > last_event_id) out.push_back(e);
+        for (auto const& e : history) if (e.id > last_event_id && e.id <= taken) out.push_back(e);
         return out;
     }
     std::shared_ptr<std::atomic<bool>> stream_attached = std::make_shared<std::atomic<bool>>(false);
@@ -1014,7 +1021,7 @@ public:
                 auto const id = std::strtoull(text.c_str(), &end, 10);
                 if (!text.empty() && *end == '\0') replay = slot.replay_after(id);
             }
-            return event_stream(slot.mailbox, slot.stream_attached, std::move(replay));
+            return event_stream(slot.mailbox, slot.stream_attached, slot.last_taken, std::move(replay));
         };
     }
 
@@ -2331,18 +2338,17 @@ private:
     static chunked_response<std::string> event_stream(
         std::shared_ptr<async_channel<detail::sse_event>> mailbox,
         std::shared_ptr<std::atomic<bool>> attached,
+        std::shared_ptr<std::atomic<std::uint64_t>> last_taken,
         std::vector<detail::sse_event> replay)
     {
         attached_guard const guard {std::move(attached)};
         co_yield set_header(boost::beast::http::field::content_type, "text/event-stream");
         co_yield set_header(boost::beast::http::field::cache_control, "no-cache");
         co_yield std::string {": connected\n\n"};
-        // Resumption: replay what the client missed, then skip the copies of
-        // those events still queued in the mailbox.
-        std::uint64_t delivered = 0;
+        // Resumption: replay what an earlier stream took but the client
+        // missed; whatever is still queued follows in order.
         for (auto const& e : replay)
         {
-            delivered = e.id;
             co_yield sse_frame(e);
         }
         for (;;)
@@ -2350,8 +2356,7 @@ private:
             auto msg = co_await mailbox->async_receive(
                 boost::asio::use_awaitable_t<boost::asio::any_io_executor> {});
             if (!msg) break;
-            if (msg->id <= delivered) continue;
-            delivered = msg->id;
+            last_taken->store(msg->id);
             co_yield sse_frame(*msg);
         }
     }

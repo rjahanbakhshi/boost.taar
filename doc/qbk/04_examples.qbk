@@ -56,6 +56,12 @@ with the `curl` commands that exercise it.
  resource, a blob resource, a tool that notifies its own caller through
  `session_info`, a tool that asks the user to confirm through elicitation,
  CORS for browser clients, and Origin validation.]]
+[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/taskboard_server.cpp taskboard_server.cpp]]
+ [One task board exposed over REST (cookie sessions, constrained
+ arguments, OpenAPI with a bearer scheme and components), JSON-RPC and
+ MCP (annotated tools, templated resources, prompt completion,
+ elicitation, logging), plus a per-user event stream under `with_session`,
+ CORS, and a multi-threaded `io_context` with graceful shutdown.]]
 [[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/mcp_stdio_server.cpp mcp_stdio_server.cpp]]
  [The same MCP tools served over stdio, the transport desktop clients
  launch locally.]]

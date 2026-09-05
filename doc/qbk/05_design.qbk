@@ -403,9 +403,11 @@ Where the specifications leave room, Taar makes these choices:
   the injected `session_info`.
 * Every stream event carries an `id`; a session keeps the last
   `server_info::stream_history` events (100 by default). A `GET` with
-  `Last-Event-ID` replays the newer ones before continuing live, and the
-  copies still queued are skipped, so a reconnecting client sees each
-  event exactly once.
+  `Last-Event-ID` first replays the events newer than that id which an
+  earlier stream had already taken (those the client may have missed in
+  flight), then continues with whatever is still queued, so a
+  reconnecting client sees each event once and in order. An event that
+  fell out of the bounded history before the reconnect is gone.
 * Tools return plain values (text plus `structuredContent`) or the typed
   results in `mcp/content.hpp`: `image`, `audio`, `embedded_resource`,
   `text`, or a full `tool_result` with several items and an explicit
