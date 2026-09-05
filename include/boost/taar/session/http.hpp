@@ -250,6 +250,29 @@ inline bool is_transport_error(boost::system::error_code const& ec)
 }
 
 
+/// A handler result that is streamed: a generator, returned directly or through an awaitable.
+template <typename R>
+inline constexpr bool is_streaming_result =
+    is_chunked_response<awaitable_result_t<R>> || is_async_generator<awaitable_result_t<R>>;
+
+/// True if @a eptr holds a `system_error` carrying `operation_aborted`.
+inline bool is_operation_aborted(std::exception_ptr eptr) noexcept
+{
+    if (!eptr) return false;
+    try
+    {
+        std::rethrow_exception(eptr);
+    }
+    catch (boost::system::system_error const& e)
+    {
+        return e.code() == boost::asio::error::operation_aborted;
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
 /// Hook run on every response header before it is written (CORS, Server, security headers).
 using response_filter_type = std::function<void(
     boost::beast::http::request_header<> const&,
@@ -513,6 +536,7 @@ private:
 
     using request_handler_wrapper_type = std::move_only_function<
         awaitable<bool>(
+            basic_http&,
             matcher::context const&,
             Stream&,
             boost::beast::flat_buffer&,
@@ -645,6 +669,9 @@ public:
     }
 
     basic_http(basic_http const&) = delete;
+    /// Movable until the first connection is served: registered handlers
+    /// and error-handler wrappers do not refer to the object they were
+    /// installed on.
     basic_http(basic_http&&) = default;
     basic_http& operator=(basic_http const&) = delete;
     basic_http& operator=(basic_http&&) = default;
@@ -761,6 +788,7 @@ public:
                 if (iter != matcher_handlers_.cend())
                 {
                     if (!co_await iter->handler(
+                        *this,
                         context,
                         stream,
                         buffer,
@@ -795,6 +823,7 @@ public:
                     if (iter != matcher_handlers_.cend())
                     {
                         if (!co_await iter->handler(
+                            *this,
                             context,
                             stream,
                             buffer,
@@ -879,6 +908,17 @@ public:
             hard_error_handler_(std::current_exception());
         }
 
+        // A raw handler may have taken the stream (a WebSocket upgrade):
+        // nothing is left to close here.
+        if (!boost::beast::get_lowest_layer(stream).socket().is_open())
+        {
+            co_return;
+        }
+        // The loop may have ended because shutdown was requested; the
+        // close sequence itself must still run to completion.
+        co_await this_coro::reset_cancellation_state();
+        co_await this_coro::throw_if_cancelled(false);
+
         // Close the TLS layer first, if there is one, then half-close TCP.
         if constexpr (requires { stream.async_shutdown(net::as_tuple(use_awaitable)); })
         {
@@ -945,7 +985,7 @@ public:
         record_route_methods(operand);
 
         matcher_handlers_.emplace_back(
-            [this, operand = std::move(operand)](
+            [operand = std::move(operand)](
                 http::request_header<> const& request,
                 matcher::context& context,
                 boost::urls::url_view const& parsed_target,
@@ -953,7 +993,8 @@ public:
             {
                 return operand(request, context, parsed_target, parsed_cookies);
             },
-            [this, request_handler = std::move(request_handler)](
+            [request_handler = std::move(request_handler)](
+                basic_http& self,
                 matcher::context const& context,
                 Stream& stream,
                 boost::beast::flat_buffer& buffer,
@@ -973,10 +1014,7 @@ public:
                     // limit is the handler's business; a body left unread
                     // closes the connection after the response.
                     static_assert(
-                        !is_chunked_response<result_type> && !is_async_generator<result_type> &&
-                        !(is_awaitable<result_type> &&
-                          (is_chunked_response<awaitable_result_t<result_type>> ||
-                           is_async_generator<awaitable_result_t<result_type>>)),
+                        !detail::is_streaming_result<result_type>,
                         "A handler that streams the request body must produce a plain response, "
                         "not a chunked_response or async_generator.");
 
@@ -995,7 +1033,7 @@ public:
                             std::move(request_handler), conn_ctx, request, context);
                         shutting_down = co_await detail::observe_shutdown();
                         detail::finish_response(response, version, keep_alive && header_parser.is_done(), shutting_down);
-                        detail::apply_response_filter(*response_filter_, header_parser.get(), response);
+                        detail::apply_response_filter(*self.response_filter_, header_parser.get(), response);
                         bool const ka = response.keep_alive() && !shutting_down;
                         co_await detail::write_response(stream, std::move(response), header_parser.get().method() == http::verb::head);
                         co_return ka;
@@ -1010,7 +1048,7 @@ public:
                         // Unread body: the error response must announce the close.
                         header_parser.get().keep_alive(false);
                     }
-                    bool const ka = co_await wrapped_soft_error_handler_(eptr, stream, header_parser.get(), signals);
+                    bool const ka = co_await self.wrapped_soft_error_handler_(eptr, stream, header_parser.get(), signals);
                     co_return ka && !shutting_down && header_parser.is_done();
                 }
                 else
@@ -1022,12 +1060,12 @@ public:
                 // progressively by the parser.
                 boost::system::error_code req_ec;
                 std::size_t req_sz = 0;
-                if (detail::declares_body_beyond(header_parser, request_body_limit_))
+                if (detail::declares_body_beyond(header_parser, self.request_body_limit_))
                 {
                     req_ec = http::error::body_limit;
                 }
                 http::request_parser<body_type> body_parser {std::move(header_parser)};
-                body_parser.body_limit(request_body_limit_);
+                body_parser.body_limit(self.request_body_limit_);
                 if (!req_ec)
                 {
                     std::tie(req_ec, req_sz) = co_await async_read(stream, buffer, body_parser);
@@ -1040,7 +1078,7 @@ public:
                 {
                     if (!detail::is_transport_error(req_ec))
                     {
-                        co_await write_protocol_error(stream, req_ec, body_parser.get().base());
+                        co_await self.write_protocol_error(stream, req_ec, body_parser.get().base());
                     }
                     // Invoke the hard error handler for server-side visibility.
                     throw boost::system::system_error{req_ec};
@@ -1058,85 +1096,22 @@ public:
                 std::exception_ptr stream_error;
                 try
                 {
-                    if constexpr (is_chunked_response<result_type>)
+                    if constexpr (detail::is_streaming_result<result_type>)
                     {
-                        // Sync handler returning chunked_response<T>
-                        auto generator = handler::detail::invoke_handler(
+                        // chunked_response or async_generator, returned directly
+                        // or through an awaitable: response_from_invoke yields
+                        // the generator in every case.
+                        auto generator = co_await handler::detail::response_from_invoke_handler(
                             std::move(request_handler),
                             conn_ctx,
                             body_parser.get(),
                             context);
                         bool const ka = co_await detail::write_chunked_response(
                             generator, stream, version, keep_alive, cancellation_slot, &stream_error,
-                            *response_filter_, &body_parser.get(),
+                            *self.response_filter_, &body_parser.get(),
                             body_parser.get().method() == http::verb::head);
                         if (stream_error) std::rethrow_exception(stream_error);
                         co_return ka;
-                    }
-                    else if constexpr (is_async_generator<result_type>)
-                    {
-                        // Sync handler returning async_generator<T>
-                        auto generator = handler::detail::invoke_handler(
-                            std::move(request_handler),
-                            conn_ctx,
-                            body_parser.get(),
-                            context);
-                        bool const ka = co_await detail::write_chunked_response(
-                            generator, stream, version, keep_alive, cancellation_slot, &stream_error,
-                            *response_filter_, &body_parser.get(),
-                            body_parser.get().method() == http::verb::head);
-                        if (stream_error) std::rethrow_exception(stream_error);
-                        co_return ka;
-                    }
-                    else if constexpr (is_awaitable<result_type>)
-                    {
-                        if constexpr (is_chunked_response<typename result_type::value_type>)
-                        {
-                            // Async handler returning awaitable<chunked_response<T>>
-                            auto generator = co_await handler::detail::invoke_handler(
-                                std::move(request_handler),
-                                conn_ctx,
-                                body_parser.get(),
-                                context);
-                            bool const ka = co_await detail::write_chunked_response(
-                                generator, stream, version, keep_alive, cancellation_slot, &stream_error,
-                            *response_filter_, &body_parser.get(),
-                            body_parser.get().method() == http::verb::head);
-                            if (stream_error) std::rethrow_exception(stream_error);
-                            co_return ka;
-                        }
-                        else if constexpr (is_async_generator<typename result_type::value_type>)
-                        {
-                            // Async handler returning awaitable<async_generator<T>>
-                            auto generator = co_await handler::detail::invoke_handler(
-                                std::move(request_handler),
-                                conn_ctx,
-                                body_parser.get(),
-                                context);
-                            bool const ka = co_await detail::write_chunked_response(
-                                generator, stream, version, keep_alive, cancellation_slot, &stream_error,
-                            *response_filter_, &body_parser.get(),
-                            body_parser.get().method() == http::verb::head);
-                            if (stream_error) std::rethrow_exception(stream_error);
-                            co_return ka;
-                        }
-                        else
-                        {
-                            // Existing awaitable path
-                            co_await detail::shield_from_cancellation();
-                            auto response = co_await handler::detail::response_from_invoke_handler(
-                                std::move(request_handler),
-                                conn_ctx,
-                                body_parser.get(),
-                                context);
-                            shutting_down = co_await detail::observe_shutdown();
-
-                            detail::finish_response(response, version, keep_alive, shutting_down);
-                            detail::apply_response_filter(*response_filter_, body_parser.get(), response);
-                            bool const ka = response.keep_alive() && !shutting_down;
-                            co_await detail::write_response(stream, std::move(response), body_parser.get().method() == http::verb::head);
-                            co_return ka;
-                        }
                     }
                     else
                     {
@@ -1150,7 +1125,7 @@ public:
                         shutting_down = co_await detail::observe_shutdown();
 
                         detail::finish_response(response, version, keep_alive, shutting_down);
-                        detail::apply_response_filter(*response_filter_, body_parser.get(), response);
+                        detail::apply_response_filter(*self.response_filter_, body_parser.get(), response);
                         bool const ka = response.keep_alive() && !shutting_down;
                         co_await detail::write_response(stream, std::move(response), body_parser.get().method() == http::verb::head);
                         co_return ka;
@@ -1160,16 +1135,30 @@ public:
                 {
                     eptr = std::current_exception();
                 }
+                // Streaming paths were not shielded: with the state cancelled,
+                // awaiting anything would throw. Observe the shutdown first.
+                co_await boost::asio::this_coro::throw_if_cancelled(false);
+                shutting_down = co_await detail::observe_shutdown() || shutting_down;
                 if (stream_error)
                 {
+                    if (shutting_down && detail::is_operation_aborted(stream_error))
+                    {
+                        // The generator's pending wait was cancelled by shutdown:
+                        // nothing to report, the connection simply ends.
+                        co_return false;
+                    }
                     // Headers and some chunks are already on the wire: no error
                     // response is possible. Surface it as a hard error instead.
                     std::rethrow_exception(stream_error);
                 }
-                shutting_down = co_await detail::observe_shutdown() || shutting_down;
+                if (shutting_down && detail::is_operation_aborted(eptr))
+                {
+                    // A streaming write interrupted by shutdown, likewise.
+                    co_return false;
+                }
 
                 // An exception is thrown within the request handler.
-                bool const ka = co_await wrapped_soft_error_handler_(
+                bool const ka = co_await self.wrapped_soft_error_handler_(
                     eptr,
                     stream,
                     body_parser.get(),
@@ -1206,6 +1195,8 @@ public:
         Observers&&... observers)
     {
         matcher::operand operand {std::forward<MatcherType>(matcher)};
+        // Reject a bad registration before any observer records it.
+        handler::validate_path_args_against_target(operand, request_handler);
         std::forward<FirstObserver>(first_observer)(std::as_const(operand), std::as_const(request_handler));
         (std::forward<Observers>(observers)(std::as_const(operand), std::as_const(request_handler)), ...);
         return register_request_handler(std::move(operand), std::move(request_handler));
@@ -1286,7 +1277,7 @@ public:
         record_route_methods(operand);
 
         matcher_handlers_.emplace_back(
-            [this, operand = std::move(operand)](
+            [operand = std::move(operand)](
                 http::request_header<> const& request,
                 matcher::context& context,
                 boost::urls::url_view const& parsed_target,
@@ -1295,6 +1286,7 @@ public:
                 return operand(request, context, parsed_target, parsed_cookies);
             },
             [raw_handler = std::move(raw_handler)](
+                basic_http&,
                 matcher::context const& context,
                 Stream& stream,
                 boost::beast::flat_buffer& buffer,

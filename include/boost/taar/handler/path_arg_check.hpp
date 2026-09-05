@@ -21,6 +21,7 @@
 #include <optional>
 #include <ranges>
 #include <string>
+#include <tuple>
 #include <type_traits>
 #include <unordered_set>
 
@@ -153,27 +154,38 @@ void validate_path_args_against_target(Operand const& op, Handler const& handler
     }
     else
     {
-        auto const& template_str = std::get<idx>(op.captures()).template_str;
-        auto parsed = matcher::parse_template(template_str);
-        if (parsed.has_error())
-        {
-            throw boost::system::system_error{
-                parsed.error(),
-                std::format(
-                    "Invalid target template \"{}\" at handler registration",
-                    template_str)};
-        }
-
+        // Several `target == ...` leaves may be joined with `||`: a
+        // placeholder from any of them is a legitimate path_arg.
         std::unordered_set<std::string> template_names;
-        for (auto const& seg : parsed.value())
+        std::string template_str;
+        std::apply([&](auto const&... capture)
         {
-            if (seg.type == matcher::template_segment_type::param ||
-                seg.type == matcher::template_segment_type::greedy_param)
+            ([&]<typename C>(C const& c)
             {
-                template_names.emplace(seg.value);
-            }
-        }
-
+                if constexpr (requires { c.template_str; })
+                {
+                    if (!template_str.empty()) template_str += " | ";
+                    template_str += c.template_str;
+                    auto parsed = matcher::parse_template(c.template_str);
+                    if (parsed.has_error())
+                    {
+                        throw boost::system::system_error{
+                            parsed.error(),
+                            std::format(
+                                "Invalid target template \"{}\" at handler registration",
+                                c.template_str)};
+                    }
+                    for (auto const& seg : parsed.value())
+                    {
+                        if (seg.type == matcher::template_segment_type::param ||
+                            seg.type == matcher::template_segment_type::greedy_param)
+                        {
+                            template_names.emplace(seg.value);
+                        }
+                    }
+                }
+            }(capture), ...);
+        }, op.captures());
         for (auto const& name : handler.path_arg_names())
         {
             if (!template_names.contains(name))

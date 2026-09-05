@@ -158,16 +158,25 @@ struct method_handler<Callable, ProvidersTuple, CallType, std::index_sequence<Ct
         matcher::context const& mctx)
     {
         std::tuple<decltype(call_for<ArgIs>(c))...> calls {call_for<ArgIs>(c)...};
+        // The converted arguments live in this frame for the whole call: a
+        // coroutine callable taking `T const&` keeps referring to them
+        // after its first suspension.
+        std::tuple<decltype(handler::get_rest_arg<
+            type_traits::callable_arg<Callable, context_count + ArgIs>,
+            std::tuple_element_t<ArgIs, ProvidersTuple>>(
+                std::get<ArgIs>(providers_), ArgIs,
+                provider_input<std::tuple_element_t<ArgIs, ProvidersTuple>>(std::get<ArgIs>(calls)), mctx))...> args {
+            handler::get_rest_arg<
+                type_traits::callable_arg<Callable, context_count + ArgIs>,
+                std::tuple_element_t<ArgIs, ProvidersTuple>>(
+                    std::get<ArgIs>(providers_), ArgIs,
+                    provider_input<std::tuple_element_t<ArgIs, ProvidersTuple>>(std::get<ArgIs>(calls)), mctx)...};
         auto invoke = [&]() -> decltype(auto)
         {
             return std::invoke(
                 callable_,
                 handler::detail::context_arg<type_traits::callable_arg<Callable, CtxIs>>(ctxs)...,
-                handler::get_rest_arg<
-                    type_traits::callable_arg<Callable, context_count + ArgIs>,
-                    std::tuple_element_t<ArgIs, ProvidersTuple>
-                >(std::get<ArgIs>(providers_), ArgIs,
-                  provider_input<std::tuple_element_t<ArgIs, ProvidersTuple>>(std::get<ArgIs>(calls)), mctx)...);
+                std::get<ArgIs>(args)...);
         };
         using result_type = decltype(invoke());
 

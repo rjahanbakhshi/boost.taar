@@ -586,4 +586,19 @@ BOOST_AUTO_TEST_CASE(test_mcp_stream_queue_is_bounded_without_a_stream)
     BOOST_TEST(fresh->starts_with("id: 9\n"));
 }
 
+BOOST_AUTO_TEST_CASE(test_mcp_stream_keepalive_comments)
+{
+    using namespace std::chrono_literals;
+    endpoint e {{.name = "s", .version = "1", .stream_keepalive = 30ms}};
+    auto sid = initialize(e);
+    stream_reader r {open_stream(e, sid)};
+    BOOST_REQUIRE(r.next().has_value());                       // ": connected"
+    auto idle = r.next();                                       // nothing pushed: a keepalive arrives
+    BOOST_REQUIRE(idle.has_value());
+    BOOST_TEST(*idle == ": keepalive\n\n");
+    auto event = r.next([&] { e.notify(sid, "notifications/message", json::object {{"n", 1}}); });
+    BOOST_REQUIRE(event.has_value());
+    BOOST_TEST(event->starts_with("id: 1\n"));
+}
+
 } // namespace

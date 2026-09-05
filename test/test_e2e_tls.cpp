@@ -297,4 +297,38 @@ BOOST_AUTO_TEST_CASE(test_e2e_tls_cookie_session_and_stream_on_one_connection)
     });
 }
 
+BOOST_AUTO_TEST_CASE(test_e2e_tls_raw_handler_may_take_the_stream)
+{
+    net::io_context io;
+    auto tls = server_tls();
+    taar::session::https session;
+    session.register_raw_handler(
+        method == http::verb::get && target == "/take",
+        [](taar::matcher::context const&, http::request<http::empty_body>&& request,
+           taar::session::tls_stream&& stream, beast::flat_buffer&&, taar::cancellation_signals&) -> taar::awaitable<void>
+        {
+            // The handler owns the stream from here on, as a WebSocket upgrade would.
+            taar::session::tls_stream mine {std::move(stream)};
+            http::response<http::string_body> res {http::status::ok, request.version()};
+            res.body() = "taken";
+            res.prepare_payload();
+            co_await http::async_write(mine, res, taar::use_awaitable);
+            auto [ec] = co_await mine.async_shutdown(net::as_tuple(taar::use_awaitable));
+            (void)ec;
+        });
+
+    run_tls(io, tls, session, [&](unsigned short port) -> taar::awaitable<void>
+    {
+        net::ssl::context client_ctx {net::ssl::context::tls_client};
+        client_ctx.set_verify_mode(net::ssl::verify_none);
+        auto stream = co_await connect_tls(client_ctx, port);
+        beast::flat_buffer buffer;
+        auto res = co_await send(stream, buffer, e2e::make_request(http::verb::get, "/take"));
+        BOOST_TEST(res.body() == "taken");
+        // The handler closed the session cleanly; the server did not touch the moved-from stream.
+        auto [sec] = co_await stream.async_shutdown(net::as_tuple(taar::use_awaitable));
+        BOOST_TEST((!sec || sec == net::ssl::error::stream_truncated || sec == net::error::eof));
+    });
+}
+
 } // namespace

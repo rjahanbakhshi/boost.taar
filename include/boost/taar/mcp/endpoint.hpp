@@ -33,6 +33,7 @@
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/posix/stream_descriptor.hpp>
+#include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/read_until.hpp>
 #include <boost/asio/streambuf.hpp>
@@ -113,6 +114,9 @@ struct server_info
     std::size_t stream_history = 100;
     /// Least severe `log()` message delivered before the client sets a level.
     log_level default_log_level = log_level::debug;
+    /// Interval between `: keepalive` comments on an idle event stream, so a
+    /// dropped connection is noticed and freed for a reconnect; zero disables.
+    std::chrono::steady_clock::duration stream_keepalive = std::chrono::seconds {15};
 };
 
 /// The client's self-description from `initialize`.
@@ -365,13 +369,12 @@ struct session_slot
     */
     bool push(std::string json)
     {
-        sse_event event;
-        {
-            std::lock_guard<std::mutex> const g {history_mutex};
-            event = sse_event {next_event_id++, std::move(json)};
-            history.push_back(event);
-            while (history.size() > history_limit) history.pop_front();
-        }
+        // Id assignment and enqueueing share the lock so that concurrent
+        // producers cannot interleave ids out of order in the queue.
+        std::lock_guard<std::mutex> const g {history_mutex};
+        sse_event event {next_event_id++, std::move(json)};
+        history.push_back(event);
+        while (history.size() > history_limit) history.pop_front();
         bool const queued = mailbox->push(std::move(event));
         mailbox->trim(history_limit);
         return queued;
@@ -1028,7 +1031,7 @@ public:
                 auto const id = std::strtoull(text.c_str(), &end, 10);
                 if (!text.empty() && *end == '\0') replay = slot.replay_after(id);
             }
-            return event_stream(slot.mailbox, slot.stream_attached, slot.last_taken, std::move(replay));
+            return event_stream(slot.mailbox, slot.stream_attached, slot.last_taken, std::move(replay), info_.stream_keepalive);
         };
     }
 
@@ -2372,11 +2375,39 @@ private:
         return "id: " + std::to_string(e.id) + "\nevent: message\ndata: " + e.json + "\n\n";
     }
 
+    /// The next event, `nullopt` + `timed_out` on keepalive expiry, `nullopt` alone when closed.
+    struct received
+    {
+        std::optional<detail::sse_event> event;
+        bool timed_out = false;
+    };
+
+    static awaitable<received> receive_or_keepalive(
+        std::shared_ptr<async_channel<detail::sse_event>> mailbox,
+        std::chrono::steady_clock::duration keepalive)
+    {
+        namespace net = boost::asio;
+        if (keepalive <= std::chrono::steady_clock::duration::zero())
+        {
+            co_return received {co_await mailbox->async_receive(use_awaitable), false};
+        }
+        using namespace net::experimental::awaitable_operators;
+        net::steady_timer timer {co_await net::this_coro::executor};
+        timer.expires_after(keepalive);
+        auto outcome = co_await (mailbox->async_receive(use_awaitable) || timer.async_wait(use_awaitable));
+        if (outcome.index() == 0)
+        {
+            co_return received {std::get<0>(std::move(outcome)), false};
+        }
+        co_return received {std::nullopt, true};
+    }
+
     static chunked_response<std::string> event_stream(
         std::shared_ptr<async_channel<detail::sse_event>> mailbox,
         std::shared_ptr<std::atomic<bool>> attached,
         std::shared_ptr<std::atomic<std::uint64_t>> last_taken,
-        std::vector<detail::sse_event> replay)
+        std::vector<detail::sse_event> replay,
+        std::chrono::steady_clock::duration keepalive)
     {
         attached_guard const guard {std::move(attached)};
         co_yield set_header(boost::beast::http::field::content_type, "text/event-stream");
@@ -2390,11 +2421,17 @@ private:
         }
         for (;;)
         {
-            auto msg = co_await mailbox->async_receive(
-                boost::asio::use_awaitable_t<boost::asio::any_io_executor> {});
-            if (!msg) break;
-            last_taken->store(msg->id);
-            co_yield sse_frame(*msg);
+            auto got = co_await receive_or_keepalive(mailbox, keepalive);
+            if (got.timed_out)
+            {
+                // Writing it is what notices a dropped peer, which then
+                // frees the session for a reconnect.
+                co_yield std::string {": keepalive\n\n"};
+                continue;
+            }
+            if (!got.event) break;
+            last_taken->store(got.event->id);
+            co_yield sse_frame(*got.event);
         }
     }
 

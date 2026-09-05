@@ -7,6 +7,7 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
 
+#include "e2e.hpp"
 #include <boost/asio/buffers_iterator.hpp>
 #include <boost/asio/read_until.hpp>
 #include <boost/beast/http/empty_body.hpp>
@@ -655,6 +656,36 @@ BOOST_AUTO_TEST_CASE(test_http_session_raw_handler_takeover)
     BOOST_TEST(server_seen_target == "/takeover");
     BOOST_TEST(server_seen_post == "hello\n");
     BOOST_TEST(client_response == "echo:hello\n");
+}
+
+BOOST_AUTO_TEST_CASE(test_http_session_is_movable_after_registration)
+{
+    namespace net = boost::asio;
+    namespace http = boost::beast::http;
+    namespace taar = boost::taar;
+    using taar::matcher::method;
+    using taar::matcher::target;
+
+    taar::session::http original;
+    original.set_request_body_limit(64);
+    original.set_soft_error_handler([](std::exception_ptr) { return std::string {"soft"}; });
+    original.register_request_handler(
+        method == http::verb::get && target == "/hello", taar::handler::rest([] { return "hello"; }));
+    original.register_request_handler(
+        method == http::verb::get && target == "/boom", taar::handler::rest([]() -> int { throw std::runtime_error {"x"}; }));
+    taar::session::http moved {std::move(original)};
+
+    net::io_context io;
+    e2e::run(io, moved, [&](unsigned short port) -> taar::awaitable<void>
+    {
+        auto res = co_await e2e::send_all(port, {
+            e2e::make_request(http::verb::get, "/hello"),
+            e2e::make_request(http::verb::get, "/boom"),
+            e2e::make_request(http::verb::post, "/hello", std::string(100, 'x'), "text/plain")});
+        BOOST_TEST(res[0].body() == "hello");
+        BOOST_TEST(res[1].body() == "soft");                           // installed before the move
+        BOOST_TEST(res[2].result() == http::status::payload_too_large); // limit set before the move
+    });
 }
 
 } // namespace

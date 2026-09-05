@@ -47,7 +47,20 @@
 * MCP resource templates accept RFC 6570 operators (`{+path}`, `{#f}`,
   `{.e}`, `{/s}`, `{;p}`, `{?q}`, `{&q}`, lists, `*`, `:n`); plain `{var}`
   no longer spans a slash.
-* Review fixes: connections run on strands made from the `io_context`
+* Review round 2: arguments converted for a coroutine tool or method
+  live for the whole call (a `T const&` parameter no longer dangles); a
+  raw handler may take the TLS stream (no shutdown of the moved-from
+  stream); the close sequence runs after a cancelled loop so TLS sends
+  `close_notify` on shutdown; a stream interrupted by shutdown is a
+  clean close, not a soft error; sessions stay movable after handlers
+  are installed; registration is validated before observers record it;
+  `path_arg` placeholders are accepted from any `||` target
+  alternative; event ids and queue order agree under concurrent
+  producers; idle event streams send keepalive comments
+  (`stream_keepalive`); `{;a,b}` accepts pairs in any order;
+  `async_channel` never touches a consumer's slot from a producer;
+  key generation reuses a per-thread `random_device`.
+* Review round 1: connections run on strands made from the `io_context`
   executor (not nested under the acceptor's); a slot bound to the server
   coroutine by its spawner stops it again; `serve_stdio` drains running
   calls on end of input; the undelivered MCP event queue is bounded by

@@ -10,6 +10,9 @@
 // Streaming responses and protocol upgrades over a real connection.
 
 #include "e2e.hpp"
+#include <boost/taar/core/cancellation_signals.hpp>
+#include <boost/taar/server/tcp.hpp>
+#include <boost/asio/as_tuple.hpp>
 #include <boost/taar/session/http.hpp>
 #include <boost/taar/handler/rest.hpp>
 #include <boost/taar/handler/session_key.hpp>
@@ -392,6 +395,75 @@ BOOST_AUTO_TEST_CASE(test_e2e_streaming_under_with_session_sets_cookie)
         BOOST_TEST(second.get().count(http::field::set_cookie) == 0u);
         BOOST_TEST(store.size() == 1u);
     });
+}
+
+BOOST_AUTO_TEST_CASE(test_e2e_streaming_shutdown_ends_open_stream_without_hard_error)
+{
+    net::io_context io;
+    taar::session::http session;
+    std::atomic<int> hard_errors {0};
+    std::string hard_error_text;
+    session.set_hard_error_handler([&](std::exception_ptr ep)
+    {
+        ++hard_errors;
+        try { std::rethrow_exception(ep); }
+        catch (std::exception const& e) { hard_error_text = e.what(); }
+        catch (...) { hard_error_text = "unknown"; }
+    });
+    session.register_request_handler(
+        method == http::verb::get && target == "/forever",
+        rest([]() -> taar::chunked_response<std::string>
+        {
+            co_yield taar::set_header(http::field::content_type, "text/event-stream");
+            for (int i = 0;; ++i)
+            {
+                co_yield "data: " + std::to_string(i) + "\n\n";
+                net::steady_timer timer {co_await net::this_coro::executor};
+                timer.expires_after(10ms);
+                co_await timer.async_wait(taar::use_awaitable);
+            }
+        }));
+
+    taar::cancellation_signals signals;
+    std::atomic<unsigned short> port {0};
+    net::co_spawn(io,
+        taar::server::tcp("127.0.0.1", "0", session, signals, [&](net::ip::tcp::endpoint const& ep) { port = ep.port(); }),
+        net::detached);
+    std::exception_ptr client_error;
+    net::co_spawn(io, [&]() -> taar::awaitable<void>
+    {
+        try
+        {
+            net::steady_timer timer {co_await net::this_coro::executor};
+            while (port == 0) { timer.expires_after(1ms); co_await timer.async_wait(taar::use_awaitable); }
+            auto socket = co_await connect(port);
+            co_await send_get(socket, "/forever");
+            beast::flat_buffer buffer;
+            parser_type parser;
+            parser.body_limit(boost::none);
+            co_await http::async_read_header(socket, buffer, parser);
+            while (parser.get().body().find("data: 3\n\n") == std::string::npos)
+            {
+                co_await http::async_read_some(socket, buffer, parser);
+            }
+            signals.emit();                 // while the stream is live
+            boost::system::error_code ec;
+            while (!ec && !parser.is_done())
+            {
+                auto [rec, n] = co_await http::async_read_some(socket, buffer, parser, net::as_tuple(taar::use_awaitable));
+                ec = rec;
+            }
+            BOOST_TEST(ec);                 // the server dropped the connection
+        }
+        catch (...)
+        {
+            client_error = std::current_exception();
+            signals.emit();
+        }
+    }, net::detached);
+    io.run();
+    if (client_error) std::rethrow_exception(client_error);
+    BOOST_TEST(hard_errors == 0, "hard error: " << hard_error_text);
 }
 
 } // namespace

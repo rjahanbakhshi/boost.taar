@@ -10,6 +10,8 @@
 #ifndef BOOST_TAAR_HANDLER_SESSION_KEY_HPP
 #define BOOST_TAAR_HANDLER_SESSION_KEY_HPP
 
+#include <boost/taar/handler/rest_arg.hpp>
+#include <boost/taar/matcher/context.hpp>
 #include <boost/taar/core/chunked_response_meta.hpp>
 #include <boost/taar/core/cookies.hpp>
 #include <boost/beast/http/field.hpp>
@@ -59,18 +61,9 @@ struct cookie
     std::optional<std::string> extract(
         boost::beast::http::request_header<> const& request) const
     {
-        cookies parsed;
-        auto r = request.equal_range(boost::beast::http::field::cookie);
-        for (; r.first != r.second; ++r.first)
-        {
-            parse_cookies(r.first->value(), parsed);
-        }
-        auto it = parsed.find(name);
-        if (it == parsed.end())
-        {
-            return std::nullopt;
-        }
-        return it->second;
+        auto value = cookie_arg {name}(request, matcher::context {});
+        if (!value) return std::nullopt;
+        return std::move(*value);
     }
 
     template <typename Body, typename Fields>

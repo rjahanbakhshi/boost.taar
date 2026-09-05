@@ -296,4 +296,23 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_bool_spellings)
     });
 }
 
+BOOST_AUTO_TEST_CASE(test_routing_path_arg_from_any_target_alternative)
+{
+    // A placeholder of the second alternative is a legitimate path_arg.
+    taar::session::http session;
+    session.register_request_handler(
+        method == http::verb::get && (target == "/items" || target == "/items/{id}"),
+        rest([](std::string id) { return id.empty() ? std::string {"all"} : id; },
+            with_default(path_arg("id"), std::string {})));
+    net::io_context io;
+    e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
+    {
+        auto res = co_await e2e::send_all(port, {
+            e2e::make_request(http::verb::get, "/items"),
+            e2e::make_request(http::verb::get, "/items/7")});
+        BOOST_TEST(res[0].body() == "all");
+        BOOST_TEST(res[1].body() == "7");
+    });
+}
+
 } // namespace

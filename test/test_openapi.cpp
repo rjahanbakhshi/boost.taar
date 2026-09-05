@@ -484,4 +484,23 @@ BOOST_AUTO_TEST_CASE(test_openapi_components_defaults_constraints_and_security)
     BOOST_CHECK_THROW(gen.document(), std::logic_error);
 }
 
+BOOST_AUTO_TEST_CASE(test_openapi_failed_registration_records_nothing)
+{
+    taar::session::http session;
+    openapi::generator gen {{.title = "t", .version = "1"}};
+    BOOST_CHECK_THROW(
+        session.register_request_handler(
+            method == http::verb::get && target == "/users/{id}",
+            rest(&get_user, path_arg("idd"), query_arg("verbose"), query_arg("page")),
+            gen.describe("Fetch a user")),
+        boost::system::system_error);
+    BOOST_TEST(gen.operation_count() == 0u);
+    // The corrected registration is then accepted under the same path.
+    session.register_request_handler(
+        method == http::verb::get && target == "/users/{id}",
+        rest(&get_user, path_arg("id"), query_arg("verbose"), query_arg("page")),
+        gen.describe("Fetch a user"));
+    BOOST_TEST(gen.operation_count() == 1u);
+}
+
 } // namespace

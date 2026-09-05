@@ -925,4 +925,32 @@ BOOST_AUTO_TEST_CASE(test_mcp_resource_templates_with_operators)
     BOOST_TEST(templates[0].at("uriTemplate").as_string() == "file://{+path}");
 }
 
+BOOST_AUTO_TEST_CASE(test_mcp_coroutine_callable_with_reference_parameters)
+{
+    // Arguments converted for a coroutine callable must outlive its first
+    // suspension: `name` is a reference into the binder's frame.
+    stateless_endpoint e {{.name = "s", .version = "1"}};
+    e.tool("greet", "Greets", [](std::string const& name, std::vector<int> const& nums) -> taar::awaitable<std::string>
+    {
+        net::steady_timer timer {co_await net::this_coro::executor};
+        timer.expires_after(std::chrono::milliseconds {5});
+        co_await timer.async_wait(taar::use_awaitable);
+        std::string out = "hi " + name + ":";
+        for (int n : nums) out += std::to_string(n);
+        co_return out;
+    }, mcp_arg("name"), mcp_arg("nums"));
+    auto res = body_json(post(e, R"({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"greet","arguments":{"name":"Ada Lovelace of Analytical Engines","nums":[1,2,3]}}})"));
+    BOOST_TEST(res.at("result").at("content").as_array()[0].at("text").as_string() == "hi Ada Lovelace of Analytical Engines:123");
+
+    // Path parameters in a template may come in any order and be skipped.
+    auto semi = mcp::match_uri_template("calc://x{;a,b}", "calc://x;b=1");
+    BOOST_REQUIRE(semi.has_value());
+    BOOST_TEST(semi->at("b") == "1");
+    BOOST_TEST(!semi->contains("a"));
+    auto swapped = mcp::match_uri_template("calc://x{;a,b}", "calc://x;b=1;a=2");
+    BOOST_REQUIRE(swapped.has_value());
+    BOOST_TEST(swapped->at("a") == "2");
+    BOOST_TEST(!mcp::match_uri_template("calc://x{;a,b}", "calc://x;c=1").has_value());
+}
+
 } // namespace

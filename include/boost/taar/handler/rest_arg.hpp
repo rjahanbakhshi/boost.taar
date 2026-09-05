@@ -122,6 +122,18 @@ std::string arg_provider_description(ArgProviderType const& ap)
         return "";
 }
 
+/// True if @a content_types is empty or one of the request's `Content-Type` values is listed.
+template <typename Request>
+bool content_type_accepted(Request const& request, std::unordered_set<std::string> const& content_types)
+{
+    if (content_types.empty()) return true;
+    auto range = request.equal_range(boost::beast::http::field::content_type);
+    return std::find_if(range.first, range.second, [&](auto const& elem)
+    {
+        return content_types.contains(std::string {elem.value()});
+    }) != range.second;
+}
+
 template <typename Option>
 void apply_body_arg_option(
     std::unordered_set<std::string>& content_types,
@@ -684,16 +696,9 @@ struct string_body_arg
         boost::beast::http::request<boost::beast::http::string_body> const& request,
         matcher::context const&) const
     {
-        if (!content_types_.empty())
+        if (!detail::content_type_accepted(request, content_types_))
         {
-            auto range = request.equal_range(boost::beast::http::field::content_type);
-            if (std::find_if(range.first, range.second, [&](auto const& elem)
-                {
-                    return content_types_.contains(elem.value());
-                }) == range.second)
-            {
-                return error::invalid_content_type;
-            }
+            return error::invalid_content_type;
         }
 
         return std::string {request.body()};
@@ -746,16 +751,9 @@ struct json_body_arg
         boost::beast::http::request<boost::beast::http::string_body> const& request,
         matcher::context const&) const
     {
-        if (!content_types_.empty())
+        if (!detail::content_type_accepted(request, content_types_))
         {
-            auto range = request.equal_range(boost::beast::http::field::content_type);
-            if (std::find_if(range.first, range.second, [&](auto const& elem)
-                {
-                    return content_types_.contains(elem.value());
-                }) == range.second)
-            {
-                return error::invalid_content_type;
-            }
+            return error::invalid_content_type;
         }
 
         std::error_code ec;
@@ -813,16 +811,9 @@ struct url_encoded_form_data_arg
         boost::beast::http::request<boost::beast::http::string_body> const& request,
         matcher::context const&) const
     {
-        if (!content_types_.empty())
+        if (!detail::content_type_accepted(request, content_types_))
         {
-            auto range = request.equal_range(boost::beast::http::field::content_type);
-            if (std::find_if(range.first, range.second, [&](auto const& elem)
-                {
-                    return content_types_.contains(elem.value());
-                }) == range.second)
-            {
-                return error::invalid_content_type;
-            }
+            return error::invalid_content_type;
         }
 
         auto pev = boost::urls::parse_query(request.body());
@@ -1003,16 +994,9 @@ struct stream_body_arg
         streaming_request const& request,
         matcher::context const&) const
     {
-        if (!content_types_.empty())
+        if (!detail::content_type_accepted(request, content_types_))
         {
-            auto range = request.equal_range(boost::beast::http::field::content_type);
-            if (std::find_if(range.first, range.second, [&](auto const& elem)
-                {
-                    return content_types_.contains(elem.value());
-                }) == range.second)
-            {
-                return error::invalid_content_type;
-            }
+            return error::invalid_content_type;
         }
         return std::ref(request.body);
     }

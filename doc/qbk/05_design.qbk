@@ -400,7 +400,10 @@ Where the specifications leave room, Taar makes these choices:
 * The `GET` event stream is one per session (`409` for a second), fed by
   `notify`/`broadcast`; messages queued before a stream opens are kept,
   up to `server_info::stream_history` of them (oldest dropped first), so
-  a session that never opens its stream cannot grow without bound.
+  a session that never opens its stream cannot grow without bound. An
+  idle stream carries a `: keepalive` comment every
+  `server_info::stream_keepalive` (15 s by default), so a dropped
+  connection is noticed and the session freed for a reconnect.
   Deleting or sweeping the session ends the stream. `notify` does not
   refresh the session's idle timer. A tool reaches its own stream through
   the injected `session_info`.

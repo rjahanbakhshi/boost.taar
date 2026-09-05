@@ -120,7 +120,7 @@ struct default_key_generator<std::string>
 {
     std::string operator()() const
     {
-        std::random_device rd;
+        thread_local std::random_device rd;
         auto const hi = (static_cast<std::uint64_t>(rd()) << 32) | rd();
         auto const lo = (static_cast<std::uint64_t>(rd()) << 32) | rd();
         return std::format("{:016x}{:016x}", hi, lo);

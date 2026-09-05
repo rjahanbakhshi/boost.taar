@@ -207,7 +207,7 @@ inline bool uri_value_char(char op, char c, bool explode) noexcept
     `{&a,b}` (query parameters, in any order; others are ignored). Several
     variables may share an expression (`{a,b}`); the prefixed forms are
     optional, so `calc://x{?format}` matches `calc://x` with no `format`
-    argument. `{var*}` lets a `/` or `.` variable span several segments.
+    argument, and `{;a,b}` / `{?a,b}` accept their pairs in any order. `{var*}` lets a `/` or `.` variable span several segments.
     `{var:3}` caps the value's length. Literal runs must match exactly.
 
     @returns The captured variables (absent optional ones are left out),
@@ -343,23 +343,19 @@ inline std::optional<std::unordered_map<std::string, std::string>> match_uri_tem
         }
         case ';':
         {
-            for (auto const& var : expr.vars)
+            // `;name=value` or `;name` pairs, in any order; each must name a
+            // variable of this expression.
+            while (upos < limit && uri[upos] == ';')
             {
-                if (upos >= limit || uri[upos] != ';') break;
-                auto const key_end = upos + 1 + var.name.size();
-                if (uri.substr(upos + 1, var.name.size()) != var.name) return std::nullopt;
-                if (key_end < limit && uri[key_end] == '=')
-                {
-                    std::size_t const end = take(key_end + 1, limit, ';', false);
-                    if (!fits(var, end - key_end - 1)) return std::nullopt;
-                    args[var.name] = std::string {uri.substr(key_end + 1, end - key_end - 1)};
-                    upos = end;
-                }
-                else
-                {
-                    args[var.name] = {};
-                    upos = key_end;
-                }
+                std::size_t const end = take(upos + 1, limit, ';', false);
+                auto const pair = uri.substr(upos + 1, end - upos - 1);
+                auto const eq = pair.find('=');
+                auto const key = pair.substr(0, eq);
+                auto const value = eq == std::string_view::npos ? std::string_view {} : pair.substr(eq + 1);
+                auto const var = std::ranges::find_if(expr.vars, [&](auto const& v) { return v.name == key; });
+                if (var == expr.vars.end() || !fits(*var, value.size())) return std::nullopt;
+                args[var->name] = std::string {value};
+                upos = end;
             }
             break;
         }

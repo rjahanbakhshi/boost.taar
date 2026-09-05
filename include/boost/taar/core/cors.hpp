@@ -43,7 +43,9 @@ namespace boost::taar {
 */
 struct cors
 {
-    /// Origins that may call. `"*"` allows any; with credentials the request origin is echoed.
+    /// Origins that may call. `"*"` allows any origin without credentials;
+    /// with `allow_credentials` the wildcard is ignored and origins must be
+    /// listed explicitly (the matching one is echoed with `Vary: Origin`).
     std::vector<std::string> allowed_origins {"*"};
     std::vector<std::string> allowed_methods {"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"};
     std::vector<std::string> allowed_headers {

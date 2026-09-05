@@ -461,24 +461,26 @@ public:
     /// Read some of the current part as a string of at most @a max bytes; empty once done.
     awaitable<std::string> read_some(std::size_t max = 64 * 1024)
     {
-        std::string out(max, '\0');
-        auto n = co_await read_some(boost::asio::buffer(out));
-        out.resize(n);
-        co_return out;
+        if (scratch_.size() < max) scratch_.resize(max);
+        auto n = co_await read_some(boost::asio::buffer(scratch_.data(), max));
+        co_return std::string(scratch_.data(), n);
     }
 
     /// Read the rest of the current part, bounded by @a limit.
     awaitable<std::string> read_all(std::uint64_t limit = 16 * 1024 * 1024)
     {
+        constexpr std::size_t chunk = 64 * 1024;
         std::string out;
         while (!part_done())
         {
-            auto piece = co_await read_some();
-            if (out.size() + piece.size() > limit)
+            auto const old = out.size();
+            out.resize(old + chunk);
+            auto n = co_await read_some(boost::asio::buffer(out.data() + old, chunk));
+            out.resize(old + n);
+            if (out.size() > limit)
             {
                 throw boost::system::system_error {boost::beast::http::error::body_limit};
             }
-            out += piece;
         }
         co_return out;
     }
@@ -510,6 +512,7 @@ private:
     body_reader* body_;
     detail::multipart_scanner scanner_;
     std::string pending_;
+    std::string scratch_;
     bool part_done_ = true;
     bool finished_ = false;
 };
