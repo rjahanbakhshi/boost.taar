@@ -23,6 +23,7 @@
 #include <boost/taar/type_traits/string_like.hpp>
 #include <boost/describe/enumerators.hpp>
 #include <boost/describe/members.hpp>
+#include <boost/beast/core/string.hpp>
 #include <boost/beast/http/field.hpp>
 #include <boost/beast/http/message_generator.hpp>
 #include <boost/beast/http/verb.hpp>
@@ -191,10 +192,7 @@ inline std::string lower(std::string s)
 
 inline bool iequals(std::string_view a, std::string_view b)
 {
-    return a.size() == b.size() && std::ranges::equal(a, b, [](char x, char y)
-    {
-        return std::tolower(static_cast<unsigned char>(x)) == std::tolower(static_cast<unsigned char>(y));
-    });
+    return boost::beast::iequals(a, b);
 }
 
 /// A `components.schemas` key from a schema `title` (a C++ type name): `ns::T` -> `ns.T`.

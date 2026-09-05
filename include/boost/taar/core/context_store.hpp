@@ -353,17 +353,22 @@ public:
     template <typename... Args>
     std::pair<Key, entry_ptr> create(Args&&... args)
     {
+        auto const now = now_();
+        std::lock_guard<std::mutex> const g {mutex_};
+        maybe_sweep(now);
         for (;;)
         {
             Key key = generate_();
+            auto it = entries_.find(key);
+            if (it != entries_.end() && !expired(*it->second, now))
             {
-                std::lock_guard<std::mutex> const g {mutex_};
-                if (entries_.contains(key))
-                {
-                    continue;
-                }
+                continue;       // a live entry already owns this key; draw again
             }
-            auto e = emplace(key, std::forward<Args>(args)...);
+            auto e = std::make_shared<entry>(
+                key,
+                std::make_shared<Context>(std::forward<Args>(args)...),
+                now);
+            entries_.insert_or_assign(key, e);
             return {std::move(key), std::move(e)};
         }
     }

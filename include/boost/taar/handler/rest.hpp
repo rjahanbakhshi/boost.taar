@@ -11,6 +11,7 @@
 #define BOOST_TAAR_HANDLER_REST_HPP
 
 #include <boost/taar/handler/context_inject.hpp>
+#include <boost/taar/handler/path_arg_check.hpp>
 #include <boost/taar/handler/rest_arg.hpp>
 #include <boost/taar/handler/rest_param.hpp>
 #include <boost/taar/matcher/context.hpp>
@@ -71,8 +72,7 @@ using common_requests_type_t = typename common_requests_type<T...>::type;
 
 /// True if @a T is a `path_arg`, possibly wrapped in `with_default` and/or `constrained`.
 template <typename T>
-concept is_path_arg_provider =
-    std::is_same_v<typename strip_default<std::remove_cvref_t<T>>::type, path_arg>;
+concept is_path_arg_provider = is_path_arg<T>;
 
 template <typename ProvidersTupleType>
 auto collect_path_arg_names(ProvidersTupleType const& providers)
@@ -92,14 +92,6 @@ auto collect_path_arg_names(ProvidersTupleType const& providers)
     return result;
 }
 
-// The first `ContextCount` parameters of the callable must each request a
-// context (T&, T const&, shared_ptr<T>). Checked at rest() so the error
-// points at the registration site, not at the first request.
-template <typename CallableType, std::size_t... CtxIs>
-constexpr bool leading_params_are_contexts(std::index_sequence<CtxIs...>)
-{
-    return (!std::is_void_v<requested_context_t<type_traits::callable_arg<CallableType, CtxIs>>> && ...);
-}
 
 // The awaitable a handler produces, computed from the callable's own
 // parameter types so that no declaration depends on the contexts tuple

@@ -63,16 +63,16 @@ template <typename SessionHandler>
 {
     namespace net = boost::asio;
 
+    auto base = co_await net::this_coro::executor;
     co_await detail::run_on_strand(signals, detail::accept_loop(
         std::move(bind_host),
         std::move(bind_port),
-        signals,
+        base,
         std::move(local_endpoint_handler),
-        [&](rebind_executor<net::ip::tcp::socket> socket)
+        [&](rebind_executor<net::ip::tcp::socket> socket, net::any_io_executor const& strand)
         {
-            auto const executor = socket.get_executor();
             detail::spawn_session(
-                executor, signals,
+                strand, signals,
                 [&tls, &session_handler, &signals, handshake_timeout, socket = std::move(socket)]() mutable
                     -> awaitable<void>
                 {

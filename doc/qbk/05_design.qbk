@@ -187,8 +187,9 @@ strand of the operation it cancels, so the servers register each
 connection's slot together with its strand and `emit()` dispatches the
 emission there; it may therefore be called from any thread, including
 one that is not running the `io_context`. The plain `slot()` form, which
-emits inline, remains for single-threaded use. The server coroutine
-itself ignores a slot bound by its spawner and stops through the pool.
+emits inline, remains for single-threaded use. A slot bound to the server
+coroutine by its spawner still stops it: the cancellation is re-emitted
+through the acceptor's strand rather than applied inline.
 
 A request whose handler is running when the signal arrives is allowed to
 finish: the session shields a plain (non-streaming) handler from
@@ -397,7 +398,9 @@ Where the specifications leave room, Taar makes these choices:
   `-32602`, and at most 100 values are returned with `hasMore` and
   `total`. The `completions` capability appears once a completer exists.
 * The `GET` event stream is one per session (`409` for a second), fed by
-  `notify`/`broadcast`; messages queued before a stream opens are kept.
+  `notify`/`broadcast`; messages queued before a stream opens are kept,
+  up to `server_info::stream_history` of them (oldest dropped first), so
+  a session that never opens its stream cannot grow without bound.
   Deleting or sweeping the session ends the stream. `notify` does not
   refresh the session's idle timer. A tool reaches its own stream through
   the injected `session_info`.
@@ -423,7 +426,9 @@ Where the specifications leave room, Taar makes these choices:
   on `initialize`, removed at end of input. Requests before `initialize`
   are answered `-32600`. Requests run concurrently with reading (still
   serialised per session) so a cancellation can arrive mid-call. Replies
-  and notifications share one writer so lines never interleave.
+  and notifications share one writer so lines never interleave. When the
+  input closes, calls still running finish and their replies are flushed
+  before the session is removed and the coroutine returns.
 
 [heading OpenAPI]
 

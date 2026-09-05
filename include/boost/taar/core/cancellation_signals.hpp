@@ -92,6 +92,15 @@ public:
             return record_ ? record_->signal.slot() : boost::asio::cancellation_slot {};
         }
 
+        /// Emit on this slot alone, dispatched through its executor.
+        void emit(boost::asio::cancellation_type ct = boost::asio::cancellation_type::all) const
+        {
+            if (record_)
+            {
+                boost::asio::dispatch(record_->executor, [record = record_, ct] { record->signal.emit(ct); });
+            }
+        }
+
         /// Remove the slot from the pool now.
         void release()
         {

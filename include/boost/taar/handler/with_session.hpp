@@ -59,12 +59,8 @@ chunked_response<T> unauthorized_stream()
 }
 
 /// What the inner handler produces once awaited (or directly, when synchronous).
-template <typename R, bool = is_awaitable<R>>
-struct produced { using type = R; };
-template <typename R>
-struct produced<R, true> { using type = typename R::value_type; };
 template <typename Inner, typename Contexts>
-using produced_t = typename produced<handler_result_t<Inner, Contexts>>::type;
+using produced_t = awaitable_result_t<handler_result_t<Inner, Contexts>>;
 
 template <typename P>
 inline constexpr bool is_stream_v = is_chunked_response<P> || is_async_generator<P>;

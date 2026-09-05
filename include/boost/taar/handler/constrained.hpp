@@ -93,8 +93,9 @@ struct constraints
         rest(&list, constrained(with_default(query_arg("page"), 1), {.minimum = 1}))
 
     A violation is reported as `error::constraint_violated` with a
-    message naming the argument and the rule (`400` on REST, `-32602` on
-    JSON-RPC, a tool error on MCP). An absent optional value is not checked.
+    message naming the argument and the rule: `400` on REST, `-32602`
+    (invalid params) on JSON-RPC and MCP, the message in `data`. An
+    absent optional value is not checked.
 */
 template <typename ArgProviderType>
 struct constrained

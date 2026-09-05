@@ -26,6 +26,9 @@
 #include <boost/json/parse.hpp>
 #include <boost/json/serialize.hpp>
 #include <memory>
+#include <boost/asio/bind_cancellation_slot.hpp>
+#include <boost/asio/cancellation_signal.hpp>
+#include <boost/beast/http/message_generator.hpp>
 #include <boost/test/unit_test.hpp>
 #include <atomic>
 #include <chrono>
@@ -581,6 +584,93 @@ BOOST_AUTO_TEST_CASE(test_e2e_multithreaded_shutdown_from_foreign_thread)
 
     BOOST_TEST(served == clients);
     BOOST_TEST(io.stopped());
+}
+
+BOOST_AUTO_TEST_CASE(test_e2e_shutdown_closes_after_in_flight_message_generator)
+{
+    net::io_context io;
+    taar::session::http session;
+    session.register_request_handler(
+        method == http::verb::get && target == "/slow-raw",
+        [](http::request<http::empty_body> const& req, taar::matcher::context const&) -> taar::awaitable<http::message_generator>
+        {
+            net::steady_timer timer {co_await net::this_coro::executor};
+            timer.expires_after(200ms);
+            co_await timer.async_wait(taar::use_awaitable);
+            http::response<http::string_body> res {http::status::ok, req.version()};
+            res.keep_alive(true);
+            res.body() = "raw done";
+            res.prepare_payload();
+            co_return res;
+        });
+
+    taar::cancellation_signals signals;
+    std::atomic<unsigned short> port {0};
+    net::co_spawn(io,
+        taar::server::tcp("127.0.0.1", "0", session, signals, [&](net::ip::tcp::endpoint const& ep) { port = ep.port(); }),
+        net::detached);
+
+    std::exception_ptr client_error;
+    net::co_spawn(io, [&]() -> taar::awaitable<void>
+    {
+        try
+        {
+            net::steady_timer timer {co_await net::this_coro::executor};
+            while (port == 0) { timer.expires_after(1ms); co_await timer.async_wait(taar::use_awaitable); }
+            auto socket = co_await connect(port);
+            co_await http::async_write(socket, e2e::make_request(http::verb::get, "/slow-raw"));
+            timer.expires_after(50ms);
+            co_await timer.async_wait(taar::use_awaitable);
+            signals.emit();                     // while the raw handler is in flight
+
+            beast::flat_buffer buffer;
+            auto res = co_await read_response_within(socket, buffer, 2000ms);
+            BOOST_REQUIRE(res.has_value());
+            BOOST_TEST(res->body() == "raw done");
+            // A message_generator's header cannot be rewritten, so the
+            // shutdown shows as the server closing after the response.
+            BOOST_TEST(co_await peer_closed_within(socket, 500ms));
+        }
+        catch (...)
+        {
+            client_error = std::current_exception();
+            signals.emit();
+        }
+    }, net::detached);
+    io.run();
+    if (client_error) std::rethrow_exception(client_error);
+}
+
+BOOST_AUTO_TEST_CASE(test_e2e_slot_bound_by_the_spawner_still_stops_the_acceptor)
+{
+    net::io_context io;
+    taar::session::http session;
+    session.register_request_handler(method == http::verb::get && target == "/ping", rest([] { return "pong"; }));
+
+    taar::cancellation_signals signals;
+    net::cancellation_signal own;
+    std::atomic<unsigned short> port {0};
+    net::co_spawn(io,
+        taar::server::tcp("127.0.0.1", "0", session, signals, [&](net::ip::tcp::endpoint const& ep) { port = ep.port(); }),
+        net::bind_cancellation_slot(own.slot(), net::detached));
+
+    net::steady_timer failsafe {io, 5s};
+    bool timed_out = false;
+    failsafe.async_wait([&](boost::system::error_code const& ec) { if (!ec) { timed_out = true; signals.emit(); } });
+
+    net::co_spawn(io, [&]() -> taar::awaitable<void>
+    {
+        net::steady_timer timer {co_await net::this_coro::executor};
+        while (port == 0) { timer.expires_after(1ms); co_await timer.async_wait(taar::use_awaitable); }
+        auto req = e2e::make_request(http::verb::get, "/ping");
+        req.set(http::field::connection, "close");
+        auto res = co_await e2e::send_all(port, {req});
+        BOOST_TEST(res[0].body() == "pong");
+        own.emit(net::cancellation_type::all);  // the spawner's own slot, not the pool
+        failsafe.cancel();
+    }, net::detached);
+    io.run();                                   // returns because the acceptor stopped
+    BOOST_TEST(!timed_out);
 }
 
 } // namespace

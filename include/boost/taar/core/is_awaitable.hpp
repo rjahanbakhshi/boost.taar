@@ -35,6 +35,12 @@ concept is_awaitable = requires
     requires detail::is_awaitable_impl<T>::type::value;
 };
 
+/// What @a T produces once awaited: `U` for `awaitable<U, E>`, otherwise @a T itself.
+template <typename T> struct awaitable_result { using type = T; };
+template <typename T, typename E> struct awaitable_result<boost::asio::awaitable<T, E>> { using type = T; };
+template <typename T>
+using awaitable_result_t = typename awaitable_result<T>::type;
+
 } // namespace boost::taar
 
 #endif // BOOST_TAAR_CORE_IS_AWAITABLE_HPP

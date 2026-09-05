@@ -308,6 +308,15 @@ using handler_response_t = typename std::remove_cvref_t<decltype(response_from_i
     std::declval<request_type_of<H> const&>(),
     std::declval<matcher::context const&>()))>::value_type;
 
+// The first `ContextCount` parameters of the callable must each request a
+// context (T&, T const&, shared_ptr<T>). Checked at rest() so the error
+// points at the registration site, not at the first request.
+template <typename CallableType, std::size_t... CtxIs>
+constexpr bool leading_params_are_contexts(std::index_sequence<CtxIs...>)
+{
+    return (!std::is_void_v<requested_context_t<type_traits::callable_arg<CallableType, CtxIs>>> && ...);
+}
+
 } // namespace detail
 
 } // namespace boost::taar::handler

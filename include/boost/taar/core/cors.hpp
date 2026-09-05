@@ -53,9 +53,14 @@ struct cors
     bool allow_credentials = false;
     std::chrono::seconds max_age {600};
 
+    /// True if @a origin may call. The wildcard does not count when
+    /// credentials are allowed: a credentialed response must name the origin.
     bool origin_allowed(std::string_view origin) const
     {
-        return std::ranges::any_of(allowed_origins, [&](auto const& o) { return o == "*" || o == origin; });
+        return std::ranges::any_of(allowed_origins, [&](auto const& o)
+        {
+            return (o == "*" && !allow_credentials) || o == origin;
+        });
     }
 
     /// Add the CORS response headers for @a request to @a response, if its Origin is allowed.

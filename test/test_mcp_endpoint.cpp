@@ -783,10 +783,12 @@ BOOST_AUTO_TEST_CASE(test_mcp_logging_levels)
     BOOST_TEST((mcp::parse_log_level("critical") == mcp::log_level::critical));
     BOOST_TEST(mcp::to_string(mcp::log_level::alert) == "alert");
 
-    // Stateless endpoints accept the request too; there is just no stream to log to.
+    // Stateless endpoints have no stream to log to: the capability is not
+    // advertised and the method is unknown.
     stateless_endpoint stateless {{.name = "s", .version = "1"}};
-    auto ok = post(stateless, R"({"jsonrpc":"2.0","id":1,"method":"logging/setLevel","params":{"level":"error"}})");
-    BOOST_TEST(body_json(ok).at("result").as_object().empty());
+    BOOST_TEST(!body_json(post(stateless, initialize_body)).at("result").at("capabilities").as_object().contains("logging"));
+    auto unknown = post(stateless, R"({"jsonrpc":"2.0","id":1,"method":"logging/setLevel","params":{"level":"error"}})");
+    BOOST_TEST(body_json(unknown).at("error").at("code").as_int64() == -32601);
 }
 
 BOOST_AUTO_TEST_CASE(test_mcp_completion)

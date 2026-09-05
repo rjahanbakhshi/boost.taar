@@ -90,23 +90,6 @@ constexpr std::size_t call_position()
     }(std::make_index_sequence<std::tuple_size_v<ProvidersTuple>> {});
 }
 
-template <typename P>
-std::string provider_description(P const& p)
-{
-    if constexpr (requires { p.description(); })
-    {
-        return p.description();
-    }
-    else if constexpr (type_traits::specialization_of<handler::with_default, P>)
-    {
-        return provider_description(p.arg_provider_);
-    }
-    else
-    {
-        return {};
-    }
-}
-
 template <typename Callable, std::size_t Offset, typename ProvidersTuple, std::size_t... Is>
 std::vector<param_info> describe_params(ProvidersTuple const& providers, std::index_sequence<Is...>)
 {
@@ -116,7 +99,7 @@ std::vector<param_info> describe_params(ProvidersTuple const& providers, std::in
         using provider_type = std::remove_cvref_t<std::tuple_element_t<I, ProvidersTuple>>;
         auto info = make_param_info<type_traits::callable_arg<Callable, Offset + I>>(
             std::get<I>(providers).name(),
-            provider_description(std::get<I>(providers)),
+            handler::detail::arg_provider_description(std::get<I>(providers)),
             !is_optional_v<type_traits::callable_arg<Callable, Offset + I>> &&
                 !handler::detail::strip_default<provider_type>::defaulted);
         handler::detail::annotate_param(info, std::get<I>(providers));
@@ -139,12 +122,6 @@ boost::json::value to_json_result(T&& value)
     }
 }
 
-template <typename Callable, std::size_t... CtxIs>
-constexpr bool leading_params_are_contexts(std::index_sequence<CtxIs...>)
-{
-    return (!std::is_void_v<handler::detail::requested_context_t<
-        type_traits::callable_arg<Callable, CtxIs>>> && ...);
-}
 
 template <typename Callable, typename ProvidersTuple, typename CallType, typename CtxSeq, typename ArgSeq>
 struct method_handler;
@@ -253,7 +230,7 @@ bound_method<CallType, Contexts> bind_method(Callable&& callable, Providers... p
     constexpr std::size_t context_count = arg_count - provider_count;
     using ctx_seq = std::make_index_sequence<context_count>;
     using arg_seq = std::make_index_sequence<provider_count>;
-    static_assert(leading_params_are_contexts<fn>(ctx_seq {}),
+    static_assert(handler::detail::leading_params_are_contexts<fn>(ctx_seq {}),
         "The number of argument providers must equal the number of callable "
         "parameters, except for leading context parameters (T&, T const&, or "
         "std::shared_ptr<T>) which are injected by the endpoint.");

@@ -10,6 +10,7 @@
 #ifndef BOOST_TAAR_CORE_MULTIPART_HPP
 #define BOOST_TAAR_CORE_MULTIPART_HPP
 
+#include <boost/beast/core/string.hpp>
 #include <boost/taar/core/awaitable.hpp>
 #include <boost/taar/core/body_reader.hpp>
 #include <boost/taar/core/error.hpp>
@@ -273,12 +274,7 @@ private:
 
     static bool iequals(std::string_view a, std::string_view b)
     {
-        if (a.size() != b.size()) return false;
-        for (std::size_t i = 0; i < a.size(); ++i)
-        {
-            if (std::tolower(static_cast<unsigned char>(a[i])) != std::tolower(static_cast<unsigned char>(b[i]))) return false;
-        }
-        return true;
+        return boost::beast::iequals(a, b);
     }
 
     /// `form-data; name="a"; filename="b.txt"` -> parameters (quotes and `\"` escapes handled).

@@ -16,6 +16,7 @@
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/this_coro.hpp>
+#include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/cancellation_state.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/strand.hpp>
@@ -23,6 +24,7 @@
 #include <boost/asio/detached.hpp>
 #include <boost/asio/bind_cancellation_slot.hpp>
 #include <functional>
+#include <memory>
 #include <system_error>
 #include <string>
 
@@ -41,9 +43,9 @@ namespace boost::taar::server {
     invoking a @ref boost::taar::session::http instance.
 
     The acceptor and every connection register themselves with @a signals,
-    and `signals.emit()` may be called from any thread. The coroutine
-    ignores a cancellation slot bound by its spawner; stop it through
-    @a signals.
+    and `signals.emit()` may be called from any thread. A cancellation slot
+    bound to this coroutine by its spawner also stops it (safely, through
+    the acceptor's strand), though it is no longer needed.
 
     @param bind_host             Host or address to bind. `"0.0.0.0"` and
                                  `"::"` accept on all interfaces.
@@ -64,27 +66,41 @@ namespace boost::taar::server {
 */
 namespace detail {
 
-/// Run @a loop on a fresh strand, cancellable through @a signals only.
+/// Cancellation filter that re-emits the spawner's cancellation through a strand-bound slot.
+struct forward_cancellation
+{
+    std::shared_ptr<cancellation_signals::bound_slot> target;
+
+    boost::asio::cancellation_type_t operator()(boost::asio::cancellation_type_t type) const
+    {
+        if (type != boost::asio::cancellation_type::none) target->emit(type);
+        return boost::asio::cancellation_type::none;
+    }
+};
+
+/** Run @a loop on a fresh strand registered with @a signals.
+
+    A cancellation bound to this coroutine by its spawner is not applied
+    inline (it would run on the emitting thread, racing with the loop's
+    operations) but re-emitted through the strand, so both the pool and
+    the spawner's own slot stop the loop safely.
+*/
 template <typename Loop>
 awaitable<void> run_on_strand(cancellation_signals& signals, Loop loop)
 {
     namespace net = boost::asio;
-    // The spawner's slot is not usable: its emission would run on the
-    // emitting thread, racing with this coroutine's operations. A filter
-    // that passes nothing keeps that emission from reaching them.
-    co_await net::this_coro::reset_cancellation_state(
-        net::cancellation_filter<net::cancellation_type::none> {});
     auto strand = net::make_strand(co_await net::this_coro::executor);
-    auto bound = signals.slot(strand);
-    co_await net::co_spawn(strand, std::move(loop), net::bind_cancellation_slot(bound.slot(), use_awaitable));
+    auto bound = std::make_shared<cancellation_signals::bound_slot>(signals.slot(strand));
+    co_await net::this_coro::reset_cancellation_state(
+        forward_cancellation {bound}, net::cancellation_filter<net::cancellation_type::none> {});
+    co_await net::co_spawn(strand, std::move(loop), net::bind_cancellation_slot(bound->slot(), use_awaitable));
 }
 
-/// Spawn @a session on its own strand with a shutdown slot from @a signals.
-template <typename Executor, typename Session>
-void spawn_session(Executor const& executor, cancellation_signals& signals, Session&& session)
+/// Spawn @a session on @a strand with a shutdown slot from @a signals.
+template <typename Strand, typename Session>
+void spawn_session(Strand const& strand, cancellation_signals& signals, Session&& session)
 {
     namespace net = boost::asio;
-    auto strand = net::make_strand(executor);
     auto bound = signals.slot(strand);
     auto const slot = bound.slot();
     net::co_spawn(
@@ -93,19 +109,23 @@ void spawn_session(Executor const& executor, cancellation_signals& signals, Sess
         net::bind_cancellation_slot(slot, [bound = std::move(bound)](std::exception_ptr) {}));
 }
 
-/// Bind, listen and call @a on_socket for every accepted connection until cancelled.
+/** Bind, listen and call `on_socket(socket, strand)` for every accepted
+    connection until cancelled. Each socket is moved onto a fresh strand
+    made from @a base (the io_context executor, not the acceptor's strand)
+    so that connections run in parallel when several threads drive the
+    io_context.
+*/
 template <typename OnSocket>
 awaitable<void> accept_loop(
     std::string bind_host,
     std::string bind_port,
-    cancellation_signals& signals,
+    boost::asio::any_io_executor base,
     std::function<void(boost::asio::ip::tcp::endpoint const&)> local_endpoint_handler,
     OnSocket on_socket)
 {
     namespace net = boost::asio;
     namespace this_coro = net::this_coro;
     using net::ip::tcp;
-    (void)signals;
 
     rebind_executor<tcp::resolver> resolver {co_await this_coro::executor};
     auto [ec, query] = co_await resolver.async_resolve(bind_host, bind_port);
@@ -132,7 +152,10 @@ awaitable<void> accept_loop(
         auto [aec, socket] = co_await acceptor.async_accept();
         if (!aec)
         {
-            on_socket(std::move(socket));
+            auto strand = net::make_strand(base);
+            auto const protocol = socket.local_endpoint().protocol();
+            rebind_executor<tcp::socket> on_strand {strand, protocol, socket.release()};
+            on_socket(std::move(on_strand), strand);
         }
     }
 }
@@ -149,16 +172,16 @@ template <typename SessionHandler> // TODO: SessionHandler concept for callable 
 {
     namespace net = boost::asio;
 
+    auto base = co_await net::this_coro::executor;
     co_await detail::run_on_strand(signals, detail::accept_loop(
         std::move(bind_host),
         std::move(bind_port),
-        signals,
+        base,
         std::move(local_endpoint_handler),
-        [&](rebind_executor<net::ip::tcp::socket> socket)
+        [&](rebind_executor<net::ip::tcp::socket> socket, net::any_io_executor const& strand)
         {
-            auto const executor = socket.get_executor();
             detail::spawn_session(
-                executor, signals,
+                strand, signals,
                 std::forward<SessionHandler>(session_handler)(std::move(socket), signals));
         }));
 }

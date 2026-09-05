@@ -58,8 +58,22 @@ public:
         auto w = std::move(waiters_.front());
         waiters_.pop_front();
         g.unlock();
+        w.slot.clear();
         w.complete(std::optional<T> {std::move(value)});
         return true;
+    }
+
+    /// Drop the oldest queued values until at most @a max remain. Returns how many were dropped.
+    std::size_t trim(std::size_t max)
+    {
+        std::lock_guard<std::mutex> const g {mutex_};
+        std::size_t dropped = 0;
+        while (values_.size() > max)
+        {
+            values_.pop_front();
+            ++dropped;
+        }
+        return dropped;
     }
 
     /// Close the channel: pending waiters complete with `nullopt`, later pushes fail.
@@ -72,6 +86,7 @@ public:
         g.unlock();
         for (auto& w : waiters)
         {
+            w.slot.clear();
             w.complete(std::nullopt);
         }
     }
@@ -128,6 +143,7 @@ public:
                 auto const id = next_id_++;
                 waiters_.push_back(waiter {
                     id,
+                    slot,
                     [ex, h = std::move(handler)](std::optional<T> v) mutable
                     {
                         boost::asio::post(ex, [h = std::move(h), v = std::move(v)]() mutable
@@ -153,6 +169,7 @@ private:
     struct waiter
     {
         std::uint64_t id;
+        boost::asio::cancellation_slot slot;    ///< Cleared when the wait completes, so no stale handler points here.
         std::move_only_function<void(std::optional<T>)> complete;
     };
 

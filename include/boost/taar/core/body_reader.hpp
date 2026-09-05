@@ -64,24 +64,26 @@ public:
     /// Read the next piece as a string of at most @a max bytes; empty when @ref done.
     awaitable<std::string> read_some(std::size_t max = 64 * 1024)
     {
-        std::string out(max, '\0');
-        auto n = co_await read_some(boost::asio::buffer(out));
-        out.resize(n);
-        co_return out;
+        if (scratch_.size() < max) scratch_.resize(max);
+        auto n = co_await read_some(boost::asio::buffer(scratch_.data(), max));
+        co_return std::string(scratch_.data(), n);
     }
 
     /// Read everything that remains, bounded by @a limit (throws `body_limit` beyond it).
     awaitable<std::string> read_all(std::uint64_t limit = 16 * 1024 * 1024)
     {
+        constexpr std::size_t chunk = 64 * 1024;
         std::string out;
         while (!done())
         {
-            auto piece = co_await read_some();
-            if (out.size() + piece.size() > limit)
+            auto const old = out.size();
+            out.resize(old + chunk);
+            auto n = co_await read_some(boost::asio::buffer(out.data() + old, chunk));
+            out.resize(old + n);
+            if (out.size() > limit)
             {
                 throw boost::system::system_error {boost::beast::http::error::body_limit};
             }
-            out += piece;
         }
         co_return out;
     }
@@ -100,6 +102,7 @@ private:
     std::function<bool()> done_;
     std::optional<std::uint64_t> content_length_;
     std::uint64_t bytes_read_ = 0;
+    std::string scratch_;
 };
 
 /** The request a streaming handler receives: the parsed header plus a

@@ -249,8 +249,6 @@ inline bool is_transport_error(boost::system::error_code const& ec)
            ec == http_err::error::end_of_stream;
 }
 
-template <typename T> struct awaitable_value { using type = void; };
-template <typename T, typename E> struct awaitable_value<boost::asio::awaitable<T, E>> { using type = T; };
 
 /// Hook run on every response header before it is written (CORS, Server, security headers).
 using response_filter_type = std::function<void(
@@ -540,8 +538,11 @@ private:
 /// @endcond
 public:
     basic_http()
-        : wrapped_soft_error_handler_ {
-            [this](
+    {
+        // The wrapper outlives moves of this object, so it captures the
+        // shared filter rather than `this`.
+        wrapped_soft_error_handler_ =
+            [filter = response_filter_](
                 std::exception_ptr eptr,
                 Stream& stream,
                 boost::beast::http::request_header<>& req,
@@ -581,16 +582,15 @@ public:
                     auto response = response_from(error_msg);
                     response.result(status);
                     detail::finish_response(response, req.version(), detail::header_keep_alive(req), false);
-                    detail::apply_response_filter(response_filter_, req, response);
+                    detail::apply_response_filter(*filter, req, response);
                     bool keep_alive = response.keep_alive();
                     co_await detail::write_response(stream, std::move(response), req.method() == boost::beast::http::verb::head);
                     co_return keep_alive;
                 }
 
                 std::rethrow_exception(eptr);
-            }
-        }
-    {}
+            };
+    }
 
     /** Answer `405 Method Not Allowed` (with an `Allow` header) instead of
         `404` when no route matches but some route accepts the path under
@@ -629,7 +629,7 @@ public:
     */
     void set_response_filter(detail::response_filter_type filter)
     {
-        response_filter_ = std::move(filter);
+        *response_filter_ = std::move(filter);
     }
 
     /// Cap the bytes consumed by a request header. Default 8 KiB.
@@ -722,14 +722,7 @@ public:
                     }
                     if (!detail::is_transport_error(header_ec))
                     {
-                        // Protocol error. Send an appropriate error response.
-                        http::response<http::empty_body> err_response{
-                            detail::select_error_status(header_ec), 11};
-                        err_response.keep_alive(false);
-                        err_response.prepare_payload();
-                        auto [wec, wsz] = co_await http::async_write(stream, err_response);
-                        (void)wec;
-                        (void)wsz;
+                        co_await write_protocol_error(stream, header_ec, header_parser.get());
                     }
                     // Invoke the hard error handler for server-side visibility.
                     throw boost::system::system_error{header_ec};
@@ -844,14 +837,7 @@ public:
                     {
                         if (!detail::is_transport_error(req_ec))
                         {
-                            // Protocol error. Send an appropriate error response.
-                            http::response<http::empty_body> err_response{
-                                detail::select_error_status(req_ec), version};
-                            err_response.keep_alive(false);
-                            err_response.prepare_payload();
-                            auto [wec, wsz] = co_await http::async_write(stream, err_response);
-                            (void)wec;
-                            (void)wsz;
+                            co_await write_protocol_error(stream, req_ec, body_parser.get().base());
                         }
                         // Invoke the hard error handler for server-side visibility.
                         throw boost::system::system_error{req_ec};
@@ -868,7 +854,7 @@ public:
                     response.set(http::field::allow, allow);
                 }
                 response.keep_alive(keep_alive);
-                detail::apply_response_filter(response_filter_, req_header, response);
+                detail::apply_response_filter(*response_filter_, req_header, response);
                 response.prepare_payload();
                 auto [resp_ec, resp_sz] = co_await http::async_write(
                     stream,
@@ -989,8 +975,8 @@ public:
                     static_assert(
                         !is_chunked_response<result_type> && !is_async_generator<result_type> &&
                         !(is_awaitable<result_type> &&
-                          (is_chunked_response<typename detail::awaitable_value<result_type>::type> ||
-                           is_async_generator<typename detail::awaitable_value<result_type>::type>)),
+                          (is_chunked_response<awaitable_result_t<result_type>> ||
+                           is_async_generator<awaitable_result_t<result_type>>)),
                         "A handler that streams the request body must produce a plain response, "
                         "not a chunked_response or async_generator.");
 
@@ -1009,8 +995,8 @@ public:
                             std::move(request_handler), conn_ctx, request, context);
                         shutting_down = co_await detail::observe_shutdown();
                         detail::finish_response(response, version, keep_alive && header_parser.is_done(), shutting_down);
-                        detail::apply_response_filter(response_filter_, header_parser.get(), response);
-                        bool const ka = response.keep_alive();
+                        detail::apply_response_filter(*response_filter_, header_parser.get(), response);
+                        bool const ka = response.keep_alive() && !shutting_down;
                         co_await detail::write_response(stream, std::move(response), header_parser.get().method() == http::verb::head);
                         co_return ka;
                     }
@@ -1054,14 +1040,7 @@ public:
                 {
                     if (!detail::is_transport_error(req_ec))
                     {
-                        // Protocol error. Send an appropriate error response.
-                        http::response<http::empty_body> err_response{
-                            detail::select_error_status(req_ec), version};
-                        err_response.keep_alive(false);
-                        err_response.prepare_payload();
-                        auto [wec, wsz] = co_await http::async_write(stream, err_response);
-                        (void)wec;
-                        (void)wsz;
+                        co_await write_protocol_error(stream, req_ec, body_parser.get().base());
                     }
                     // Invoke the hard error handler for server-side visibility.
                     throw boost::system::system_error{req_ec};
@@ -1089,7 +1068,7 @@ public:
                             context);
                         bool const ka = co_await detail::write_chunked_response(
                             generator, stream, version, keep_alive, cancellation_slot, &stream_error,
-                            response_filter_, &body_parser.get(),
+                            *response_filter_, &body_parser.get(),
                             body_parser.get().method() == http::verb::head);
                         if (stream_error) std::rethrow_exception(stream_error);
                         co_return ka;
@@ -1104,7 +1083,7 @@ public:
                             context);
                         bool const ka = co_await detail::write_chunked_response(
                             generator, stream, version, keep_alive, cancellation_slot, &stream_error,
-                            response_filter_, &body_parser.get(),
+                            *response_filter_, &body_parser.get(),
                             body_parser.get().method() == http::verb::head);
                         if (stream_error) std::rethrow_exception(stream_error);
                         co_return ka;
@@ -1121,7 +1100,7 @@ public:
                                 context);
                             bool const ka = co_await detail::write_chunked_response(
                                 generator, stream, version, keep_alive, cancellation_slot, &stream_error,
-                            response_filter_, &body_parser.get(),
+                            *response_filter_, &body_parser.get(),
                             body_parser.get().method() == http::verb::head);
                             if (stream_error) std::rethrow_exception(stream_error);
                             co_return ka;
@@ -1136,7 +1115,7 @@ public:
                                 context);
                             bool const ka = co_await detail::write_chunked_response(
                                 generator, stream, version, keep_alive, cancellation_slot, &stream_error,
-                            response_filter_, &body_parser.get(),
+                            *response_filter_, &body_parser.get(),
                             body_parser.get().method() == http::verb::head);
                             if (stream_error) std::rethrow_exception(stream_error);
                             co_return ka;
@@ -1153,8 +1132,8 @@ public:
                             shutting_down = co_await detail::observe_shutdown();
 
                             detail::finish_response(response, version, keep_alive, shutting_down);
-                            detail::apply_response_filter(response_filter_, body_parser.get(), response);
-                            bool const ka = response.keep_alive();
+                            detail::apply_response_filter(*response_filter_, body_parser.get(), response);
+                            bool const ka = response.keep_alive() && !shutting_down;
                             co_await detail::write_response(stream, std::move(response), body_parser.get().method() == http::verb::head);
                             co_return ka;
                         }
@@ -1171,8 +1150,8 @@ public:
                         shutting_down = co_await detail::observe_shutdown();
 
                         detail::finish_response(response, version, keep_alive, shutting_down);
-                        detail::apply_response_filter(response_filter_, body_parser.get(), response);
-                        bool const ka = response.keep_alive();
+                        detail::apply_response_filter(*response_filter_, body_parser.get(), response);
+                        bool const ka = response.keep_alive() && !shutting_down;
                         co_await detail::write_response(stream, std::move(response), body_parser.get().method() == http::verb::head);
                         co_return ka;
                     }
@@ -1360,7 +1339,7 @@ public:
     void set_soft_error_handler(HandlerType handler)
     {
         wrapped_soft_error_handler_ =
-            [this, handler = std::move(handler)](
+            [filter = response_filter_, handler = std::move(handler)](
                 std::exception_ptr eptr,
                 Stream& stream,
                 boost::beast::http::request_header<>& request_header,
@@ -1369,7 +1348,7 @@ public:
             {
                 auto response = co_await response_from_invoke(handler, eptr);
                 detail::finish_response(response, request_header.version(), detail::header_keep_alive(request_header), false);
-                detail::apply_response_filter(response_filter_, request_header, response);
+                detail::apply_response_filter(*filter, request_header, response);
                 bool keep_alive = response.keep_alive();
                 co_await detail::write_response(stream, std::move(response), request_header.method() == boost::beast::http::verb::head);
                 co_return keep_alive;
@@ -1399,7 +1378,25 @@ private:
     std::vector<matcher_handler_type> matcher_handlers_;
     soft_error_handler_wrapper_type wrapped_soft_error_handler_;
     hard_error_handler_type hard_error_handler_ = [](std::exception_ptr){};
-    detail::response_filter_type response_filter_;
+    /// Shared with the error-handler wrappers so they stay valid across moves of this object.
+    std::shared_ptr<detail::response_filter_type> response_filter_ = std::make_shared<detail::response_filter_type>();
+
+    /// Answer a protocol-level failure (malformed request, header or body too large) before closing.
+    awaitable<void> write_protocol_error(
+        Stream& stream,
+        boost::system::error_code ec,
+        boost::beast::http::request_header<> const& header)
+    {
+        namespace http = boost::beast::http;
+        unsigned const version = header.version() == 10 ? 10u : 11u;
+        http::response<http::empty_body> err_response {detail::select_error_status(ec), version};
+        err_response.keep_alive(false);
+        err_response.prepare_payload();
+        detail::apply_response_filter(*response_filter_, header, err_response);
+        auto [wec, wsz] = co_await http::async_write(stream, err_response);
+        (void)wec;
+        (void)wsz;
+    }
 
     /// Methods a route accepts, with a matcher for its path alone (for 405 and HEAD).
     struct route_methods_type

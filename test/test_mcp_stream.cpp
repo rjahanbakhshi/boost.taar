@@ -563,4 +563,27 @@ BOOST_AUTO_TEST_CASE(test_mcp_server_to_client_requests)
     BOOST_TEST(stray.result_int() == 202);
 }
 
+BOOST_AUTO_TEST_CASE(test_mcp_stream_queue_is_bounded_without_a_stream)
+{
+    endpoint e {{.name = "s", .version = "1", .stream_history = 5}};
+    auto sid = initialize(e);
+    for (int n = 1; n <= 8; ++n) e.notify(sid, "notifications/message", json::object {{"n", n}});
+
+    // Only the newest five are still queued when the client finally connects.
+    stream_reader r {open_stream(e, sid)};
+    BOOST_REQUIRE(r.next().has_value());
+    std::vector<std::uint64_t> ids;
+    for (int i = 0; i < 5; ++i)
+    {
+        auto frame = r.next();
+        BOOST_REQUIRE(frame.has_value());
+        auto const pos = frame->find("id: ") + 4;
+        ids.push_back(std::stoull(frame->substr(pos, frame->find('\n', pos) - pos)));
+    }
+    BOOST_TEST((ids == std::vector<std::uint64_t> {4, 5, 6, 7, 8}));
+    auto fresh = r.next([&] { e.notify(sid, "notifications/message", json::object {{"n", 9}}); });
+    BOOST_REQUIRE(fresh.has_value());
+    BOOST_TEST(fresh->starts_with("id: 9\n"));
+}
+
 } // namespace

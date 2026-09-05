@@ -47,6 +47,17 @@
 * MCP resource templates accept RFC 6570 operators (`{+path}`, `{#f}`,
   `{.e}`, `{/s}`, `{;p}`, `{?q}`, `{&q}`, lists, `*`, `:n`); plain `{var}`
   no longer spans a slash.
+* Review fixes: connections run on strands made from the `io_context`
+  executor (not nested under the acceptor's); a slot bound to the server
+  coroutine by its spawner stops it again; `serve_stdio` drains running
+  calls on end of input; the undelivered MCP event queue is bounded by
+  `stream_history`; `cors` never reflects a wildcard with credentials;
+  protocol-error responses (400/413/431) go through the response filter;
+  shutdown closes connections after `message_generator` responses too;
+  `basic_http` can be moved after installing handlers;
+  `context_store::create` draws and inserts keys under one lock;
+  `async_channel` clears the consumer's cancellation slot on completion.
+  Stateless MCP endpoints no longer advertise `logging`.
 * MCP `logging/setLevel` with `log()`/`log_all()`, `completion/complete`
   with `complete_prompt`/`complete_resource`, and `tool_spec` for tool
   `title`, `annotations` and `outputSchema` (derived from the return type

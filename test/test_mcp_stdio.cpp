@@ -24,6 +24,7 @@
 #include <boost/json/parse.hpp>
 #include <boost/json/serialize.hpp>
 #include <csignal>
+#include <functional>
 #include <optional>
 #include <string_view>
 #include <string>
@@ -49,6 +50,7 @@ struct stdio_harness
     int in_pipe[2] {};
     int out_pipe[2] {};
     bool finished = false;
+    std::function<void()> close_input;      ///< Ends the server's stdin from inside a client script.
 
     stdio_harness()
     {
@@ -79,6 +81,7 @@ struct stdio_harness
         {
             net::posix::stream_descriptor in {co_await net::this_coro::executor, in_pipe[1]};
             net::posix::stream_descriptor out {co_await net::this_coro::executor, out_pipe[0]};
+            close_input = [&in] { if (in.is_open()) in.close(); };
             net::streambuf buffer;
             auto send = [&](std::string line) -> taar::awaitable<void>
             {
@@ -93,7 +96,7 @@ struct stdio_harness
                 co_return json::parse(line);
             };
             co_await client(send, receive);
-            in.close();     // EOF for the server
+            close_input();  // EOF for the server
         }, net::detached);
         io.run();
     }
@@ -306,6 +309,23 @@ BOOST_AUTO_TEST_CASE(test_mcp_stdio_full_session_scenario)
         co_await send(R"({"jsonrpc":"2.0","id":12,"method":"ping"})");
         auto pong = co_await receive();
         BOOST_TEST(pong.at("id").as_int64() == 12);
+    });
+    BOOST_TEST(h.finished);
+    BOOST_TEST(h.server.session_count() == 0u);
+}
+
+BOOST_AUTO_TEST_CASE(test_mcp_stdio_eof_waits_for_running_calls)
+{
+    stdio_harness h;
+    h.run([&](auto& send, auto& receive) -> taar::awaitable<void>
+    {
+        co_await send(R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}})");
+        (void)co_await receive();
+        co_await send(R"({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"slow","arguments":{"ms":150}}})");
+        h.close_input();                    // stdin ends while the call is still running
+        auto reply = co_await receive();    // ... and its answer is still written
+        BOOST_TEST(reply.at("id").as_int64() == 2);
+        BOOST_TEST(reply.at("result").at("content").as_array()[0].at("text").as_string() == "done");
     });
     BOOST_TEST(h.finished);
     BOOST_TEST(h.server.session_count() == 0u);

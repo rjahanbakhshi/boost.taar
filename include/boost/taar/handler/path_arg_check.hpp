@@ -11,6 +11,7 @@
 #define BOOST_TAAR_HANDLER_PATH_ARG_CHECK_HPP
 
 #include <boost/taar/handler/rest_arg.hpp>
+#include <boost/taar/handler/rest_param.hpp>
 #include <boost/taar/matcher/metadata.hpp>
 #include <boost/taar/matcher/template_parser.hpp>
 #include <boost/taar/type_traits/specialization_of.hpp>
@@ -25,7 +26,8 @@
 
 namespace boost::taar::handler {
 
-/** Concept: true if @a T is a `path_arg` or a `with_default<path_arg, ...>`.
+/** Concept: true if @a T is a `path_arg`, possibly wrapped in
+    `with_default` and/or `constrained`.
 
     The check is by type identity rather than behaviour, because the
     distinguishing fact is *which kind of input* the provider reads (a path
@@ -33,11 +35,7 @@ namespace boost::taar::handler {
 */
 template <typename T>
 concept is_path_arg =
-    std::is_same_v<std::remove_cvref_t<T>, path_arg> ||
-    (type_traits::specialization_of<with_default, std::remove_cvref_t<T>> &&
-     std::is_same_v<
-        typename std::remove_cvref_t<T>::arg_provider_type,
-        path_arg>);
+    std::is_same_v<typename detail::strip_default<std::remove_cvref_t<T>>::type, path_arg>;
 
 /** Concept: true if @a Handler exposes a const `path_arg_names()` accessor.
 

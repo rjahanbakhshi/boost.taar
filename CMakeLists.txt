@@ -21,8 +21,8 @@ set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 23)
 target_sources(
     ${PROJECT_NAME}
     PUBLIC FILE_SET HEADERS BASE_DIRS include FILES
-        include/boost/taar/core/async_generator.hpp
         include/boost/taar/core/async_channel.hpp
+        include/boost/taar/core/async_generator.hpp
         include/boost/taar/core/awaitable.hpp
         include/boost/taar/core/base64.hpp
         include/boost/taar/core/body_reader.hpp
@@ -33,8 +33,8 @@ target_sources(
         include/boost/taar/core/chunked_response_meta.hpp
         include/boost/taar/core/constexpr_string.hpp
         include/boost/taar/core/context_store.hpp
-        include/boost/taar/core/cors.hpp
         include/boost/taar/core/cookies.hpp
+        include/boost/taar/core/cors.hpp
         include/boost/taar/core/error.hpp
         include/boost/taar/core/form_kvp.hpp
         include/boost/taar/core/ignore_and_rethrow.hpp

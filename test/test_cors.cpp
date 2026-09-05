@@ -144,4 +144,26 @@ BOOST_AUTO_TEST_CASE(test_e2e_cors_headers_on_every_response_kind)
     });
 }
 
+BOOST_AUTO_TEST_CASE(test_cors_credentials_never_reflect_a_wildcard)
+{
+    taar::cors policy;
+    policy.allow_credentials = true;                // allowed_origins still {"*"}
+    http::request<http::empty_body> req {http::verb::get, "/", 11};
+    req.set(http::field::origin, "https://evil.example");
+    http::response<http::string_body> res;
+    policy.apply(req, res);
+    BOOST_TEST(res.count(http::field::access_control_allow_origin) == 0u);
+    BOOST_TEST(res.count(http::field::access_control_allow_credentials) == 0u);
+
+    policy.allowed_origins = {"https://app.example"};
+    http::response<http::string_body> denied;
+    policy.apply(req, denied);
+    BOOST_TEST(denied.count(http::field::access_control_allow_origin) == 0u);
+    req.set(http::field::origin, "https://app.example");
+    http::response<http::string_body> allowed;
+    policy.apply(req, allowed);
+    BOOST_TEST(allowed[http::field::access_control_allow_origin] == "https://app.example");
+    BOOST_TEST(allowed[http::field::access_control_allow_credentials] == "true");
+}
+
 } // namespace

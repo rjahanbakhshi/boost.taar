@@ -483,7 +483,8 @@ BOOST_AUTO_TEST_CASE(test_scenario_mcp_elicitation_cancelled_mid_flight)
 
 /// Resumption with a small history: what an earlier stream took and the
 /// client missed is replayed if still remembered, what was never taken
-/// follows from the queue, and nothing is duplicated.
+/// follows from the queue (itself bounded by the same window), and
+/// nothing is duplicated.
 BOOST_AUTO_TEST_CASE(test_scenario_stream_resumption_after_history_overflow)
 {
     auto scenario = [](std::size_t history, int expected_frames) -> std::vector<std::uint64_t>
@@ -505,7 +506,7 @@ BOOST_AUTO_TEST_CASE(test_scenario_stream_resumption_after_history_overflow)
             }, net::detached);
             io.run();
         }
-        for (int n = 1; n <= 6; ++n) e.notify(sid, "notifications/message", json::object {{"n", n}});
+        for (int n = 1; n <= 3; ++n) e.notify(sid, "notifications/message", json::object {{"n", n}});
 
         auto id_of = [](std::string const& frame)
         {
@@ -543,15 +544,16 @@ BOOST_AUTO_TEST_CASE(test_scenario_stream_resumption_after_history_overflow)
             auto got = take(first, 2);              // the client received events 1 and 2, then the connection dropped
             BOOST_TEST((got == std::vector<std::uint64_t> {1, 2}));
         }
-        for (int n = 7; n <= 8; ++n) e.notify(sid, "notifications/message", json::object {{"n", n}});
+        for (int n = 4; n <= 8; ++n) e.notify(sid, "notifications/message", json::object {{"n", n}});
 
         auto resumed = open("1");                   // the client acknowledges only event 1
         return take(resumed, expected_frames);
     };
 
-    // History of 3: event 2 fell out before the reconnect and is gone; 3..8 arrive once, in order.
-    BOOST_TEST((scenario(3, 6) == std::vector<std::uint64_t> {3, 4, 5, 6, 7, 8}));
-    // History of 10: event 2 is replayed first, then 3..8.
+    // Window of 3: event 2 fell out of the history and 3..5 out of the
+    // queue before the reconnect; the newest three arrive once, in order.
+    BOOST_TEST((scenario(3, 3) == std::vector<std::uint64_t> {6, 7, 8}));
+    // Window of 10: event 2 is replayed first, then 3..8 from the queue.
     BOOST_TEST((scenario(10, 7) == std::vector<std::uint64_t> {2, 3, 4, 5, 6, 7, 8}));
 }
 

@@ -107,7 +107,9 @@ struct server_info
     std::chrono::steady_clock::duration session_idle_timeout = std::chrono::minutes {30};
     /// Items per page for `*/list` methods; 0 returns everything in one page.
     std::size_t page_size = 0;
-    /// Events kept per session for `Last-Event-ID` stream resumption.
+    /// Events kept per session for `Last-Event-ID` stream resumption; also
+    /// bounds how many undelivered events a session queues for a stream
+    /// that has not been opened yet (oldest dropped first).
     std::size_t stream_history = 100;
     /// Least severe `log()` message delivered before the client sets a level.
     log_level default_log_level = log_level::debug;
@@ -298,15 +300,12 @@ using prompt_call = tool_call;
 
 namespace detail {
 
-template <typename T> struct unwrap_awaitable { using type = T; };
-template <typename T, typename E> struct unwrap_awaitable<boost::asio::awaitable<T, E>> { using type = T; };
-
 /// The `outputSchema` implied by a tool callable's return type, or empty.
 template <typename Callable>
 boost::json::object output_schema_for()
 {
     using R0 = std::remove_cvref_t<type_traits::callable_result<std::remove_cvref_t<Callable>>>;
-    using R = std::remove_cvref_t<typename unwrap_awaitable<R0>::type>;
+    using R = std::remove_cvref_t<awaitable_result_t<R0>>;
     if constexpr (
         std::is_void_v<R> || is_optional_v<R> ||
         std::same_as<R, boost::json::value> || std::same_as<R, boost::json::object> || std::same_as<R, boost::json::array> ||
@@ -357,7 +356,13 @@ struct session_slot
     std::size_t history_limit = 100;
     std::atomic<int> log_level {0};            ///< Least severe level delivered by `log()`.
 
-    /// Queue a message for the client, assigning the next event id.
+    /** Queue a message for the client, assigning the next event id.
+
+        The undelivered queue is bounded by the same `history_limit`: a
+        client that keeps a session alive without ever opening its stream
+        costs at most that many messages, and receives the newest ones
+        when it finally connects.
+    */
     bool push(std::string json)
     {
         sse_event event;
@@ -367,7 +372,9 @@ struct session_slot
             history.push_back(event);
             while (history.size() > history_limit) history.pop_front();
         }
-        return mailbox->push(std::move(event));
+        bool const queued = mailbox->push(std::move(event));
+        mailbox->trim(history_limit);
+        return queued;
     }
 
     /// Highest event id a stream has taken from the mailbox (handed to a client).
@@ -1033,7 +1040,9 @@ public:
         writes server notifications (from @ref notify / @ref broadcast) there
         as well. One implicit session is created on `initialize` in stateful
         mode; the session is removed when the input reaches end of file.
-        Nothing but protocol messages is written to @a out_fd, so a program
+        On end of input the coroutine waits for requests still running,
+        flushes their replies, removes the session and returns. Nothing but
+        protocol messages is written to @a out_fd, so a program
         using it must log to stderr. Idle expiry applies to the stdio
         session like any other; a stdio-only server should give
         @ref server_info::session_idle_timeout a generous value.
@@ -1047,38 +1056,53 @@ public:
         namespace http = boost::beast::http;
 
         auto ex = co_await net::this_coro::executor;
+
+        // Everything the spawned coroutines touch lives here, so a request
+        // still running when stdin closes never outlives its inputs.
+        struct shared_state
+        {
+            net::posix::stream_descriptor out;
+            std::shared_ptr<async_channel<std::string>> outbox = std::make_shared<async_channel<std::string>>();
+            request_type const request {http::verb::post, "/", 11};
+            matcher::context const mctx {};
+            std::atomic<std::size_t> in_flight {0};
+            std::atomic<bool> eof {false};
+            async_channel<bool> drained;
+            async_channel<bool> writer_done;
+
+            shared_state(net::any_io_executor const& executor, int fd) : out {executor, fd} {}
+        };
+        auto state = std::make_shared<shared_state>(ex, out_fd);
         net::posix::stream_descriptor in {ex, in_fd};
-        net::posix::stream_descriptor out {ex, out_fd};
-        auto outbox = std::make_shared<async_channel<std::string>>();
 
         // Single writer: everything leaving the process goes through outbox.
-        net::co_spawn(ex, [outbox, &out]() -> awaitable<void>
+        net::co_spawn(ex, [state]() -> awaitable<void>
         {
             for (;;)
             {
-                auto line = co_await outbox->async_receive(
-                    net::use_awaitable_t<net::any_io_executor> {});
+                auto line = co_await state->outbox->async_receive(use_awaitable);
                 if (!line) break;
-                auto [ec, n] = co_await net::async_write(out, net::buffer(*line),
-                    net::as_tuple(net::use_awaitable_t<net::any_io_executor> {}));
+                auto [ec, n] = co_await net::async_write(state->out, net::buffer(*line), use_awaitable_tuple);
                 if (ec) break;
             }
+            state->writer_done.push(true);
         }, net::detached);
 
-        auto send = [outbox](boost::json::value const& v)
+        auto send = [state](boost::json::value const& v)
         {
-            outbox->push(boost::json::serialize(v) + "\n");
+            state->outbox->push(boost::json::serialize(v) + "\n");
+        };
+        auto finished_one = [state]
+        {
+            if (state->in_flight.fetch_sub(1) == 1 && state->eof.load()) state->drained.push(true);
         };
 
-        request_type const request {http::verb::post, "/", 11};
-        matcher::context const mctx;
         session_handle session {};
         net::streambuf buffer;
 
         for (;;)
         {
-            auto [ec, n] = co_await net::async_read_until(in, buffer, '\n',
-                net::as_tuple(net::use_awaitable_t<net::any_io_executor> {}));
+            auto [ec, n] = co_await net::async_read_until(in, buffer, '\n', use_awaitable_tuple);
             if (ec) break;
             std::string line {net::buffers_begin(buffer.data()), net::buffers_begin(buffer.data()) + static_cast<std::ptrdiff_t>(n)};
             buffer.consume(n);
@@ -1125,14 +1149,13 @@ public:
                         if (session) sessions_.store.erase(session->key());
                         session = outcome.session;
                         // Forward this session's notifications to stdout.
-                        net::co_spawn(ex, [mailbox = session->context()->mailbox, outbox]() -> awaitable<void>
+                        net::co_spawn(ex, [mailbox = session->context()->mailbox, state]() -> awaitable<void>
                         {
                             for (;;)
                             {
-                                auto msg = co_await mailbox->async_receive(
-                                    net::use_awaitable_t<net::any_io_executor> {});
+                                auto msg = co_await mailbox->async_receive(use_awaitable);
                                 if (!msg) break;
-                                outbox->push(msg->json + "\n");
+                                state->outbox->push(msg->json + "\n");
                             }
                         }, net::detached);
                     }
@@ -1162,20 +1185,30 @@ public:
             }
             // Requests run concurrently with reading (the session lock still
             // serialises them) so a cancellation can arrive mid-call.
+            ++state->in_flight;
             net::co_spawn(ex,
-                [this, incoming, env = std::move(env.value()), session, &request, &mctx, send]() -> awaitable<void>
+                [this, incoming, env = std::move(env.value()), session, state, send, finished_one]() -> awaitable<void>
                 {
-                    auto reply = co_await run(incoming, env, session, request, mctx);
+                    auto reply = co_await run(incoming, env, session, state->request, state->mctx);
                     if (reply) send(*reply);
+                    finished_one();
                 },
                 net::detached);
         }
 
+        // stdin is closed: let the requests already running finish and
+        // flush their replies before the session and the writer go away.
+        state->eof = true;
+        if (state->in_flight.load() > 0)
+        {
+            co_await state->drained.async_receive(use_awaitable);
+        }
         if constexpr (stateful)
         {
             if (session) sessions_.store.erase(session->key());
         }
-        outbox->close();
+        state->outbox->close();
+        co_await state->writer_done.async_receive(use_awaitable);
     }
 
     /// Serve the stdio transport on duplicates of the process's stdin/stdout with fresh contexts.
@@ -1610,7 +1643,10 @@ private:
     {
         boost::json::object capabilities;
         capabilities["tools"] = boost::json::object {{"listChanged", true}};
-        capabilities["logging"] = boost::json::object {};
+        if constexpr (stateful)
+        {
+            capabilities["logging"] = boost::json::object {};
+        }
         if (!completers_.empty())
         {
             capabilities["completions"] = boost::json::object {};
@@ -1767,12 +1803,13 @@ private:
                 {
                     entry->context()->log_level = static_cast<int>(*parsed);
                 }
+                out = jsonrpc::make_response(id, boost::json::object {});
             }
             else
             {
-                stateless_log_level_ = static_cast<int>(*parsed);
+                // No session, no stream, nothing to log to: not offered.
+                co_return error_envelope(id, jsonrpc::error::method_not_found);
             }
-            out = jsonrpc::make_response(id, boost::json::object {});
         }
         else if (env.method == "completion/complete")
         {
@@ -2369,7 +2406,6 @@ private:
     std::vector<resource_entry> resources_;
     std::unordered_map<std::string, prompt_entry> prompts_;
     std::unordered_map<std::string, completer_fn> completers_;
-    std::atomic<int> stateless_log_level_ {static_cast<int>(log_level::debug)};
     std::vector<std::string> prompt_order_;
     std::move_only_function<void(contexts_type const&, initialize_params const&)> on_initialize_;
     std::unordered_map<std::string, std::function<void(contexts_type const&, boost::json::value const&)>> client_notifications_;
