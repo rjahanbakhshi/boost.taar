@@ -16,6 +16,7 @@
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/post.hpp>
 #include <boost/test/unit_test.hpp>
+#include <chrono>
 #include <optional>
 #include <string>
 #include <thread>
@@ -149,6 +150,27 @@ BOOST_AUTO_TEST_CASE(test_async_channel_push_from_another_thread)
     producer.join();
     BOOST_REQUIRE(got.has_value() && got->has_value());
     BOOST_TEST(**got == "from-thread");
+}
+
+BOOST_AUTO_TEST_CASE(test_async_channel_pending_receive_keeps_io_context_alive)
+{
+    // A receive with nothing queued is outstanding work: run() must not
+    // return until the value pushed from another thread arrives.
+    net::io_context io;
+    taar::async_channel<int> channel;
+    std::optional<int> got;
+    net::co_spawn(io, [&]() -> taar::awaitable<void>
+    {
+        got = co_await channel.async_receive(taar::use_awaitable);
+    }, net::detached);
+    std::jthread producer {[&]
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds {50});
+        channel.push(42);
+    }};
+    io.run();
+    BOOST_TEST(got.has_value());
+    BOOST_TEST(got.value_or(0) == 42);
 }
 
 } // namespace

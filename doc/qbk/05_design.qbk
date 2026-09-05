@@ -355,9 +355,10 @@ Where the specifications leave room, Taar makes these choices:
   stdout on stdio) with server-side ids; the client's response is matched
   by id and routed to the awaiting coroutine without taking the session
   lock, so a tool can await its own client while it holds the session.
-  Other requests from the same session wait meanwhile. An error reply
-  throws `client_error`; a timeout or the session ending throws
-  `system_error`. `session_info` carries the client's identity and
+  Other requests from the same session wait meanwhile, so the wait is
+  bounded by `server_info::request_timeout` (five minutes by default)
+  unless a call passes its own. An error reply throws `client_error`; a
+  timeout or the session ending throws `system_error`. `session_info` carries the client's identity and
   declared `capabilities`, so a tool can check before asking.
   `on_client_notification` hooks notifications the client sends, such as
   `notifications/roots/list_changed`.

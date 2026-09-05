@@ -30,10 +30,12 @@
 #include <boost/taar/type_traits/callable.hpp>
 #include <boost/describe/members.hpp>
 #include <boost/describe/enumerators.hpp>
+#include <boost/asio/bind_cancellation_slot.hpp>
+#include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
+#include <boost/asio/error.hpp>
 #include <boost/asio/posix/stream_descriptor.hpp>
-#include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/read_until.hpp>
 #include <boost/asio/streambuf.hpp>
@@ -117,6 +119,11 @@ struct server_info
     /// Interval between `: keepalive` comments on an idle event stream, so a
     /// dropped connection is noticed and freed for a reconnect; zero disables.
     std::chrono::steady_clock::duration stream_keepalive = std::chrono::seconds {15};
+    /// How long `request()` (and `elicit`, `create_message`, `list_roots`)
+    /// waits for the client when no timeout is passed; zero waits forever.
+    /// A tool awaits its client while holding the session, so unbounded
+    /// waits would wedge the session if the client never answers.
+    std::chrono::steady_clock::duration request_timeout = std::chrono::minutes {5};
 };
 
 /// The client's self-description from `initialize`.
@@ -762,7 +769,8 @@ public:
         instance through `request_scope`) abandons the request.
 
         Usable from a tool: it does not need the session lock, which the
-        calling tool already holds.
+        calling tool already holds. A zero @a timeout means
+        `server_info::request_timeout`.
     */
     awaitable<boost::json::value> request(
         std::string const& session_id,
@@ -793,6 +801,7 @@ public:
         auto ex = co_await net::this_coro::executor;
         net::steady_timer timer {ex};
         auto timed_out = std::make_shared<std::atomic<bool>>(false);
+        if (timeout <= std::chrono::steady_clock::duration::zero()) timeout = info_.request_timeout;
         if (timeout > std::chrono::steady_clock::duration::zero())
         {
             timer.expires_after(timeout);
@@ -1103,10 +1112,18 @@ public:
         session_handle session {};
         net::streambuf buffer;
 
+        bool last_line = false;
         for (;;)
         {
+            if (last_line) break;
             auto [ec, n] = co_await net::async_read_until(in, buffer, '\n', use_awaitable_tuple);
-            if (ec) break;
+            if (ec)
+            {
+                // A final message without a trailing newline still counts.
+                if (ec != net::error::eof || buffer.size() == 0) break;
+                n = buffer.size();
+                last_line = true;
+            }
             std::string line {net::buffers_begin(buffer.data()), net::buffers_begin(buffer.data()) + static_cast<std::ptrdiff_t>(n)};
             buffer.consume(n);
             if (line.find_first_not_of(" \t\r\n") == std::string::npos) continue;
@@ -2391,15 +2408,38 @@ private:
         {
             co_return received {co_await mailbox->async_receive(use_awaitable), false};
         }
-        using namespace net::experimental::awaitable_operators;
+        // The timer cancels the receive instead of racing it: an event the
+        // channel already handed to the waiter still completes the receive,
+        // so nothing taken from the queue is ever dropped.
+        struct guard
+        {
+            net::cancellation_signal stop;
+            bool expired = false;
+            bool done = false;
+        };
+        auto g = std::make_shared<guard>();
         net::steady_timer timer {co_await net::this_coro::executor};
         timer.expires_after(keepalive);
-        auto outcome = co_await (mailbox->async_receive(use_awaitable) || timer.async_wait(use_awaitable));
-        if (outcome.index() == 0)
+        timer.async_wait([g](boost::system::error_code const& ec)
         {
-            co_return received {std::get<0>(std::move(outcome)), false};
+            if (!ec && !g->done)
+            {
+                g->expired = true;
+                g->stop.emit(net::cancellation_type::terminal);
+            }
+        });
+        // The stream's own cancellation (client gone) must reach the receive too.
+        auto cs = co_await net::this_coro::cancellation_state;
+        if (cs.slot().is_connected())
+        {
+            cs.slot().assign([g](net::cancellation_type_t type) { g->stop.emit(type); });
         }
-        co_return received {std::nullopt, true};
+        auto event = co_await mailbox->async_receive(net::bind_cancellation_slot(g->stop.slot(), use_awaitable));
+        g->done = true;
+        timer.cancel();
+        if (cs.slot().is_connected()) cs.slot().clear();
+        if (event) co_return received {std::move(event), false};
+        co_return received {std::nullopt, g->expired && !mailbox->closed()};
     }
 
     static chunked_response<std::string> event_stream(

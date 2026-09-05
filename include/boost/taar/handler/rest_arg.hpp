@@ -34,6 +34,7 @@
 #include <boost/json/value_to.hpp>
 #include <boost/system/result.hpp>
 #include <functional>
+#include <cctype>
 #include <system_error>
 #include <unordered_set>
 #include <variant>
@@ -122,7 +123,22 @@ std::string arg_provider_description(ArgProviderType const& ap)
         return "";
 }
 
-/// True if @a content_types is empty or one of the request's `Content-Type` values is listed.
+/// The media type of a `Content-Type` value: parameters stripped, trimmed, lower-cased.
+inline std::string media_type_of(std::string_view content_type)
+{
+    auto const semi = content_type.find(';');
+    auto type = content_type.substr(0, semi);
+    while (!type.empty() && (type.front() == ' ' || type.front() == '\t')) type.remove_prefix(1);
+    while (!type.empty() && (type.back() == ' ' || type.back() == '\t')) type.remove_suffix(1);
+    std::string out {type};
+    for (auto& c : out) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return out;
+}
+
+/** True if @a content_types is empty or the media type of one of the
+    request's `Content-Type` values is listed (`application/json;
+    charset=utf-8` matches `application/json`).
+*/
 template <typename Request>
 bool content_type_accepted(Request const& request, std::unordered_set<std::string> const& content_types)
 {
@@ -130,7 +146,7 @@ bool content_type_accepted(Request const& request, std::unordered_set<std::strin
     auto range = request.equal_range(boost::beast::http::field::content_type);
     return std::find_if(range.first, range.second, [&](auto const& elem)
     {
-        return content_types.contains(std::string {elem.value()});
+        return content_types.contains(media_type_of(elem.value()));
     }) != range.second;
 }
 

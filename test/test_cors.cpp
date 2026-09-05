@@ -17,6 +17,7 @@
 #include <boost/test/unit_test.hpp>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -164,6 +165,23 @@ BOOST_AUTO_TEST_CASE(test_cors_credentials_never_reflect_a_wildcard)
     policy.apply(req, allowed);
     BOOST_TEST(allowed[http::field::access_control_allow_origin] == "https://app.example");
     BOOST_TEST(allowed[http::field::access_control_allow_credentials] == "true");
+}
+
+BOOST_AUTO_TEST_CASE(test_cors_vary_is_appended_not_replaced)
+{
+    taar::cors policy;
+    policy.allowed_origins = {"https://app.example"};
+    http::request<http::empty_body> req {http::verb::get, "/", 11};
+    req.set(http::field::origin, "https://app.example");
+    http::response<http::string_body> res;
+    res.set(http::field::vary, "Accept-Encoding");
+    policy.apply(req, res);
+    std::vector<std::string> vary;
+    auto range = res.equal_range(http::field::vary);
+    for (auto it = range.first; it != range.second; ++it) vary.emplace_back(it->value());
+    BOOST_TEST((vary == std::vector<std::string> {"Accept-Encoding", "Origin"}));
+    policy.apply(req, res);                                     // idempotent
+    BOOST_TEST(res.count(http::field::vary) == 2u);
 }
 
 } // namespace

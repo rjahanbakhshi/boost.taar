@@ -47,6 +47,16 @@
 * MCP resource templates accept RFC 6570 operators (`{+path}`, `{#f}`,
   `{.e}`, `{/s}`, `{;p}`, `{?q}`, `{&q}`, lists, `*`, `:n`); plain `{var}`
   no longer spans a slash.
+* Review round 3: the keepalive timer cancels the stream's receive
+  instead of racing it (no event can be dropped); `request()` waits are
+  bounded by `server_info::request_timeout`; a pending `async_channel`
+  receive keeps the `io_context` alive; `Content-Type` parameters such
+  as `charset` no longer fail body providers; the accept loop backs off
+  on persistent errors; the session lingers briefly on close so a
+  response is not reset away; `cors` appends to `Vary`; `serve_stdio`
+  handles a final line without a newline; `server::tcp`/`tls` refuse a
+  temporary session at compile time; `request_scope::slot` documented as
+  the endpoint's.
 * Review round 2: arguments converted for a coroutine tool or method
   live for the whole call (a `T const&` parameter no longer dangles); a
   raw handler may take the TLS stream (no shutdown of the moved-from

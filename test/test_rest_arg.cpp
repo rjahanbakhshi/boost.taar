@@ -469,4 +469,22 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_with_default)
     //  rest_arg<int, with_default<query_arg, int>>{with_default(query_arg("qval1"), 42), 0, req, ctx) == 13));
 }
 
+BOOST_AUTO_TEST_CASE(test_rest_arg_content_type_parameters_are_ignored)
+{
+    using namespace boost::taar::handler;
+    namespace http = boost::beast::http;
+    http::request<http::string_body> req {http::verb::post, "/", 11};
+    req.set(http::field::content_type, "Application/JSON; charset=utf-8");
+    req.body() = R"({"a":1})";
+    req.prepare_payload();
+    boost::taar::matcher::context ctx;
+    auto value = json_body_arg {}(req, ctx);
+    BOOST_REQUIRE(value.has_value());
+    BOOST_TEST(value->at("a").as_int64() == 1);
+    req.set(http::field::content_type, "text/plain; charset=utf-8");
+    BOOST_TEST(!json_body_arg {}(req, ctx).has_value());
+    BOOST_TEST(string_body_arg {}(req, ctx).has_value());
+    BOOST_TEST(detail::media_type_of("  Text/Plain ; charset=x") == "text/plain");
+}
+
 } // namespace

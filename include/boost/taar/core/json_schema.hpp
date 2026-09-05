@@ -197,8 +197,8 @@ param_info make_param_info(std::string name, std::string description, bool requi
     return p;
 }
 
-/// A JSON Schema fragment for one parameter: its schema plus `description` and `default`.
-inline boost::json::object param_schema(param_info const& p)
+/// A parameter's type schema: its schema (or the bare type) plus `default`, without `description`.
+inline boost::json::object param_type_schema(param_info const& p)
 {
     boost::json::object schema = p.schema;
     if (schema.empty() && !p.json_type.empty())
@@ -209,6 +209,13 @@ inline boost::json::object param_schema(param_info const& p)
     {
         schema["default"] = *p.default_value;
     }
+    return schema;
+}
+
+/// A JSON Schema fragment for one parameter: @ref param_type_schema plus `description`.
+inline boost::json::object param_schema(param_info const& p)
+{
+    boost::json::object schema = param_type_schema(p);
     if (!p.description.empty())
     {
         schema["description"] = p.description;

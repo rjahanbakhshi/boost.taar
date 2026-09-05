@@ -83,9 +83,9 @@ struct stdio_harness
             net::posix::stream_descriptor out {co_await net::this_coro::executor, out_pipe[0]};
             close_input = [&in] { if (in.is_open()) in.close(); };
             net::streambuf buffer;
-            auto send = [&](std::string line) -> taar::awaitable<void>
+            auto send = [&](std::string line, bool newline = true) -> taar::awaitable<void>
             {
-                line += '\n';
+                if (newline) line += '\n';
                 co_await net::async_write(in, net::buffer(line), token {});
             };
             auto receive = [&]() -> taar::awaitable<json::value>
@@ -329,6 +329,21 @@ BOOST_AUTO_TEST_CASE(test_mcp_stdio_eof_waits_for_running_calls)
     });
     BOOST_TEST(h.finished);
     BOOST_TEST(h.server.session_count() == 0u);
+}
+
+BOOST_AUTO_TEST_CASE(test_mcp_stdio_final_line_without_newline)
+{
+    stdio_harness h;
+    h.run([&](auto& send, auto& receive) -> taar::awaitable<void>
+    {
+        co_await send(R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}})");
+        (void)co_await receive();
+        co_await send(R"({"jsonrpc":"2.0","id":9,"method":"ping"})", false);   // no trailing newline
+        h.close_input();
+        auto reply = co_await receive();
+        BOOST_TEST(reply.at("id").as_int64() == 9);
+    });
+    BOOST_TEST(h.finished);
 }
 
 } // namespace

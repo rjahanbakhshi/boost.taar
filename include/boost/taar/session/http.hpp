@@ -64,6 +64,7 @@
 #include <vector>
 #include <utility>
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <concepts>
 #include <exception>
@@ -928,6 +929,18 @@ public:
         }
         boost::system::error_code ec;
         boost::beast::get_lowest_layer(stream).socket().shutdown(net::ip::tcp::socket::shutdown_send, ec); // NOLINT
+
+        // Lingering close: a request body left unread would otherwise make
+        // the kernel reset the connection and possibly discard the response
+        // still in flight. Read and discard, briefly, until the peer closes.
+        boost::beast::get_lowest_layer(stream).expires_after(std::chrono::milliseconds {250});
+        std::array<char, 4096> sink {};
+        for (std::size_t drained = 0; drained < 1024 * 1024;)
+        {
+            auto [rec, n] = co_await boost::beast::get_lowest_layer(stream).async_read_some(net::buffer(sink));
+            if (rec) break;
+            drained += n;
+        }
     }
 
     template <typename MatcherType, typename RequestHandler>
@@ -979,6 +992,14 @@ public:
         // check is a no-op when the matcher has no target_constraint or
         // the handler does not expose path_arg_names().
         handler::validate_path_args_against_target(operand, request_handler);
+        return install_handler(std::move(operand), std::move(request_handler));
+    }
+
+    /// Install a route whose registration has already been validated.
+    template <typename Operand, typename RequestHandler>
+    auto install_handler(Operand operand, RequestHandler request_handler)
+    {
+        namespace http = boost::beast::http;
 
         needs_parsed_target_ |= decltype(operand)::with_parsed_target;
         needs_parsed_cookies_ |= decltype(operand)::with_parsed_cookies;
@@ -1199,7 +1220,7 @@ public:
         handler::validate_path_args_against_target(operand, request_handler);
         std::forward<FirstObserver>(first_observer)(std::as_const(operand), std::as_const(request_handler));
         (std::forward<Observers>(observers)(std::as_const(operand), std::as_const(request_handler)), ...);
-        return register_request_handler(std::move(operand), std::move(request_handler));
+        return install_handler(std::move(operand), std::move(request_handler));
     }
 
     /// Convenience overload that binds a non-const member-function pointer to @a object.

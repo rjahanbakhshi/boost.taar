@@ -64,7 +64,12 @@ public:
     /// Where notifications go (set by the endpoint); empty on transports without a stream.
     std::function<void(boost::json::value)> notify;
 
-    /// Slot to bind to asynchronous operations so cancellation interrupts them.
+    /** The slot the endpoint binds to the method's coroutine.
+
+        Not for callables: the coroutine's own cancellation state already
+        interrupts every `co_await` inside it when the request is
+        cancelled, and assigning this slot would replace that binding.
+    */
     boost::asio::cancellation_slot slot() { return signal_.slot(); }
 
     /// True once @ref cancel was called.

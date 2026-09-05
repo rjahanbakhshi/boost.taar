@@ -601,4 +601,25 @@ BOOST_AUTO_TEST_CASE(test_mcp_stream_keepalive_comments)
     BOOST_TEST(event->starts_with("id: 1\n"));
 }
 
+BOOST_AUTO_TEST_CASE(test_mcp_request_default_timeout_bounds_the_wait)
+{
+    using namespace std::chrono_literals;
+    endpoint e {{.name = "s", .version = "1", .request_timeout = 40ms}};
+    auto sid = initialize(e);                                    // no stream opened, ever
+    e.tool("ask", "Elicit", [&](mcp::session_info const& me) -> taar::awaitable<std::string>
+    {
+        try
+        {
+            co_await e.elicit(me.id, "?", json::object {{"type", "object"}});
+        }
+        catch (boost::system::system_error const& err)
+        {
+            co_return err.code() == boost::system::errc::timed_out ? "timed out" : "other";
+        }
+        co_return "answered";
+    });
+    auto res = post(e, http::verb::post, R"({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ask"}})", sid);
+    BOOST_TEST(json::parse(res.body()).at("result").at("content").as_array()[0].at("text").as_string() == "timed out");
+}
+
 } // namespace

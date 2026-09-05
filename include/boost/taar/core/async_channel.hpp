@@ -14,6 +14,7 @@
 #include <boost/asio/associated_executor.hpp>
 #include <boost/asio/async_result.hpp>
 #include <boost/asio/cancellation_type.hpp>
+#include <boost/asio/executor_work_guard.hpp>
 #include <boost/asio/post.hpp>
 #include <cstddef>
 #include <cstdint>
@@ -156,14 +157,18 @@ public:
                         if (auto s = weak.lock()) cancel(*s, id);
                     });
                 }
+                // The wait counts as outstanding work on the consumer's
+                // executor, so an io_context does not run out of work while
+                // a receive is pending.
                 state_->waiters.push_back(waiter {
                     id,
-                    [ex, h = std::move(handler)](std::optional<T> v) mutable
+                    [ex, work = boost::asio::make_work_guard(ex), h = std::move(handler)](std::optional<T> v) mutable
                     {
                         boost::asio::post(ex, [h = std::move(h), v = std::move(v)]() mutable
                         {
                             h(std::move(v));
                         });
+                        work.reset();
                     }});
             },
             token);

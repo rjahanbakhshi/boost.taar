@@ -19,12 +19,16 @@
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/cancellation_state.hpp>
 #include <boost/asio/co_spawn.hpp>
+#include <boost/asio/error.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/bind_cancellation_slot.hpp>
+#include <chrono>
 #include <functional>
 #include <memory>
+#include <type_traits>
 #include <system_error>
 #include <string>
 
@@ -150,7 +154,17 @@ awaitable<void> accept_loop(
          cs = co_await this_coro::cancellation_state)
     {
         auto [aec, socket] = co_await acceptor.async_accept();
-        if (!aec)
+        if (aec)
+        {
+            // A persistent failure (descriptor exhaustion, no buffers) would
+            // otherwise spin this loop; wait a little before trying again.
+            if (aec == net::error::operation_aborted) continue;
+            net::steady_timer backoff {co_await this_coro::executor};
+            backoff.expires_after(std::chrono::milliseconds {100});
+            auto [tec] = co_await backoff.async_wait(use_awaitable_tuple);
+            (void)tec;
+            continue;
+        }
         {
             auto strand = net::make_strand(base);
             auto const protocol = socket.local_endpoint().protocol();
@@ -171,6 +185,9 @@ template <typename SessionHandler> // TODO: SessionHandler concept for callable 
     std::function<void(boost::asio::ip::tcp::endpoint const&)> local_endpoint_handler = nullptr)
 {
     namespace net = boost::asio;
+    static_assert(std::is_lvalue_reference_v<SessionHandler>,
+        "server::tcp keeps a reference to the session handler for as long as it "
+        "accepts connections: pass an object that outlives the server, not a temporary.");
 
     auto base = co_await net::this_coro::executor;
     co_await detail::run_on_strand(signals, detail::accept_loop(

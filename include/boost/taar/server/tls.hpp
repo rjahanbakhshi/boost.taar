@@ -25,6 +25,7 @@
 #include <boost/beast/core/stream_traits.hpp>
 #include <boost/beast/core/tcp_stream.hpp>
 #include <chrono>
+#include <type_traits>
 #include <functional>
 #include <string>
 #include <utility>
@@ -62,6 +63,9 @@ template <typename SessionHandler>
     std::chrono::steady_clock::duration handshake_timeout = std::chrono::seconds {30})
 {
     namespace net = boost::asio;
+    static_assert(std::is_lvalue_reference_v<SessionHandler>,
+        "server::tls keeps a reference to the session handler for as long as it "
+        "accepts connections: pass an object that outlives the server, not a temporary.");
 
     auto base = co_await net::this_coro::executor;
     co_await detail::run_on_strand(signals, detail::accept_loop(

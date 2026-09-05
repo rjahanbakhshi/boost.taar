@@ -596,13 +596,7 @@ private:
         }
 
         json::array parameters;
-        auto type_schema = [](param_info const& info)
-        {
-            json::object schema = info.schema;
-            if (schema.empty() && !info.json_type.empty()) schema["type"] = info.json_type;
-            if (info.default_value) schema["default"] = *info.default_value;
-            return schema;
-        };
+        auto type_schema = [](param_info const& info) { return param_type_schema(info); };
         // Parameters that carry credentials for a registered scheme are
         // documented as security requirements rather than parameters.
         std::vector<std::string> inferred;

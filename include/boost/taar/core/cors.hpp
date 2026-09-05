@@ -11,6 +11,7 @@
 #define BOOST_TAAR_CORE_CORS_HPP
 
 #include <boost/taar/matcher/context.hpp>
+#include <boost/beast/core/string.hpp>
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/field.hpp>
 #include <boost/beast/http/message.hpp>
@@ -84,7 +85,13 @@ struct cors
         else
         {
             response.set(http::field::access_control_allow_origin, origin->value());
-            response.set(http::field::vary, "Origin");
+            bool varies_on_origin = false;
+            auto vary = response.equal_range(http::field::vary);
+            for (auto it = vary.first; it != vary.second; ++it)
+            {
+                if (boost::beast::iequals(it->value(), "Origin")) varies_on_origin = true;
+            }
+            if (!varies_on_origin) response.insert(http::field::vary, "Origin");
         }
         if (allow_credentials)
         {
