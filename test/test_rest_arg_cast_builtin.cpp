@@ -7,7 +7,7 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
 
-#include <boost/system/system_error.hpp>
+#include <boost/taar/core/error.hpp>
 #include <boost/taar/handler/rest_arg_cast.hpp>
 #include <boost/taar/type_traits/container_like.hpp>
 #include <boost/json/value_from.hpp>
@@ -114,8 +114,8 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_cast_builtin)
     BOOST_TEST(rest_arg_cast<int>("42") == 42);
     BOOST_TEST(rest_arg_cast<float>("3.14") == 3.14f);
     BOOST_TEST(rest_arg_cast<float>("3") == 3.0f);
-    BOOST_REQUIRE_THROW(rest_arg_cast<int>("not a number"), boost::system::system_error);
-    BOOST_REQUIRE_THROW(rest_arg_cast<int>("13.7"), boost::system::system_error);
+    BOOST_REQUIRE_THROW(rest_arg_cast<int>("not a number"), boost::taar::exception);
+    BOOST_REQUIRE_THROW(rest_arg_cast<int>("13.7"), boost::taar::exception);
     BOOST_TEST(rest_arg_cast<bool>("true"));
     BOOST_TEST(!rest_arg_cast<bool>("false"));
     BOOST_TEST(rest_arg_cast<std::string>(13) == "13");
@@ -152,9 +152,9 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_cast_csv)
     BOOST_TEST((rest_arg_cast<std::vector<int>>(" 1 , 2 , 3 ") == std::vector<int>{1, 2, 3}));
     BOOST_TEST((rest_arg_cast<std::vector<std::string>>("a , b , c") == std::vector<std::string>{"a", "b", "c"}));
     // Empty element (after trim) throws
-    BOOST_REQUIRE_THROW((rest_arg_cast<std::vector<int>>("1,,3")), boost::system::system_error);
+    BOOST_REQUIRE_THROW((rest_arg_cast<std::vector<int>>("1,,3")), boost::taar::exception);
     // All-whitespace element (trimmed to empty) throws
-    BOOST_REQUIRE_THROW((rest_arg_cast<std::vector<int>>("1,  ,3")), boost::system::system_error);
+    BOOST_REQUIRE_THROW((rest_arg_cast<std::vector<int>>("1,  ,3")), boost::taar::exception);
     // insertable_container path (std::set)
     BOOST_TEST((rest_arg_cast<std::set<int>>("3,1,2") == std::set<int>{1, 2, 3}));
 }

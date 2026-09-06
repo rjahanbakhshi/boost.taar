@@ -73,6 +73,14 @@ http::response<http::string_body> soft_error(std::exception_ptr ep)
         res.prepare_payload();
         return res;
     }
+    catch (taar::exception const& e)
+    {
+        if (e.error().code().category() != taar::error_category()) throw;
+        http::response<http::string_body> res {http::status::bad_request, 11};
+        res.body() = e.error().code().message();
+        res.prepare_payload();
+        return res;
+    }
     catch (boost::system::system_error const& e)
     {
         if (e.code().category() != taar::error_category()) throw;

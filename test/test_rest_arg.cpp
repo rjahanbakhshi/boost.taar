@@ -14,7 +14,6 @@
 #include <optional>
 #include <boost/test/unit_test.hpp>
 #include <boost/json/value_from.hpp>
-#include <boost/system/system_error.hpp>
 #include <list>
 #include <set>
 #include <vector>
@@ -108,7 +107,7 @@ BOOST_AUTO_TEST_CASE(test_rest_arg)
         // ... but query_arg still parses a single CSV occurrence.
         BOOST_TEST((get_rest_arg<std::vector<int>, query_arg>(query_arg("csv"), 0, multi, ctx) == std::vector<int> {3, 4}));
         // Absent: not found, or empty optional / default.
-        BOOST_CHECK_THROW((get_rest_arg<std::vector<int>, query_list_arg>(query_list_arg("zzz"), 0, multi, ctx)), boost::system::system_error);
+        BOOST_CHECK_THROW((get_rest_arg<std::vector<int>, query_list_arg>(query_list_arg("zzz"), 0, multi, ctx)), boost::taar::exception);
         BOOST_TEST(!(get_rest_arg<std::optional<std::vector<int>>, query_list_arg>(query_list_arg("zzz"), 0, multi, ctx)).has_value());
         auto defaulted = get_rest_arg<std::vector<int>, taar::handler::with_default<query_list_arg, std::vector<int>>>(
             taar::handler::with_default(query_list_arg("zzz"), std::vector<int> {9}), 0, multi, ctx);
@@ -185,7 +184,7 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_multiple_headers)
     http::request<http::string_body> req2{http::verb::get, "", 10};
     req2.insert(http::field::host, "host1");
     req2.insert(http::field::host, "host2");
-    BOOST_REQUIRE_THROW((get_rest_arg<std::string, header_arg>(header_arg(http::field::host), 0, req2, ctx)), boost::system::system_error);
+    BOOST_REQUIRE_THROW((get_rest_arg<std::string, header_arg>(header_arg(http::field::host), 0, req2, ctx)), boost::taar::exception);
 }
 
 BOOST_AUTO_TEST_CASE(test_rest_arg_cookie)
@@ -209,16 +208,16 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_cookie)
     BOOST_TEST((get_rest_arg<std::string, cookie_arg>(cookie_arg("cookie1"), 0, req, ctx) == ""));
 
     req.set(http::field::cookie, "");
-    BOOST_REQUIRE_THROW((get_rest_arg<std::string, cookie_arg>(cookie_arg("cookie1"), 0, req, ctx)), boost::system::system_error);
+    BOOST_REQUIRE_THROW((get_rest_arg<std::string, cookie_arg>(cookie_arg("cookie1"), 0, req, ctx)), boost::taar::exception);
 
     req.set(http::field::cookie, "cookie1");
-    BOOST_REQUIRE_THROW((get_rest_arg<std::string, cookie_arg>(cookie_arg("cookie1"), 0, req, ctx)), boost::system::system_error);
+    BOOST_REQUIRE_THROW((get_rest_arg<std::string, cookie_arg>(cookie_arg("cookie1"), 0, req, ctx)), boost::taar::exception);
 
     req.set(http::field::cookie, "cookie1;");
-    BOOST_REQUIRE_THROW((get_rest_arg<std::string, cookie_arg>(cookie_arg("cookie1"), 0, req, ctx)), boost::system::system_error);
+    BOOST_REQUIRE_THROW((get_rest_arg<std::string, cookie_arg>(cookie_arg("cookie1"), 0, req, ctx)), boost::taar::exception);
 
     req.set(http::field::cookie, ";");
-    BOOST_REQUIRE_THROW((get_rest_arg<std::string, cookie_arg>(cookie_arg("cookie1"), 0, req, ctx)), boost::system::system_error);
+    BOOST_REQUIRE_THROW((get_rest_arg<std::string, cookie_arg>(cookie_arg("cookie1"), 0, req, ctx)), boost::taar::exception);
 }
 
 BOOST_AUTO_TEST_CASE(test_rest_arg_string_body)
@@ -254,7 +253,7 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_string_body)
 
     BOOST_CHECK_THROW(
         (get_rest_arg<std::string, string_body_arg>(string_body_arg("image/png"), 0, req, ctx)),
-        boost::system::system_error);
+        boost::taar::exception);
 }
 
 BOOST_AUTO_TEST_CASE(test_rest_arg_json_body)
@@ -290,7 +289,7 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_json_body)
 
     BOOST_CHECK_THROW(
         (get_rest_arg<boost::json::value, json_body_arg>(json_body_arg("text/plain"), 0, req, ctx)),
-        boost::system::system_error);
+        boost::taar::exception);
 }
 
 BOOST_AUTO_TEST_CASE(test_rest_arg_url_encoded_form_data)
@@ -332,7 +331,7 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_url_encoded_form_data)
 
     BOOST_CHECK_THROW(
         (get_rest_arg<form_kvp, url_encoded_form_data_arg>(url_encoded_form_data_arg("text/plain"), 0, req, ctx)),
-        boost::system::system_error);
+        boost::taar::exception);
 }
 
 BOOST_AUTO_TEST_CASE(test_rest_arg_reference_wrapper)
@@ -485,6 +484,99 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_content_type_parameters_are_ignored)
     BOOST_TEST(!json_body_arg {}(req, ctx).has_value());
     BOOST_TEST(string_body_arg {}(req, ctx).has_value());
     BOOST_TEST(detail::media_type_of("  Text/Plain ; charset=x") == "text/plain");
+}
+
+BOOST_AUTO_TEST_CASE(test_rest_arg_failure_shape)
+{
+    using namespace boost::taar::handler;
+    namespace http = boost::beast::http;
+    namespace taar = boost::taar;
+    using taar::error;
+    taar::matcher::context ctx;
+
+    // Providers report failures as taar::result; not-found carries no message.
+    http::request<http::string_body> req {http::verb::post, "/?page=abc&tag=a&tag=b", 11};
+    req.set(http::field::content_type, "text/html; charset=utf-8");
+    req.body() = "{";
+    req.prepare_payload();
+
+    auto missing = query_arg("zzz")(req, ctx);
+    BOOST_REQUIRE(missing.has_error());
+    BOOST_TEST(missing.error().is(error::argument_not_found));
+    BOOST_TEST(missing.error().message().empty());
+
+    auto ambiguous = query_arg("tag")(req, ctx);
+    BOOST_REQUIRE(ambiguous.has_error());
+    BOOST_TEST(ambiguous.error().is(error::argument_ambiguous));
+    BOOST_TEST(ambiguous.error().message() == "query parameter 'tag' occurs more than once");
+
+    auto wrong_type = json_body_arg {}(req, ctx);
+    BOOST_REQUIRE(wrong_type.has_error());
+    BOOST_TEST(wrong_type.error().is(error::invalid_content_type));
+    BOOST_TEST(wrong_type.error().message().find("'text/html'") != std::string::npos);
+
+    auto malformed = json_body_arg {all_content_types}(req, ctx);
+    BOOST_REQUIRE(malformed.has_error());
+    BOOST_TEST(malformed.error().is(error::invalid_request_format));
+    BOOST_REQUIRE(malformed.error().cause() != nullptr);
+    BOOST_TEST(static_cast<bool>(malformed.error().cause()->code()));
+
+    // get_rest_arg: invalid_argument_format naming the argument, the provider failure as cause.
+    try
+    {
+        (void)get_rest_arg<int, query_arg>(query_arg("zzz"), 1, req, ctx);
+        BOOST_FAIL("no throw");
+    }
+    catch (taar::exception const& e)
+    {
+        auto const& f = e.error();
+        BOOST_TEST(f.is(error::invalid_argument_format));
+        BOOST_TEST(f.message() == "argument zzz (position 2)");
+        BOOST_TEST(f.data().at("argument").as_string() == "zzz");
+        BOOST_TEST(f.data().at("position").to_number<int>() == 2);
+        BOOST_REQUIRE(f.cause() != nullptr);
+        BOOST_TEST(f.cause()->is(error::argument_not_found));
+        BOOST_TEST(f.has(error::argument_not_found));
+    }
+
+    // A failed cast is the cause.
+    try
+    {
+        (void)get_rest_arg<int, query_arg>(query_arg("page"), 0, req, ctx);
+        BOOST_FAIL("no throw");
+    }
+    catch (taar::exception const& e)
+    {
+        BOOST_TEST(e.error().message() == "argument page (position 1)");
+        BOOST_REQUIRE(e.error().cause() != nullptr);
+        BOOST_TEST(e.error().cause()->is(error::invalid_number_format));
+        BOOST_TEST(e.error().cause()->message().find("'abc'") != std::string::npos);
+        BOOST_TEST(std::string {e.what()}.find("(caused by: ") != std::string::npos);
+    }
+
+    // A user provider returning boost::system::result with an error_code still works.
+    struct legacy_provider
+    {
+        std::string name() const { return "legacy"; }
+        boost::system::result<std::string> operator()(
+            http::request_header<> const&, taar::matcher::context const&) const
+        {
+            return boost::system::error_code {error::argument_not_found};
+        }
+    };
+    legacy_provider user_provider;
+    BOOST_TEST(!(get_rest_arg<std::optional<std::string>, decltype(user_provider)>(user_provider, 0, req, ctx)).has_value());
+    try
+    {
+        (void)get_rest_arg<std::string, decltype(user_provider)>(user_provider, 0, req, ctx);
+        BOOST_FAIL("no throw");
+    }
+    catch (taar::exception const& e)
+    {
+        BOOST_TEST(e.error().is(error::invalid_argument_format));
+        BOOST_REQUIRE(e.error().cause() != nullptr);
+        BOOST_TEST(e.error().cause()->is(error::argument_not_found));
+    }
 }
 
 } // namespace

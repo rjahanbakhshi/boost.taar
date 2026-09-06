@@ -287,6 +287,16 @@ inline std::optional<std::string> default_tool_error_handler(std::exception_ptr 
     {
         std::rethrow_exception(e);
     }
+    catch (taar::exception const& x)
+    {
+        auto const& code = x.error().code();
+        if (code.category() == taar::error_category() ||
+            code.category() == jsonrpc::error_category())
+        {
+            return std::nullopt;
+        }
+        return std::string {x.what()};
+    }
     catch (boost::system::system_error const& x)
     {
         if (x.code().category() == taar::error_category() ||

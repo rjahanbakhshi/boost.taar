@@ -17,7 +17,6 @@
 #include <boost/beast/http/message.hpp>
 #include <boost/beast/http/string_body.hpp>
 #include <boost/json/value.hpp>
-#include <boost/system/result.hpp>
 #include <string>
 #include <utility>
 
@@ -50,6 +49,12 @@ struct call
     support all work). Wrap in `with_default` or use a `std::optional<T>`
     parameter to make it optional.
 
+    An absent parameter is reported as `taar::error::argument_not_found`
+    (without a message, so optional and defaulted parameters stay cheap);
+    scalar `params` as `jsonrpc::error::invalid_params`. The binder wraps
+    either in an `invalid_argument_format` failure naming the parameter
+    and its position.
+
     The optional description is not sent on the wire; it feeds generators
     (MCP `inputSchema`, OpenAPI) that describe the method.
 */
@@ -63,19 +68,19 @@ struct rpc_arg
     std::string const& name() const noexcept { return name_; }
     std::string const& description() const noexcept { return description_; }
 
-    boost::system::result<boost::json::value> operator()(
+    taar::result<boost::json::value> operator()(
         call const& c,
         matcher::context const&) const
     {
         if (!c.env.params.has_value())
         {
-            return taar::error::argument_not_found;
+            return taar::failure {taar::error::argument_not_found};
         }
         if (auto const* arr = c.env.params->if_array())
         {
             if (!c.position || *c.position >= arr->size())
             {
-                return taar::error::argument_not_found;
+                return taar::failure {taar::error::argument_not_found};
             }
             return (*arr)[*c.position];
         }
@@ -83,12 +88,12 @@ struct rpc_arg
         if (obj == nullptr)
         {
             // Scalar params are not supported.
-            return jsonrpc::error::invalid_params;
+            return taar::failure {jsonrpc::error::invalid_params, "params must be an object or an array"};
         }
         auto const* v = obj->if_contains(name_);
         if (v == nullptr)
         {
-            return taar::error::argument_not_found;
+            return taar::failure {taar::error::argument_not_found};
         }
         return *v;
     }

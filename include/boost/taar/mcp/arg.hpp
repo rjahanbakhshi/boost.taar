@@ -19,7 +19,6 @@
 #include <boost/beast/http/string_body.hpp>
 #include <boost/json/object.hpp>
 #include <boost/json/value.hpp>
-#include <boost/system/result.hpp>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -61,14 +60,14 @@ struct mcp_arg
     std::string const& name() const noexcept { return name_; }
     std::string const& description() const noexcept { return description_; }
 
-    boost::system::result<boost::json::value> operator()(
+    taar::result<boost::json::value> operator()(
         tool_call const& c,
         matcher::context const&) const
     {
         auto const* v = c.arguments.if_contains(name_);
         if (v == nullptr)
         {
-            return taar::error::argument_not_found;
+            return taar::failure {taar::error::argument_not_found};
         }
         return *v;
     }
@@ -89,14 +88,14 @@ struct uri_arg
     std::string const& name() const noexcept { return name_; }
     std::string const& description() const noexcept { return description_; }
 
-    boost::system::result<std::string> operator()(
+    taar::result<std::string> operator()(
         resource_call const& c,
         matcher::context const&) const
     {
         auto it = c.args.find(name_);
         if (it == c.args.end())
         {
-            return taar::error::argument_not_found;
+            return taar::failure {taar::error::argument_not_found};
         }
         return it->second;
     }

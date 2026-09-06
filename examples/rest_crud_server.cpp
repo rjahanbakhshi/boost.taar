@@ -147,6 +147,16 @@ taar::response_builder on_soft_error(std::exception_ptr e)
     {
         return reply(http::status::not_found, x.what());
     }
+    catch (taar::exception const& x)
+    {
+        // Argument and constraint failures map to 400; anything else is a 500.
+        auto const status = taar::http_status_for(x.error());
+        if (status != http::status::internal_server_error)
+        {
+            return reply(status, x.error().code().message());
+        }
+        return reply(status, x.what());
+    }
     catch (boost::system::system_error const& x)
     {
         if (x.code().category() == taar::error_category())

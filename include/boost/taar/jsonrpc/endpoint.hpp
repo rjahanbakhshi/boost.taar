@@ -61,6 +61,8 @@ using error_mapper = std::function<error_info(std::exception_ptr)>;
 
 /** The default exception-to-error mapping.
 
+    @li `boost::taar::exception` is mapped by its failure's code like the
+        `system_error` cases below, `what()` being the failure's chain.
     @li `boost::system::system_error` in the JSON-RPC category: that code,
         the exception's message.
     @li `boost::system::system_error` in Taar's category (argument not found,
@@ -75,6 +77,22 @@ inline error_info default_error_mapper(std::exception_ptr e)
     try
     {
         std::rethrow_exception(e);
+    }
+    catch (taar::exception const& x)
+    {
+        auto const& code = x.error().code();
+        if (code.category() == jsonrpc::error_category())
+        {
+            return {code.value(), x.what(), std::nullopt};
+        }
+        if (code.category() == taar::error_category())
+        {
+            return {
+                static_cast<int>(error::invalid_params),
+                jsonrpc::error_category().message(static_cast<int>(error::invalid_params)),
+                boost::json::value {x.what()}};
+        }
+        return {static_cast<int>(error::internal_error), x.what(), std::nullopt};
     }
     catch (boost::system::system_error const& x)
     {

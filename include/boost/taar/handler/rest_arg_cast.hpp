@@ -19,7 +19,9 @@
 #include <boost/json/value.hpp>
 #include <boost/json/value_to.hpp>
 #include <boost/algorithm/string/predicate.hpp>
-#include <boost/system/system_error.hpp>
+#include <format>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <charconv>
 #include <concepts>
@@ -74,9 +76,9 @@ inline bool tag_invoke(rest_arg_cast_built_in_tag<bool>, std::string_view const&
     if (boost::iequals(from, "false")) return false;
     if (boost::iequals(from, "no")) return false;
     if (from == "0") return false;
-    throw boost::system::system_error {
+    throw taar::exception {taar::failure {
         error::invalid_boolean_format,
-        "REST arg cast from string to boolean error"};
+        std::format("value '{}' is not a boolean", from)}};
 }
 
 // Helper function for from_chars-based conversions. It performs the conversion
@@ -92,18 +94,20 @@ inline ToType from_chars_conversion(char const* begin, std::size_t size)
 
     if (ec != std::errc{})
     {
-        throw boost::system::system_error {
+        throw taar::exception {taar::failure {
             error::invalid_number_format,
-            "REST arg cast from string to number error (" +
-            std::make_error_code(ec).message() + ")"
-        };
+            std::format(
+                "value '{}' is not a number ({})",
+                std::string_view {begin, size},
+                std::make_error_code(ec).message())}};
     }
     else if (ptr != end && *ptr != '\0')
     {
-        throw boost::system::system_error {
+        throw taar::exception {taar::failure {
             error::invalid_number_format,
-            "REST arg cast from string to number error (Partial conversion)"
-        };
+            std::format(
+                "value '{}' is not a number (partial conversion)",
+                std::string_view {begin, size})}};
     }
 
     return result;
@@ -135,9 +139,9 @@ inline std::string tag_invoke(rest_arg_cast_built_in_tag<std::string>, FromType 
         }
         else if (ec != std::errc()) [[unlikely]]
         {
-            throw boost::system::system_error {
+            throw taar::exception {taar::failure {
                 error::invalid_number_format,
-                "REST arg cast from string to number error"};
+                "number to string conversion failed"}};
         }
 
         [[likely]]
@@ -146,9 +150,9 @@ inline std::string tag_invoke(rest_arg_cast_built_in_tag<std::string>, FromType 
     }
 
     [[unlikely]]
-    throw boost::system::system_error {
+    throw taar::exception {taar::failure {
         error::invalid_number_format,
-        "REST arg cast from number to string error (number too large)"};
+        "number to string conversion failed (number too large)"}};
 }
 
 // From bool to std::string: "1" for true and "0" for false.
@@ -312,8 +316,11 @@ concept rest_arg_castable =
         (via `std::to_chars`), `boost::json::value` to any
         `value_to`-compatible type, and CSV-style string to container.
 
-    Throws `boost::system::system_error` with a `boost::taar::error` code
-    on conversion failure.
+    The built-in conversions throw @ref boost::taar::exception with a
+    `boost::taar::error` code (`invalid_number_format`,
+    `invalid_boolean_format`) and the offending text in the failure's
+    message. User-defined conversions may throw anything; the argument
+    binder wraps it.
 */
 template <typename ToType, typename FromType>
 inline constexpr decltype(auto) rest_arg_cast(FromType const& from)

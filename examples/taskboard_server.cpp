@@ -219,6 +219,11 @@ int main(int argc, char* argv[])
         try { std::rethrow_exception(ep); }
         catch (not_authorized const& e) { return reply(http::status::forbidden, e.what()); }
         catch (std::out_of_range const& e) { return reply(http::status::not_found, e.what()); }
+        catch (taar::exception const& e)
+        {
+            if (e.error().code().category() == taar::error_category()) return reply(http::status::bad_request, e.what());
+            return reply(http::status::internal_server_error, "internal error");
+        }
         catch (boost::system::system_error const& e)
         {
             if (e.code().category() == taar::error_category()) return reply(http::status::bad_request, e.what());

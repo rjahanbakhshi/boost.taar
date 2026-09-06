@@ -26,7 +26,6 @@
 #include <boost/beast/http/message.hpp>
 #include <boost/beast/http/string_body.hpp>
 #include <boost/json/parse.hpp>
-#include <boost/system/system_error.hpp>
 #include <boost/test/unit_test.hpp>
 #include <optional>
 #include <string>
@@ -73,10 +72,12 @@ bool violates(Handler& h, Request const& req, taar::matcher::context const& ctx,
     {
         run_handler(h, req, ctx);
     }
-    catch (boost::system::system_error const& e)
+    catch (taar::exception const& e)
     {
         BOOST_TEST_MESSAGE(e.what());
-        return e.code() == taar::error::constraint_violated && std::string {e.what()}.find(fragment) != std::string::npos;
+        return e.error().is(taar::error::constraint_violated) &&
+            e.error().message().find(fragment) != std::string::npos &&
+            std::string {e.what()}.find(fragment) != std::string::npos;
     }
     return false;
 }

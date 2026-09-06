@@ -18,7 +18,6 @@
 #include <boost/json/array.hpp>
 #include <boost/json/object.hpp>
 #include <boost/json/value.hpp>
-#include <boost/system/system_error.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -92,8 +91,9 @@ struct constraints
 
         rest(&list, constrained(with_default(query_arg("page"), 1), {.minimum = 1}))
 
-    A violation is reported as `error::constraint_violated` with a
-    message naming the argument and the rule: `400` on REST, `-32602`
+    A violation is thrown as @ref boost::taar::exception carrying
+    `error::constraint_violated` with a message naming the argument and the
+    rule: `400` on REST, `-32602`
     (invalid params) on JSON-RPC and MCP, the message in `data`. An
     absent optional value is not checked.
 */
@@ -139,7 +139,12 @@ struct constrained
         return constraints_;
     }
 
-    /// Validate @a value; throws `system_error(error::constraint_violated)`.
+    /** Validate @a value.
+
+        @throws boost::taar::exception with @ref error::constraint_violated,
+                message `<name> <rule>` (e.g. "page must be >= 1") and data
+                `{"argument": name}`.
+    */
     template <typename T>
     void check(T const& value) const
     {
@@ -198,7 +203,10 @@ struct constrained
 private:
     [[noreturn]] void fail(std::string what) const
     {
-        throw boost::system::system_error {error::constraint_violated, name() + " " + what};
+        auto const argument = name();
+        taar::failure f {error::constraint_violated, argument + " " + what};
+        f.with_data(boost::json::object {{"argument", argument}});
+        throw taar::exception {std::move(f)};
     }
 };
 

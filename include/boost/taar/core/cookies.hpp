@@ -14,7 +14,6 @@
 #include <boost/url/decode_view.hpp>
 #include <boost/url/grammar/all_chars.hpp>
 #include <boost/url/grammar/lut_chars.hpp>
-#include <boost/system/result.hpp>
 #include <unordered_map>
 #include <string_view>
 #include <string>
@@ -87,7 +86,7 @@ public:
 
     /** Construct by parsing a `Cookie` header value.
 
-        @throws boost::system::system_error if the header is malformed
+        @throws boost::taar::exception if the header is malformed
                 (carries an @ref error::invalid_cookie_format code).
     */
     cookies(std::string_view cookie_string)
@@ -95,7 +94,7 @@ public:
         auto e = parse_cookies(cookie_string, *this);
         if (e != error::success)
         {
-            throw boost::system::system_error{e};
+            throw taar::exception {taar::failure {e}};
         }
     }
 
@@ -352,16 +351,16 @@ public:
 
     /** Parse @a cookie_string into a fresh @ref cookies.
 
-        @returns A `boost::system::result` carrying the parsed cookies, or
-                 an @ref error code if the input is malformed.
+        @returns A @ref boost::taar::result carrying the parsed cookies, or
+                 a failure with an @ref error code if the input is malformed.
     */
-    friend boost::system::result<cookies, error> parse_cookies(
+    friend taar::result<cookies> parse_cookies(
         std::string_view cookie_string)
     {
         cookies result;
         auto e = parse_cookies(cookie_string, result);
         if (e != error::success)
-            return e;
+            return taar::failure {e};
 
         return result;
     }

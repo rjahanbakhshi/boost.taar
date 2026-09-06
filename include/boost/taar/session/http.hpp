@@ -580,6 +580,28 @@ public:
                 {
                     std::rethrow_exception(eptr);
                 }
+                catch(taar::exception const& e)
+                {
+                    auto const& f = e.error();
+                    status = http_status_for(f);
+                    if (status == boost::beast::http::status::bad_request)
+                    {
+                        // Constraint failures name the argument and the rule.
+                        error_msg = f.is(taar::error::constraint_violated)
+                            ? std::string {e.what()}
+                            : f.code().message();
+                    }
+                    else if (status == boost::beast::http::status::payload_too_large)
+                    {
+                        error_msg = "Request body too large";
+                    }
+                    else if (status == boost::beast::http::status::request_header_fields_too_large)
+                    {
+                        error_msg = "Request header fields too large";
+                    }
+                    // Anything else escalates to the hard error handler.
+                    ex = std::current_exception();
+                }
                 catch(boost::system::system_error const& e)
                 {
                     if (e.code().category() == error_category())

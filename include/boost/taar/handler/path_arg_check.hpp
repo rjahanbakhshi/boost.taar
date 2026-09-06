@@ -170,7 +170,7 @@ void validate_path_args_against_target(Operand const& op, Handler const& handler
                     if (parsed.has_error())
                     {
                         throw boost::system::system_error{
-                            parsed.error(),
+                            parsed.error().code(),
                             std::format(
                                 "Invalid target template \"{}\" at handler registration",
                                 c.template_str)};

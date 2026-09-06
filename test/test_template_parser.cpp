@@ -45,19 +45,19 @@ BOOST_AUTO_TEST_CASE(test_matcher_template_parser_invalid)
     using namespace boost::taar::matcher;
     using boost::taar::error;
 
-    BOOST_TEST((parse_template("") == error::no_absolute_template));
-    BOOST_TEST((parse_template("blah") == error::no_absolute_template));
-    BOOST_TEST((parse_template("blah/blah") == error::no_absolute_template));
-    BOOST_TEST((parse_template("/blah/{b") == error::invalid_template));
-    BOOST_TEST((parse_template("/blah/{") == error::invalid_template));
-    BOOST_TEST((parse_template("/blah{") == error::invalid_template));
-    BOOST_TEST((parse_template("/bl{ah") == error::invalid_template));
-    BOOST_TEST((parse_template("{blah}/blah") == error::no_absolute_template));
-    BOOST_TEST((parse_template("/blah}") == error::invalid_template));
-    BOOST_TEST((parse_template("/bl}ah") == error::invalid_template));
-    BOOST_TEST((parse_template("/blah/{bl/ah}") == error::invalid_template));
-    BOOST_TEST((parse_template("/blah/b{la}h") == error::invalid_template));
-    BOOST_TEST((parse_template("/blah/{blah") == error::invalid_template));
+    BOOST_TEST(parse_template("").error().is(error::no_absolute_template));
+    BOOST_TEST(parse_template("blah").error().is(error::no_absolute_template));
+    BOOST_TEST(parse_template("blah/blah").error().is(error::no_absolute_template));
+    BOOST_TEST(parse_template("/blah/{b").error().is(error::invalid_template));
+    BOOST_TEST(parse_template("/blah/{").error().is(error::invalid_template));
+    BOOST_TEST(parse_template("/blah{").error().is(error::invalid_template));
+    BOOST_TEST(parse_template("/bl{ah").error().is(error::invalid_template));
+    BOOST_TEST(parse_template("{blah}/blah").error().is(error::no_absolute_template));
+    BOOST_TEST(parse_template("/blah}").error().is(error::invalid_template));
+    BOOST_TEST(parse_template("/bl}ah").error().is(error::invalid_template));
+    BOOST_TEST(parse_template("/blah/{bl/ah}").error().is(error::invalid_template));
+    BOOST_TEST(parse_template("/blah/b{la}h").error().is(error::invalid_template));
+    BOOST_TEST(parse_template("/blah/{blah").error().is(error::invalid_template));
 }
 
 BOOST_AUTO_TEST_CASE(test_matcher_template_parser)

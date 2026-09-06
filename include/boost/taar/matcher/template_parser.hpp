@@ -11,7 +11,6 @@
 #define BOOST_TAAR_MATCHER_TEMPLATE_PARSER_HPP
 
 #include <boost/taar/core/error.hpp>
-#include <boost/system/result.hpp>
 #include <vector>
 #include <string_view>
 
@@ -107,12 +106,12 @@ using parsed_template_ref = std::vector<template_segment_ref>;
 /** Parse a path template into a sequence of typed segments.
 
     @param path The template text (e.g. `"/users/{id}/files/{*path}"`).
-    @returns A `boost::system::result` carrying the parsed segments on
-             success, or a `boost::taar::error` code
+    @returns A @ref boost::taar::result carrying the parsed segments on
+             success, or a failure with a `boost::taar::error` code
              (`error::no_absolute_template` or `error::invalid_template`)
              on failure.
 */
-inline /*constexpr*/ boost::system::result<parsed_template_ref> parse_template(
+inline /*constexpr*/ result<parsed_template_ref> parse_template(
     std::string_view path)
 {
     enum class states : char
@@ -138,7 +137,7 @@ inline /*constexpr*/ boost::system::result<parsed_template_ref> parse_template(
         case states::start:
             if (*iter != '/')
             {
-                return error::no_absolute_template;
+                return failure {error::no_absolute_template};
             }
             state = states::start_segment;
             break;
@@ -164,7 +163,7 @@ inline /*constexpr*/ boost::system::result<parsed_template_ref> parse_template(
                 break;
             }
 
-            return error::invalid_template;
+            return failure {error::invalid_template};
 
         case states::start_param:
             if (*iter == '*')
@@ -182,7 +181,7 @@ inline /*constexpr*/ boost::system::result<parsed_template_ref> parse_template(
                 break;
             }
 
-            return error::invalid_template;
+            return failure {error::invalid_template};
 
         case states::start_greedy_param:
             if (detail::validate_param_start(*iter))
@@ -194,7 +193,7 @@ inline /*constexpr*/ boost::system::result<parsed_template_ref> parse_template(
                 break;
             }
 
-            return error::invalid_template;
+            return failure {error::invalid_template};
 
         case states::in_param:
             if (*iter == '}')
@@ -217,7 +216,7 @@ inline /*constexpr*/ boost::system::result<parsed_template_ref> parse_template(
                 break;
             }
 
-            return error::invalid_template;
+            return failure {error::invalid_template};
 
         case states::end_param:
             if (*iter == '/')
@@ -225,7 +224,7 @@ inline /*constexpr*/ boost::system::result<parsed_template_ref> parse_template(
                 state = states::start_segment;
                 break;
             }
-            return error::invalid_template;
+            return failure {error::invalid_template};
 
         case states::in_literal:
             if (*iter == '/')
@@ -241,13 +240,13 @@ inline /*constexpr*/ boost::system::result<parsed_template_ref> parse_template(
             {
                 break;
             }
-            return error::invalid_template;
+            return failure {error::invalid_template};
         }
     }
 
     if (state == states::start)
     {
-        return error::no_absolute_template;
+        return failure {error::no_absolute_template};
     }
     else if (state == states::in_literal)
     {
@@ -257,7 +256,7 @@ inline /*constexpr*/ boost::system::result<parsed_template_ref> parse_template(
     }
     else if (state != states::start_segment && state != states::end_param)
     {
-        return error::invalid_template;
+        return failure {error::invalid_template};
     }
 
     return result;

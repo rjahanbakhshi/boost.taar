@@ -29,13 +29,12 @@
 #include <boost/url/parse.hpp>
 #include <boost/url/parse_query.hpp>
 #include <boost/url/ignore_case.hpp>
+#include <boost/json/object.hpp>
 #include <boost/json/parse.hpp>
 #include <boost/json/value.hpp>
 #include <boost/json/value_to.hpp>
-#include <boost/system/result.hpp>
 #include <functional>
 #include <cctype>
-#include <system_error>
 #include <unordered_set>
 #include <variant>
 #include <optional>
@@ -123,6 +122,17 @@ std::string arg_provider_description(ArgProviderType const& ap)
         return "";
 }
 
+/// True if a provider failure means "argument absent" (taar `failure` or a user provider's `error_code`).
+inline bool is_not_found(taar::failure const& f) noexcept
+{
+    return f.is(error::argument_not_found);
+}
+
+inline bool is_not_found(boost::system::error_code const& ec) noexcept
+{
+    return ec == error::argument_not_found;
+}
+
 /// The media type of a `Content-Type` value: parameters stripped, trimmed, lower-cased.
 inline std::string media_type_of(std::string_view content_type)
 {
@@ -148,6 +158,34 @@ bool content_type_accepted(Request const& request, std::unordered_set<std::strin
     {
         return content_types.contains(media_type_of(elem.value()));
     }) != range.second;
+}
+
+/// The failure a body provider reports when the request's `Content-Type` is not accepted.
+template <typename Request>
+taar::failure content_type_failure(Request const& request)
+{
+    auto const iter = request.find(boost::beast::http::field::content_type);
+    if (iter == request.end())
+    {
+        return taar::failure {error::invalid_content_type, "missing content type"};
+    }
+    return taar::failure {
+        error::invalid_content_type,
+        "content type '" + media_type_of(iter->value()) + "' is not accepted"};
+}
+
+/// The failure the multipart providers report without a `multipart/form-data` boundary.
+template <typename Request>
+taar::failure multipart_content_type_failure(Request const& request)
+{
+    auto const iter = request.find(boost::beast::http::field::content_type);
+    if (iter == request.end())
+    {
+        return taar::failure {error::invalid_content_type, "missing content type"};
+    }
+    return taar::failure {
+        error::invalid_content_type,
+        "content type '" + media_type_of(iter->value()) + "' is not multipart/form-data with a boundary"};
 }
 
 template <typename Option>
@@ -242,7 +280,16 @@ struct with_default
 template <typename T, typename U>
 with_default(T, U) -> with_default<std::remove_cvref_t<T>, std::remove_cvref_t<U>>;
 
-// Direct or lazy retrieval of REST arg value from the arg provider.
+/** Direct or lazy retrieval of REST arg value from the arg provider.
+
+    A provider failure (other than an absent argument that `with_default`
+    or a `std::optional` parameter absorbs) or a failed cast throws
+    @ref boost::taar::exception with @ref error::invalid_argument_format,
+    message `argument <name> (position N)`, data
+    `{"argument": name, "position": N}`, and the provider's failure (or
+    the cast's exception, wrapped by @ref failure::from_exception) as the
+    cause. A `constrained` provider's violation is thrown unwrapped.
+*/
 template <typename HandlerArgType, typename ArgProviderType, typename RequestType>
 decltype(auto) get_rest_arg(
     ArgProviderType const& arg_provider,
@@ -283,8 +330,7 @@ decltype(auto) get_rest_arg(
                     "Incompatible rest arg default value!");
 
                 auto result = arg_provider(request, context);
-                if (result.has_error() &&
-                    result.error() == error::argument_not_found)
+                if (result.has_error() && detail::is_not_found(result.error()))
                 {
                     return rest_arg_cast<handler_arg_no_cv_type>(arg_provider.default_value());
                 }
@@ -298,8 +344,7 @@ decltype(auto) get_rest_arg(
                     typename handler_arg_no_cv_type::value_type>)
                 {
                     auto result = arg_provider(request, context);
-                    if (result.has_error() &&
-                        result.error() == error::argument_not_found)
+                    if (result.has_error() && detail::is_not_found(result.error()))
                     {
                         return std::optional<rest_arg_cast_result_t<
                             typename handler_arg_no_cv_type::value_type,
@@ -339,24 +384,23 @@ decltype(auto) get_rest_arg(
                 "Incompatible rest arg provider!");
         }
     }
-    catch(std::exception const& e)
-    {
-        throw boost::system::system_error{
-            error::invalid_argument_format,
-            std::format(
-                "{} - REST arg({}:{})",
-                e.what(),
-                index + 1,
-                detail::arg_provider_name(arg_provider))};
-    }
     catch(...)
     {
-        throw boost::system::system_error{
+        // The provider's failure, or whatever a cast threw, becomes the
+        // cause of an argument-level failure naming the parameter.
+        auto cause = taar::failure::from_exception(std::current_exception());
+        auto const name = detail::arg_provider_name(arg_provider);
+        auto const position = index + 1;
+        taar::failure f {
             error::invalid_argument_format,
-            std::format(
-                "REST arg({}:{})",
-                index + 1,
-                detail::arg_provider_name(arg_provider))};
+            name.empty()
+                ? std::format("argument (position {})", position)
+                : std::format("argument {} (position {})", name, position)};
+        f.with_data(boost::json::object {
+            {"argument", name},
+            {"position", position}});
+        f.with_cause(std::move(cause));
+        throw taar::exception {std::move(f)};
     }
 }
 
@@ -384,7 +428,7 @@ struct path_arg
         return description_;
     }
 
-    boost::system::result<std::string> operator()(
+    taar::result<std::string> operator()(
         boost::beast::http::request_header<> const&,
         matcher::context const& context) const
     {
@@ -393,7 +437,7 @@ struct path_arg
         {
             return std::string {iter->second};
         }
-        return error::argument_not_found;
+        return taar::failure {error::argument_not_found};
     }
 
     std::string path_key_;
@@ -438,21 +482,24 @@ struct query_arg
         return description_;
     }
 
-    boost::system::result<std::string> operator()(
+    taar::result<std::string> operator()(
         boost::beast::http::request_header<> const& request,
         matcher::context const&) const
     {
         auto url_view = boost::urls::parse_origin_form(request.target());
         if (!url_view)
         {
-            return error::invalid_url_format;
+            return taar::failure {error::invalid_url_format, "request target"}
+                .with_cause(taar::failure {url_view.error()});
         }
 
         auto params = url_view->params();
 
         if (params.count(query_key_, ic_) > 1)
         {
-            return error::argument_ambiguous;
+            return taar::failure {
+                error::argument_ambiguous,
+                "query parameter '" + query_key_ + "' occurs more than once"};
         }
 
         auto iter = params.find(query_key_, ic_);
@@ -461,7 +508,7 @@ struct query_arg
             auto const& param = *iter;
             return std::string {param.value};
         }
-        return error::argument_not_found;
+        return taar::failure {error::argument_not_found};
     }
 
     std::string query_key_;
@@ -507,14 +554,15 @@ struct query_list_arg
         return description_;
     }
 
-    boost::system::result<std::vector<std::string>> operator()(
+    taar::result<std::vector<std::string>> operator()(
         boost::beast::http::request_header<> const& request,
         matcher::context const&) const
     {
         auto url_view = boost::urls::parse_origin_form(request.target());
         if (!url_view)
         {
-            return error::invalid_url_format;
+            return taar::failure {error::invalid_url_format, "request target"}
+                .with_cause(taar::failure {url_view.error()});
         }
 
         std::vector<std::string> values;
@@ -527,7 +575,7 @@ struct query_list_arg
         }
         if (values.empty())
         {
-            return error::argument_not_found;
+            return taar::failure {error::argument_not_found};
         }
         return values;
     }
@@ -578,39 +626,36 @@ struct header_arg
         return result;
     }
 
-    boost::system::result<std::string> operator()(
+    taar::result<std::string> operator()(
         boost::beast::http::request_header<> const& request,
         matcher::context const&) const
     {
-        boost::system::result<std::string> result;
-
-        std::visit([&](auto&& arg)
+        return std::visit([&](auto&& arg) -> taar::result<std::string>
         {
             auto iter_range = request.equal_range(arg);
 
-            if (iter_range.first == request.end())
+            if (iter_range.first == iter_range.second)
             {
-                result = error::argument_not_found;
+                return taar::failure {error::argument_not_found};
             }
-            else
-            {
-                result = std::string {iter_range.first->value()};
-                if (std::any_of(
-                        iter_range.first,
-                        iter_range.second,
-                        [&](auto const& val)
-                        {
-                            return val.value() != result.value();
-                        }
-                   ))
-                {
-                    // Same header is repeated with different values.
-                    result = error::argument_ambiguous;
-                }
-            }
-        }, header_);
 
-        return result;
+            std::string value {iter_range.first->value()};
+            if (std::any_of(
+                    iter_range.first,
+                    iter_range.second,
+                    [&](auto const& val)
+                    {
+                        return val.value() != value;
+                    }
+               ))
+            {
+                // Same header is repeated with different values.
+                return taar::failure {
+                    error::argument_ambiguous,
+                    "header '" + name() + "' occurs more than once with different values"};
+            }
+            return value;
+        }, header_);
     }
 
     std::variant<boost::beast::http::field, std::string> header_;
@@ -640,7 +685,7 @@ struct cookie_arg
         return description_;
     }
 
-    boost::system::result<std::string> operator()(
+    taar::result<std::string> operator()(
         boost::beast::http::request_header<> const& request,
         matcher::context const&) const
     {
@@ -657,7 +702,7 @@ struct cookie_arg
             return iter->second;
         }
 
-        return error::argument_not_found;
+        return taar::failure {error::argument_not_found};
     }
 
     std::string name_;
@@ -708,13 +753,13 @@ struct string_body_arg
         return content_types_;
     }
 
-    boost::system::result<std::string> operator()(
+    taar::result<std::string> operator()(
         boost::beast::http::request<boost::beast::http::string_body> const& request,
         matcher::context const&) const
     {
         if (!detail::content_type_accepted(request, content_types_))
         {
-            return error::invalid_content_type;
+            return detail::content_type_failure(request);
         }
 
         return std::string {request.body()};
@@ -763,20 +808,21 @@ struct json_body_arg
         return content_types_;
     }
 
-    boost::system::result<boost::json::value> operator()(
+    taar::result<boost::json::value> operator()(
         boost::beast::http::request<boost::beast::http::string_body> const& request,
         matcher::context const&) const
     {
         if (!detail::content_type_accepted(request, content_types_))
         {
-            return error::invalid_content_type;
+            return detail::content_type_failure(request);
         }
 
-        std::error_code ec;
+        boost::system::error_code ec;
         auto json = boost::json::parse(request.body(), ec);
         if (ec)
         {
-            return error::invalid_request_format;
+            return taar::failure {error::invalid_request_format, "malformed JSON body"}
+                .with_cause(taar::failure {ec});
         }
         return json;
     }
@@ -823,19 +869,20 @@ struct url_encoded_form_data_arg
         return content_types_;
     }
 
-    boost::system::result<form_kvp> operator()(
+    taar::result<form_kvp> operator()(
         boost::beast::http::request<boost::beast::http::string_body> const& request,
         matcher::context const&) const
     {
         if (!detail::content_type_accepted(request, content_types_))
         {
-            return error::invalid_content_type;
+            return detail::content_type_failure(request);
         }
 
         auto pev = boost::urls::parse_query(request.body());
         if (!pev)
         {
-            return error::invalid_request_format;
+            return taar::failure {error::invalid_request_format, "malformed form body"}
+                .with_cause(taar::failure {pev.error()});
         }
 
         form_kvp result;
@@ -889,14 +936,14 @@ struct multipart_form_arg
         return description_;
     }
 
-    boost::system::result<multipart_form> operator()(
+    taar::result<multipart_form> operator()(
         boost::beast::http::request<boost::beast::http::string_body> const& request,
         matcher::context const&) const
     {
         auto boundary = multipart_boundary(request[boost::beast::http::field::content_type]);
         if (!boundary)
         {
-            return error::invalid_content_type;
+            return detail::multipart_content_type_failure(request);
         }
         try
         {
@@ -904,7 +951,8 @@ struct multipart_form_arg
         }
         catch (boost::system::system_error const&)
         {
-            return error::invalid_request_format;
+            return taar::failure {error::invalid_request_format, "malformed multipart body"}
+                .with_cause(taar::failure::from_exception(std::current_exception()));
         }
     }
 
@@ -945,14 +993,14 @@ struct multipart_stream_arg
         return description_;
     }
 
-    boost::system::result<multipart_reader> operator()(
+    taar::result<multipart_reader> operator()(
         streaming_request const& request,
         matcher::context const&) const
     {
         auto boundary = multipart_boundary(request[boost::beast::http::field::content_type]);
         if (!boundary)
         {
-            return error::invalid_content_type;
+            return detail::multipart_content_type_failure(request);
         }
         return multipart_reader {request.body, std::move(*boundary)};
     }
@@ -1006,13 +1054,13 @@ struct stream_body_arg
         return content_types_;
     }
 
-    boost::system::result<std::reference_wrapper<body_reader>> operator()(
+    taar::result<std::reference_wrapper<body_reader>> operator()(
         streaming_request const& request,
         matcher::context const&) const
     {
         if (!detail::content_type_accepted(request, content_types_))
         {
-            return error::invalid_content_type;
+            return detail::content_type_failure(request);
         }
         return std::ref(request.body);
     }
@@ -1038,7 +1086,7 @@ struct target_arg
         return "target";
     }
 
-    boost::system::result<std::string> operator()(
+    taar::result<std::string> operator()(
         boost::beast::http::request_header<> const& request,
         matcher::context const&) const
     {
@@ -1054,7 +1102,7 @@ struct body_size_arg
         return "body_size";
     }
 
-    boost::system::result<std::size_t> operator()(
+    taar::result<std::size_t> operator()(
         boost::beast::http::request<boost::beast::http::string_body> const& request,
         matcher::context const&) const
     {
