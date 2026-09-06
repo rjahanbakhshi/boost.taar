@@ -11,6 +11,19 @@
 #define BOOST_TAAR_HANDLER_ERROR_HPP
 
 #include <boost/system/error_category.hpp>
+#include <boost/system/error_code.hpp>
+#include <boost/system/result.hpp>
+#include <boost/system/system_error.hpp>
+#include <boost/beast/http/error.hpp>
+#include <boost/beast/http/status.hpp>
+#include <boost/json/value.hpp>
+#include <boost/assert/source_location.hpp>
+#include <exception>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <system_error>
+#include <utility>
 
 namespace boost::taar {
 
@@ -40,6 +53,7 @@ enum class error
     invalid_number_format,      ///< A numeric argument could not be parsed.
     late_chunk_metadata,        ///< Chunked metadata was yielded after body data.
     constraint_violated,        ///< An argument failed its declared constraints.
+    unknown_exception,          ///< A foreign exception that carries no error code.
 };
 
 /// Singleton @c boost::system::error_category instance for the @c error enum.
@@ -87,6 +101,8 @@ inline boost::system::error_category const& error_category() noexcept
                 return "Chunk metadata yielded after data.";
             case error::constraint_violated:
                 return "Argument constraint violated";
+            case error::unknown_exception:
+                return "Unknown exception";
             }
 
             return "(Unknown error)";
@@ -122,5 +138,366 @@ struct is_error_code_enum<::boost::taar::error>
 };
 
 } // namespace boost::system
+
+namespace boost::taar {
+
+class exception;
+
+/** A failure: what went wrong, where, and why.
+
+    The one error value of Boost.Taar. A failure carries
+
+    @li an `error_code` from any category (@ref error, Asio, Beast,
+        Boost.JSON, `jsonrpc::error`, generic `errc`, ...);
+    @li a message specific to this occurrence ("query parameter 'page'"),
+        which does not repeat the code's generic text;
+    @li optional structured data (a JSON value);
+    @li an optional nested cause, so a failure can explain itself in
+        layers ("argument page (position 1)" caused by "value 'abc'");
+    @li the source location where it was raised;
+    @li optionally the foreign exception it was made from (see
+        @ref from_exception), so a user can still @ref rethrow and catch
+        their own type.
+
+    A default-constructed failure means "no error": its code is success.
+    A failure with no message, data or cause allocates nothing, which
+    keeps hot paths such as @ref error::argument_not_found cheap. Copies
+    share the cause chain.
+
+    @see result, exception
+*/
+class failure
+{
+public:
+    /// No error: `code()` is success.
+    failure() = default;
+
+    /// A failure carrying @a code, an optional @a message for this occurrence, and its location.
+    explicit failure(
+            boost::system::error_code code,
+            std::string message = {},
+            boost::source_location const& where = BOOST_CURRENT_LOCATION)
+        : code_ {code}
+        , message_ {std::move(message)}
+        , where_ {where}
+    {}
+
+    /// Convenience for codes of the @ref error enum.
+    explicit failure(
+            error code,
+            std::string message = {},
+            boost::source_location const& where = BOOST_CURRENT_LOCATION)
+        : failure {make_error_code(code), std::move(message), where}
+    {}
+
+    /// The error code; any category.
+    [[nodiscard]] boost::system::error_code const& code() const noexcept
+    {
+        return code_;
+    }
+
+    /// The message for this occurrence only; may be empty.
+    [[nodiscard]] std::string const& message() const noexcept
+    {
+        return message_;
+    }
+
+    /// Structured data attached to this occurrence; null when none.
+    [[nodiscard]] boost::json::value const& data() const noexcept
+    {
+        return data_;
+    }
+
+    /// The nested cause, or `nullptr`.
+    [[nodiscard]] failure const* cause() const noexcept
+    {
+        return cause_.get();
+    }
+
+    /// Where the failure was raised.
+    [[nodiscard]] boost::source_location const& where() const noexcept
+    {
+        return where_;
+    }
+
+    /// The innermost foreign exception kept in the chain, if any.
+    [[nodiscard]] std::exception_ptr exception() const noexcept
+    {
+        std::exception_ptr out;
+        for (failure const* f = this; f != nullptr; f = f->cause())
+        {
+            if (f->exception_) out = f->exception_;
+        }
+        return out;
+    }
+
+    /// Replace the message.
+    failure& with_message(std::string message)
+    {
+        message_ = std::move(message);
+        return *this;
+    }
+
+    /// Replace the structured data.
+    failure& with_data(boost::json::value data)
+    {
+        data_ = std::move(data);
+        return *this;
+    }
+
+    /// Nest @a cause below this failure.
+    failure& with_cause(failure cause)
+    {
+        cause_ = std::make_shared<failure const>(std::move(cause));
+        return *this;
+    }
+
+    /// Keep @a exception, the foreign exception this failure stands for.
+    failure& with_exception(std::exception_ptr exception)
+    {
+        exception_ = std::move(exception);
+        return *this;
+    }
+
+    /// True if this failure's own code equals @a code.
+    [[nodiscard]] bool is(boost::system::error_code const& code) const noexcept
+    {
+        return code_ == code;
+    }
+
+    /// True if this failure or any of its causes carries @a code.
+    [[nodiscard]] bool has(boost::system::error_code const& code) const noexcept
+    {
+        for (failure const* f = this; f != nullptr; f = f->cause())
+        {
+            if (f->code_ == code) return true;
+        }
+        return false;
+    }
+
+    /// The innermost cause (this failure if it has none).
+    [[nodiscard]] failure const& root() const noexcept
+    {
+        failure const* f = this;
+        while (f->cause() != nullptr) f = f->cause();
+        return *f;
+    }
+
+    /** Render the failure and its causes as text.
+
+        Each level reads `message: code text [category:value]` (or
+        `code text [category:value]` when it has no message); causes
+        follow in `(caused by: ...)`. For a failure without cause this is
+        the same text as `boost::system::system_error::what()`.
+    */
+    [[nodiscard]] std::string chain() const
+    {
+        std::string out;
+        std::size_t depth = 0;
+        for (failure const* f = this; f != nullptr; f = f->cause(), ++depth)
+        {
+            if (depth > 0) out += " (caused by: ";
+            if (!f->message_.empty())
+            {
+                out += f->message_;
+                out += ": ";
+            }
+            out += f->code_.message();
+            out += " [";
+            out += f->code_.to_string();
+            out += "]";
+        }
+        if (depth > 1) out.append(depth - 1, ')');
+        return out;
+    }
+
+    /** Throw the failure.
+
+        Rethrows the kept foreign exception (@ref exception) if there is
+        one, so a user's own exception type can be caught again; throws
+        @ref boost::taar::exception carrying this failure otherwise.
+    */
+    [[noreturn]] void rethrow() const;
+
+    /** Wrap an exception as a failure.
+
+        @li @ref boost::taar::exception: its failure, unwrapped.
+        @li `boost::system::system_error` and `std::system_error`: the
+            exception's code, its text without the code's own text as the
+            message, the exception kept.
+        @li Any other `std::exception`: @ref error::unknown_exception with
+            `what()` as the message, the exception kept.
+        @li Anything else: @ref error::unknown_exception, message
+            "unknown exception", the exception kept.
+        @li A null pointer: no error.
+    */
+    [[nodiscard]] static failure from_exception(std::exception_ptr eptr);
+
+private:
+    /// @a what without a trailing @a suffix (and its ": " separator), if present.
+    static std::string strip_code_text(std::string_view what, std::string_view suffix)
+    {
+        if (what == suffix) return {};
+        if (what.size() > suffix.size() + 2 &&
+            what.ends_with(suffix) &&
+            what.substr(what.size() - suffix.size() - 2, 2) == ": ")
+        {
+            return std::string {what.substr(0, what.size() - suffix.size() - 2)};
+        }
+        return std::string {what};
+    }
+
+    boost::system::error_code code_ {};
+    std::string message_ {};
+    boost::json::value data_ {};
+    std::shared_ptr<failure const> cause_ {};
+    boost::source_location where_ {};
+    std::exception_ptr exception_ {};
+};
+
+/** The non-throwing result shape of Boost.Taar: a `T` or a @ref failure.
+
+    Accessing `value()` on a failed result throws
+    @ref boost::taar::exception carrying the failure (through the ADL hook
+    @ref throw_exception_from_error). Construct a failed result explicitly:
+    `return failure {error::argument_not_found};`.
+*/
+template <typename T>
+using result = boost::system::result<T, failure>;
+
+/** The exception type Boost.Taar throws.
+
+    Carries a @ref failure; `what()` renders its cause chain
+    (@ref failure::chain). Copies are cheap and do not throw.
+*/
+class exception : public std::exception
+{
+public:
+    /// Throwable wrapper for @a f.
+    explicit exception(failure f)
+        : state_ {std::make_shared<state const>(std::move(f))}
+    {}
+
+    /// The failure this exception carries.
+    [[nodiscard]] failure const& error() const noexcept
+    {
+        return state_->failure_;
+    }
+
+    /// The rendered cause chain.
+    [[nodiscard]] char const* what() const noexcept override
+    {
+        return state_->what_.c_str();
+    }
+
+private:
+    struct state
+    {
+        explicit state(failure f)
+            : failure_ {std::move(f)}
+            , what_ {failure_.chain()}
+        {}
+
+        failure failure_;
+        std::string what_;
+    };
+
+    std::shared_ptr<state const> state_;
+};
+
+/** ADL hook used by `result<T>::value()`: throws @ref boost::taar::exception.
+
+    The failure is thrown as is; its own @ref failure::where is kept and
+    @a loc (the `value()` call site) is not recorded.
+*/
+[[noreturn]] inline void throw_exception_from_error(
+    failure const& f,
+    boost::source_location const& loc)
+{
+    (void)loc;
+    throw exception {f};
+}
+
+inline void failure::rethrow() const
+{
+    if (auto eptr = exception())
+    {
+        std::rethrow_exception(eptr);
+    }
+    throw taar::exception {*this};
+}
+
+inline failure failure::from_exception(std::exception_ptr eptr)
+{
+    if (!eptr) return failure {};
+    try
+    {
+        std::rethrow_exception(eptr);
+    }
+    catch (taar::exception const& e)
+    {
+        return e.error();
+    }
+    catch (boost::system::system_error const& e)
+    {
+        return failure {e.code(), strip_code_text(e.what(), e.code().what())}.with_exception(eptr);
+    }
+    catch (std::system_error const& e)
+    {
+        return failure {
+            boost::system::error_code {e.code()},
+            strip_code_text(e.what(), e.code().message())}.with_exception(eptr);
+    }
+    catch (std::exception const& e)
+    {
+        return failure {error::unknown_exception, e.what()}.with_exception(eptr);
+    }
+    catch (...)
+    {
+        return failure {error::unknown_exception, "unknown exception"}.with_exception(eptr);
+    }
+}
+
+/** The HTTP status a failure maps to by default.
+
+    @li Request-related codes of @ref error (argument not found or
+        ambiguous, invalid argument, request, URL, content type, cookie,
+        boolean or number format, constraint violated): `400 Bad Request`.
+    @li `boost::beast::http::error::body_limit`: `413 Payload Too Large`.
+    @li `boost::beast::http::error::header_limit`:
+        `431 Request Header Fields Too Large`.
+    @li Anything else: `500 Internal Server Error`.
+
+    Only the outermost code is consulted.
+*/
+[[nodiscard]] inline boost::beast::http::status http_status_for(failure const& f) noexcept
+{
+    namespace http = boost::beast::http;
+    auto const& code = f.code();
+    if (code.category() == error_category())
+    {
+        switch (static_cast<error>(code.value()))
+        {
+        case error::argument_not_found:
+        case error::argument_ambiguous:
+        case error::invalid_argument_format:
+        case error::invalid_request_format:
+        case error::invalid_url_format:
+        case error::invalid_content_type:
+        case error::invalid_cookie_format:
+        case error::invalid_boolean_format:
+        case error::invalid_number_format:
+        case error::constraint_violated:
+            return http::status::bad_request;
+        default:
+            return http::status::internal_server_error;
+        }
+    }
+    if (code == http::error::body_limit) return http::status::payload_too_large;
+    if (code == http::error::header_limit) return http::status::request_header_fields_too_large;
+    return http::status::internal_server_error;
+}
+
+} // namespace boost::taar
 
 #endif // BOOST_TAAR_HANDLER_ERROR_HPP
