@@ -239,21 +239,16 @@ BOOST_AUTO_TEST_CASE(test_e2e_custom_soft_error_handler_keeps_connection)
 {
     net::io_context io;
     auto session = make_session();
-    session.set_soft_error_handler([](std::exception_ptr ep)
+    session.set_soft_error_handler([](taar::failure const& f)
     {
-        try
-        {
-            std::rethrow_exception(ep);
-        }
-        catch (division_by_zero const& e)
-        {
-            http::response<http::string_body> res {http::status::unprocessable_entity, 11};
-            res.set(http::field::content_type, "application/json");
-            res.body() = json::serialize(json::object {{"error", e.what()}});
-            res.keep_alive(true);
-            res.prepare_payload();
-            return res;
-        }
+        auto const* e = f.as<division_by_zero>();
+        if (e == nullptr) f.rethrow();
+        http::response<http::string_body> res {http::status::unprocessable_entity, 11};
+        res.set(http::field::content_type, "application/json");
+        res.body() = json::serialize(json::object {{"error", e->what()}});
+        res.keep_alive(true);
+        res.prepare_payload();
+        return res;
     });
 
     e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
@@ -272,11 +267,9 @@ BOOST_AUTO_TEST_CASE(test_e2e_unknown_exception_escalates_to_hard_error_and_serv
     net::io_context io;
     auto session = make_session();
     std::atomic<int> runtime_errors {0};
-    session.set_hard_error_handler([&](std::exception_ptr ep)
+    session.set_hard_error_handler([&](taar::failure const& f)
     {
-        try { std::rethrow_exception(ep); }
-        catch (std::runtime_error const&) { ++runtime_errors; }
-        catch (...) {}
+        if (f.as<std::runtime_error>()) ++runtime_errors;
     });
 
     e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
@@ -298,15 +291,13 @@ BOOST_AUTO_TEST_CASE(test_e2e_soft_error_handler_that_throws_becomes_hard_error)
     net::io_context io;
     auto session = make_session();
     std::atomic<int> logic_errors {0};
-    session.set_soft_error_handler([](std::exception_ptr) -> http::response<http::string_body>
+    session.set_soft_error_handler([](taar::failure const&) -> http::response<http::string_body>
     {
         throw std::logic_error {"handler failed"};
     });
-    session.set_hard_error_handler([&](std::exception_ptr ep)
+    session.set_hard_error_handler([&](taar::failure const& f)
     {
-        try { std::rethrow_exception(ep); }
-        catch (std::logic_error const&) { ++logic_errors; }
-        catch (...) {}
+        if (f.as<std::logic_error>()) ++logic_errors;
     });
 
     e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>

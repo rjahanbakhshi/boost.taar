@@ -206,7 +206,7 @@ int main(int argc, char* argv[])
     // A domain error becomes a 403 on REST (JSON-RPC maps it below, MCP
     // reports it as a tool error); argument problems stay 400 with their
     // message, anything else is a 500 without details.
-    session.set_soft_error_handler([](std::exception_ptr ep)
+    session.set_soft_error_handler([](taar::failure const& f)
     {
         auto reply = [](http::status status, std::string text)
         {
@@ -216,20 +216,11 @@ int main(int argc, char* argv[])
             res.prepare_payload();
             return res;
         };
-        try { std::rethrow_exception(ep); }
-        catch (not_authorized const& e) { return reply(http::status::forbidden, e.what()); }
-        catch (std::out_of_range const& e) { return reply(http::status::not_found, e.what()); }
-        catch (taar::exception const& e)
-        {
-            if (e.error().code().category() == taar::error_category()) return reply(http::status::bad_request, e.what());
-            return reply(http::status::internal_server_error, "internal error");
-        }
-        catch (boost::system::system_error const& e)
-        {
-            if (e.code().category() == taar::error_category()) return reply(http::status::bad_request, e.what());
-            return reply(http::status::internal_server_error, "internal error");
-        }
-        catch (std::exception const&) { return reply(http::status::internal_server_error, "internal error"); }
+        if (auto const* e = f.as<not_authorized>()) return reply(http::status::forbidden, e->what());
+        if (auto const* e = f.as<std::out_of_range>()) return reply(http::status::not_found, e->what());
+        auto const status = taar::http_status_for(f);
+        if (status != http::status::internal_server_error) return reply(status, f.text());
+        return reply(http::status::internal_server_error, "internal error");
     });
 
     // ---- REST + OpenAPI -----------------------------------------------------

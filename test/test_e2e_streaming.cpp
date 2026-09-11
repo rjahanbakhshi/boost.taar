@@ -194,11 +194,10 @@ BOOST_AUTO_TEST_CASE(test_e2e_streaming_generator_throwing_mid_stream_truncates_
     net::io_context io;
     taar::session::http session;
     std::atomic<int> generator_errors {0};
-    session.set_hard_error_handler([&](std::exception_ptr ep)
+    session.set_hard_error_handler([&](taar::failure const& f)
     {
-        try { std::rethrow_exception(ep); }
-        catch (std::runtime_error const&) { ++generator_errors; }
-        catch (...) {}   // transport errors (peer EOF) also arrive here
+        // Transport errors (peer EOF) also arrive here.
+        if (f.as<std::runtime_error>()) ++generator_errors;
     });
 
     session.register_request_handler(
@@ -245,7 +244,7 @@ BOOST_AUTO_TEST_CASE(test_e2e_streaming_mid_stream_throw_bypasses_custom_soft_er
 
     // A soft handler that writes a full response must not run once chunks
     // are on the wire: its bytes would corrupt the chunked framing.
-    session.set_soft_error_handler([&](std::exception_ptr)
+    session.set_soft_error_handler([&](taar::failure const&)
     {
         ++soft_calls;
         http::response<http::string_body> res {http::status::internal_server_error, 11};
@@ -253,11 +252,9 @@ BOOST_AUTO_TEST_CASE(test_e2e_streaming_mid_stream_throw_bypasses_custom_soft_er
         res.prepare_payload();
         return res;
     });
-    session.set_hard_error_handler([&](std::exception_ptr ep)
+    session.set_hard_error_handler([&](taar::failure const& f)
     {
-        try { std::rethrow_exception(ep); }
-        catch (std::runtime_error const&) { ++hard_calls; }
-        catch (...) {}
+        if (f.as<std::runtime_error>()) ++hard_calls;
     });
 
     session.register_request_handler(
@@ -403,12 +400,10 @@ BOOST_AUTO_TEST_CASE(test_e2e_streaming_shutdown_ends_open_stream_without_hard_e
     taar::session::http session;
     std::atomic<int> hard_errors {0};
     std::string hard_error_text;
-    session.set_hard_error_handler([&](std::exception_ptr ep)
+    session.set_hard_error_handler([&](taar::failure const& f)
     {
         ++hard_errors;
-        try { std::rethrow_exception(ep); }
-        catch (std::exception const& e) { hard_error_text = e.what(); }
-        catch (...) { hard_error_text = "unknown"; }
+        hard_error_text = f.chain();
     });
     session.register_request_handler(
         method == http::verb::get && target == "/forever",

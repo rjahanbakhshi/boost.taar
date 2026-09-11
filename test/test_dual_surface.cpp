@@ -59,36 +59,21 @@ int add(calc_session& s, int a, int b) { s.last = a + b; return s.last; }
 int divide(int a, int b) { if (b == 0) throw division_by_zero {"division by zero"}; return a / b; }
 int last(calc_session const& s) { return s.last; }
 
-http::response<http::string_body> soft_error(std::exception_ptr ep)
+http::response<http::string_body> soft_error(taar::failure const& f)
 {
-    try
-    {
-        std::rethrow_exception(ep);
-    }
-    catch (division_by_zero const& e)
+    if (auto const* e = f.as<division_by_zero>())
     {
         http::response<http::string_body> res {http::status::unprocessable_entity, 11};
         res.set(http::field::content_type, "application/json");
-        res.body() = json::serialize(json::object {{"error", e.what()}});
+        res.body() = json::serialize(json::object {{"error", e->what()}});
         res.prepare_payload();
         return res;
     }
-    catch (taar::exception const& e)
-    {
-        if (e.error().code().category() != taar::error_category()) throw;
-        http::response<http::string_body> res {http::status::bad_request, 11};
-        res.body() = e.error().code().message();
-        res.prepare_payload();
-        return res;
-    }
-    catch (boost::system::system_error const& e)
-    {
-        if (e.code().category() != taar::error_category()) throw;
-        http::response<http::string_body> res {http::status::bad_request, 11};
-        res.body() = e.code().message();
-        res.prepare_payload();
-        return res;
-    }
+    if (f.code().category() != taar::error_category()) f.rethrow();
+    http::response<http::string_body> res {http::status::bad_request, 11};
+    res.body() = f.code().message();
+    res.prepare_payload();
+    return res;
 }
 
 jsonrpc::error_info rpc_error(std::exception_ptr ep)

@@ -133,42 +133,19 @@ private:
 // Turns exceptions from handlers into JSON error responses. Library
 // argument errors (bad path/query/body) become 400, the domain's not_found
 // becomes 404, anything else 500.
-taar::response_builder on_soft_error(std::exception_ptr e)
+taar::response_builder on_soft_error(taar::failure const& f)
 {
     auto reply = [](http::status status, std::string message)
     {
         return taar::response_builder(json::value {{"error", std::move(message)}}).set_status(status);
     };
-    try
+    if (auto const* x = f.as<not_found>())
     {
-        std::rethrow_exception(e);
+        return reply(http::status::not_found, x->what());
     }
-    catch (not_found const& x)
-    {
-        return reply(http::status::not_found, x.what());
-    }
-    catch (taar::exception const& x)
-    {
-        // Argument and constraint failures map to 400; anything else is a 500.
-        auto const status = taar::http_status_for(x.error());
-        if (status != http::status::internal_server_error)
-        {
-            return reply(status, x.error().code().message());
-        }
-        return reply(status, x.what());
-    }
-    catch (boost::system::system_error const& x)
-    {
-        if (x.code().category() == taar::error_category())
-        {
-            return reply(http::status::bad_request, x.code().message());
-        }
-        return reply(http::status::internal_server_error, x.what());
-    }
-    catch (std::exception const& x)
-    {
-        return reply(http::status::internal_server_error, x.what());
-    }
+    // Argument and constraint failures map to 400 (oversized bodies to
+    // 413); anything else is a 500.
+    return reply(taar::http_status_for(f), f.text());
 }
 
 } // namespace

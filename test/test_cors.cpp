@@ -103,7 +103,7 @@ BOOST_AUTO_TEST_CASE(test_e2e_cors_headers_on_every_response_kind)
     taar::cors policy;
     session.register_request_handler(method == http::verb::options, policy.preflight_handler());
     session.set_response_filter(policy.response_filter());
-    session.set_soft_error_handler([](std::exception_ptr)
+    session.set_soft_error_handler([](taar::failure const&)
     {
         http::response<http::string_body> res {http::status::unprocessable_entity, 11};
         res.body() = "bad";

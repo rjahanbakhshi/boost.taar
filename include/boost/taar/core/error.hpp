@@ -311,6 +311,60 @@ public:
         return out;
     }
 
+    /** Render the failure and its causes as human-readable text.
+
+        Like @ref chain but without category tags: each level reads its
+        @ref message, or the code's own text when the message is empty;
+        causes follow in `(caused by: ...)`. Suitable for response bodies
+        and tool error content; @ref chain is for logs.
+    */
+    [[nodiscard]] std::string text() const
+    {
+        std::string out;
+        std::size_t depth = 0;
+        for (failure const* f = this; f != nullptr; f = f->cause(), ++depth)
+        {
+            if (depth > 0) out += " (caused by: ";
+            out += f->message_.empty() ? f->code_.message() : f->message_;
+        }
+        if (depth > 1) out.append(depth - 1, ')');
+        return out;
+    }
+
+    /** The kept foreign exception (@ref exception) if it is an @a E.
+
+        Lets a hook recognise its own domain exception without a
+        try/catch ladder:
+
+        @code
+        if (auto const* e = f.as<not_found>()) return reply(404, e->what());
+        @endcode
+
+        @return A pointer to the exception object, valid while this
+                failure (or a copy sharing its chain) lives; `nullptr` if
+                there is no kept exception or it is not an @a E.
+    */
+    template <typename E>
+    [[nodiscard]] E const* as() const noexcept
+    {
+        auto const eptr = exception();
+        if (!eptr) return nullptr;
+        try
+        {
+            std::rethrow_exception(eptr);
+        }
+        catch (E const& e)
+        {
+            // The exception object is owned by the exception_ptr kept in
+            // the chain, so the address outlives this handler.
+            return &e;
+        }
+        catch (...)
+        {
+        }
+        return nullptr;
+    }
+
     /** Throw the failure.
 
         Rethrows the kept foreign exception (@ref exception) if there is

@@ -59,7 +59,7 @@ struct object_type
     }
 };
 
-void on_hard_error(int, std::exception_ptr)
+void on_hard_error(int, taar::failure const&)
 {}
 
 BOOST_AUTO_TEST_CASE(test_http_session)
@@ -67,26 +67,15 @@ BOOST_AUTO_TEST_CASE(test_http_session)
     taar::session::http http_session;
 
     http_session.set_hard_error_handler(
-        [](std::exception_ptr eptr)
+        [](taar::failure const& f)
         {
-            try
-            {
-                std::rethrow_exception(eptr);
-            }
-            catch (std::exception const& e)
-            {
-                std::cerr << e.what() << '\n';
-            }
-            catch (...)
-            {
-                std::cerr << "Unknown error!\n";
-            }
+            std::cerr << f.chain() << '\n';
         });
 
     http_session.set_hard_error_handler(std::bind_front(on_hard_error, 10));
 
     http_session.set_soft_error_handler(
-        [](std::exception_ptr)
+        [](taar::failure const&)
         {
             return boost::json::value{{"Error", "Oops!"}};
         }
@@ -167,14 +156,14 @@ BOOST_AUTO_TEST_CASE(test_http_session_soft_error_handler)
     using taar::response_builder;
     taar::session::http http_session;
 
-    //http_session.set_soft_error_handler([](std::exception_ptr){});
-    //http_session.set_soft_error_handler([](std::exception_ptr) -> awaitable<void> { return {}; });
+    //http_session.set_soft_error_handler([](taar::failure const&){});
+    //http_session.set_soft_error_handler([](taar::failure const&) -> awaitable<void> { return {}; });
 
-    //http_session.set_soft_error_handler([](std::exception_ptr) -> int { return {}; });
-    //http_session.set_soft_error_handler([](std::exception_ptr) -> awaitable<int> { return {}; });
+    //http_session.set_soft_error_handler([](taar::failure const&) -> int { return {}; });
+    //http_session.set_soft_error_handler([](taar::failure const&) -> awaitable<int> { return {}; });
 
-    //http_session.set_soft_error_handler([](std::exception_ptr) -> response_builder { return {}; });
-    //http_session.set_soft_error_handler([](std::exception_ptr) -> awaitable<response_builder> { return {}; });
+    //http_session.set_soft_error_handler([](taar::failure const&) -> response_builder { return {}; });
+    //http_session.set_soft_error_handler([](taar::failure const&) -> awaitable<response_builder> { return {}; });
 }
 
 taar::awaitable<int> awaitable_handler(
@@ -376,7 +365,7 @@ BOOST_AUTO_TEST_CASE(test_http_session_request_header_limit)
     http_session.set_request_header_limit(128);
 
     bool hard_error_called = false;
-    http_session.set_hard_error_handler([&](std::exception_ptr) {
+    http_session.set_hard_error_handler([&](taar::failure const&) {
         hard_error_called = true;
     });
 
@@ -442,7 +431,7 @@ BOOST_AUTO_TEST_CASE(test_http_session_request_body_limit_no_match)
     // No handlers registered -> no-match path
 
     bool hard_error_called = false;
-    http_session.set_hard_error_handler([&](std::exception_ptr) {
+    http_session.set_hard_error_handler([&](taar::failure const&) {
         hard_error_called = true;
     });
 
@@ -502,7 +491,7 @@ BOOST_AUTO_TEST_CASE(test_http_session_request_body_limit_matched)
     http_session.set_request_body_limit(16);
 
     bool hard_error_called = false;
-    http_session.set_hard_error_handler([&](std::exception_ptr) {
+    http_session.set_hard_error_handler([&](taar::failure const&) {
         hard_error_called = true;
     });
 
@@ -668,7 +657,7 @@ BOOST_AUTO_TEST_CASE(test_http_session_is_movable_after_registration)
 
     taar::session::http original;
     original.set_request_body_limit(64);
-    original.set_soft_error_handler([](std::exception_ptr) { return std::string {"soft"}; });
+    original.set_soft_error_handler([](taar::failure const&) { return std::string {"soft"}; });
     original.register_request_handler(
         method == http::verb::get && target == "/hello", taar::handler::rest([] { return "hello"; }));
     original.register_request_handler(

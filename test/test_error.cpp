@@ -213,6 +213,49 @@ BOOST_AUTO_TEST_CASE(test_failure_rethrow)
     BOOST_CHECK_THROW(wrapped.rethrow(), std::out_of_range);
 }
 
+BOOST_AUTO_TEST_CASE(test_failure_text)
+{
+    // No message: the code's own text, no category tag.
+    BOOST_TEST(failure {error::argument_not_found}.text() == "Argument not found");
+    BOOST_TEST((failure {error::argument_ambiguous, "header 'x'"}.text() == "header 'x'"));
+
+    failure outer {error::invalid_argument_format, "argument page (position 0)"};
+    failure middle {error::invalid_number_format, "value 'abc'"};
+    middle.with_cause(failure {error::argument_not_found});
+    outer.with_cause(middle);
+    BOOST_TEST(outer.text() ==
+        "argument page (position 0) (caused by: value 'abc' (caused by: Argument not found))");
+    BOOST_TEST(outer.text().find('[') == std::string::npos);
+
+    // A wrapped user exception reads as its what().
+    auto const wrapped = failure::from_exception(std::make_exception_ptr(std::runtime_error {"boom"}));
+    BOOST_TEST(wrapped.text() == "boom");
+    BOOST_TEST(failure {}.text() == failure {}.code().message());
+}
+
+BOOST_AUTO_TEST_CASE(test_failure_as)
+{
+    auto const wrapped = failure::from_exception(std::make_exception_ptr(std::out_of_range {"index"}));
+    auto const* oor = wrapped.as<std::out_of_range>();
+    BOOST_TEST_REQUIRE(oor != nullptr);
+    BOOST_TEST(std::string {oor->what()} == "index");
+    // Base classes match, unrelated types do not.
+    BOOST_TEST(wrapped.as<std::logic_error>() == oor);
+    BOOST_TEST(wrapped.as<std::runtime_error>() == nullptr);
+    BOOST_TEST(wrapped.as<user_error>() == nullptr);
+
+    // Found when nested, and through copies.
+    failure outer {error::invalid_argument_format, "argument x (position 1)"};
+    outer.with_cause(failure::from_exception(std::make_exception_ptr(user_error {})));
+    failure const copy = outer;
+    BOOST_TEST(copy.as<user_error>() != nullptr);
+    BOOST_TEST(copy.as<user_error>() == outer.as<user_error>());
+
+    // No kept exception.
+    BOOST_TEST(failure {error::argument_not_found}.as<std::exception>() == nullptr);
+    BOOST_TEST(failure {}.as<std::exception>() == nullptr);
+}
+
 BOOST_AUTO_TEST_CASE(test_http_status_for)
 {
     BOOST_TEST((taar::http_status_for(failure {error::argument_not_found}) == http::status::bad_request));

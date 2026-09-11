@@ -56,7 +56,6 @@
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/asio/error.hpp>
 #include <boost/asio/ip/tcp.hpp>
-#include <boost/system/system_error.hpp>
 #include <boost/url/url_view.hpp>
 #include <functional>
 #include <memory>
@@ -86,14 +85,14 @@ namespace detail {
 template <typename HandlerType>
 concept soft_error_handler = requires(HandlerType handler)
 {
-    requires std::is_invocable_v<HandlerType, std::exception_ptr>;
-    response_from_invoke(std::move(handler), std::declval<std::exception_ptr>());
+    requires std::is_invocable_v<HandlerType, failure const&>;
+    response_from_invoke(std::move(handler), std::declval<failure const&>());
 };
 
 template <typename T>
 concept hard_error_handler = requires
 {
-    requires std::is_invocable_v<T, std::exception_ptr>;
+    requires std::is_invocable_v<T, failure const&>;
 };
 
 /// The contexts tuple a `basic_http<Context>` hands to its handlers:
@@ -256,22 +255,10 @@ template <typename R>
 inline constexpr bool is_streaming_result =
     is_chunked_response<awaitable_result_t<R>> || is_async_generator<awaitable_result_t<R>>;
 
-/// True if @a eptr holds a `system_error` carrying `operation_aborted`.
-inline bool is_operation_aborted(std::exception_ptr eptr) noexcept
+/// True if @a f carries `operation_aborted` (a wait cancelled by shutdown).
+inline bool is_operation_aborted(failure const& f) noexcept
 {
-    if (!eptr) return false;
-    try
-    {
-        std::rethrow_exception(eptr);
-    }
-    catch (boost::system::system_error const& e)
-    {
-        return e.code() == boost::asio::error::operation_aborted;
-    }
-    catch (...)
-    {
-        return false;
-    }
+    return f.is(boost::asio::error::operation_aborted);
 }
 
 /// Hook run on every response header before it is written (CORS, Server, security headers).
@@ -302,14 +289,18 @@ concept registration_observer = requires(
     std::forward<Observer>(observer)(operand, handler);
 };
 
-inline boost::beast::http::status select_error_status(boost::system::error_code const& ec)
+/** Status answering a protocol-level failure (the request could not be parsed).
+
+    @ref boost::taar::http_status_for decides; a code it does not know (a
+    Beast parse error) is still the client's fault here, so it becomes
+    `400 Bad Request` rather than `500`.
+*/
+inline boost::beast::http::status protocol_error_status(failure const& f) noexcept
 {
-    namespace http_err = boost::beast::http;
-    if (ec == http_err::error::header_limit)
-        return http_err::status::request_header_fields_too_large;
-    if (ec == http_err::error::body_limit)
-        return http_err::status::payload_too_large;
-    return http_err::status::bad_request;
+    auto const status = http_status_for(f);
+    return status == boost::beast::http::status::internal_server_error
+        ? boost::beast::http::status::bad_request
+        : status;
 }
 
 template <typename T>
@@ -492,13 +483,15 @@ awaitable<bool> write_chunked_response(
     Two error-reporting hooks are exposed:
 
     @li @ref set_soft_error_handler: invoked when a handler throws.
-        Receives the `exception_ptr`, has access to the stream, and is
-        expected to write an HTTP response describing the error. The
-        default handler turns @ref boost::taar::error codes into 400
-        responses.
-    @li @ref set_hard_error_handler: invoked when the connection itself
-        fails. The default discards the exception silently; a real server
-        should at least log.
+        Receives the @ref boost::taar::failure made from the exception and
+        returns the response to write. The default handler answers
+        request errors (argument, body, constraint failures; oversized
+        bodies) with the status of @ref boost::taar::http_status_for and
+        the failure's text, and escalates anything else.
+    @li @ref set_hard_error_handler: invoked with a
+        @ref boost::taar::failure when the connection itself fails or a
+        failure is escalated. The default discards it silently; a real
+        server should at least log.
 
     `http` is move-constructible but not copyable; share one instance among
     spawned sessions by reference.
@@ -553,12 +546,12 @@ private:
 
     using soft_error_handler_wrapper_type = std::move_only_function<
         awaitable<bool>(
-            std::exception_ptr,
+            failure const&,
             Stream&,
             boost::beast::http::request_header<>&,
             cancellation_signals&)>;
 
-    using hard_error_handler_type = std::move_only_function<void(std::exception_ptr)>;
+    using hard_error_handler_type = std::move_only_function<void(failure const&)>;
 
 /// @endcond
 public:
@@ -568,74 +561,26 @@ public:
         // shared filter rather than `this`.
         wrapped_soft_error_handler_ =
             [filter = response_filter_](
-                std::exception_ptr eptr,
+                failure const& f,
                 Stream& stream,
                 boost::beast::http::request_header<>& req,
                 cancellation_signals&) -> awaitable<bool>
             {
-                std::exception_ptr ex;
-                std::string error_msg;
-                auto status = boost::beast::http::status::bad_request;
-                try
+                // Request errors are answered; anything that maps to 500
+                // (a user exception, an internal or transport code) is
+                // escalated to the hard error handler with the same failure.
+                auto const status = http_status_for(f);
+                if (status == boost::beast::http::status::internal_server_error)
                 {
-                    std::rethrow_exception(eptr);
+                    throw taar::exception {f};
                 }
-                catch(taar::exception const& e)
-                {
-                    auto const& f = e.error();
-                    status = http_status_for(f);
-                    if (status == boost::beast::http::status::bad_request)
-                    {
-                        // Constraint failures name the argument and the rule.
-                        error_msg = f.is(taar::error::constraint_violated)
-                            ? std::string {e.what()}
-                            : f.code().message();
-                    }
-                    else if (status == boost::beast::http::status::payload_too_large)
-                    {
-                        error_msg = "Request body too large";
-                    }
-                    else if (status == boost::beast::http::status::request_header_fields_too_large)
-                    {
-                        error_msg = "Request header fields too large";
-                    }
-                    // Anything else escalates to the hard error handler.
-                    ex = std::current_exception();
-                }
-                catch(boost::system::system_error const& e)
-                {
-                    if (e.code().category() == error_category())
-                    {
-                        // Constraint failures name the argument and the rule.
-                        error_msg = e.code() == taar::error::constraint_violated
-                            ? std::string {e.what()}
-                            : e.code().message();
-                    }
-                    else if (e.code() == boost::beast::http::error::body_limit)
-                    {
-                        // A handler streaming the body hit its own size cap.
-                        error_msg = "Request body too large";
-                        status = boost::beast::http::status::payload_too_large;
-                    }
-                    ex = std::current_exception();
-                }
-                catch (...)
-                {
-                    ex = std::current_exception();
-                }
-
-                if (!error_msg.empty())
-                {
-                    auto response = response_from(error_msg);
-                    response.result(status);
-                    detail::finish_response(response, req.version(), detail::header_keep_alive(req), false);
-                    detail::apply_response_filter(*filter, req, response);
-                    bool keep_alive = response.keep_alive();
-                    co_await detail::write_response(stream, std::move(response), req.method() == boost::beast::http::verb::head);
-                    co_return keep_alive;
-                }
-
-                std::rethrow_exception(eptr);
+                auto response = response_from(f.text());
+                response.result(status);
+                detail::finish_response(response, req.version(), detail::header_keep_alive(req), false);
+                detail::apply_response_filter(*filter, req, response);
+                bool keep_alive = response.keep_alive();
+                co_await detail::write_response(stream, std::move(response), req.method() == boost::beast::http::verb::head);
+                co_return keep_alive;
             };
     }
 
@@ -770,12 +715,13 @@ public:
                         // Idle keep-alive connection closed by the peer, or shutdown.
                         break;
                     }
+                    failure const f {header_ec};
                     if (!detail::is_transport_error(header_ec))
                     {
-                        co_await write_protocol_error(stream, header_ec, header_parser.get());
+                        co_await write_protocol_error(stream, f, header_parser.get());
                     }
                     // Invoke the hard error handler for server-side visibility.
-                    throw boost::system::system_error{header_ec};
+                    throw taar::exception {f};
                 }
 
                 auto& req_header = header_parser.get();
@@ -887,12 +833,13 @@ public:
 
                     if (req_ec)
                     {
+                        failure const f {req_ec};
                         if (!detail::is_transport_error(req_ec))
                         {
-                            co_await write_protocol_error(stream, req_ec, body_parser.get().base());
+                            co_await write_protocol_error(stream, f, body_parser.get().base());
                         }
                         // Invoke the hard error handler for server-side visibility.
-                        throw boost::system::system_error{req_ec};
+                        throw taar::exception {f};
                     }
                     // Drain the body so the connection stays in keep-alive
                     // state; the body itself is discarded.
@@ -915,7 +862,7 @@ public:
                 if (resp_ec)
                 {
                     // Invoke the hard error handler for server-side visibility.
-                    throw boost::system::system_error{resp_ec};
+                    throw taar::exception {failure {resp_ec}};
                 }
 
                 if (!keep_alive)
@@ -927,8 +874,10 @@ public:
         }
         catch (...)
         {
-            // Unrecoverable error.
-            hard_error_handler_(std::current_exception());
+            // Unrecoverable error. A taar::exception (a transport error, an
+            // escalated failure) is unwrapped as is; anything else is
+            // wrapped here, once.
+            hard_error_handler_(failure::from_exception(std::current_exception()));
         }
 
         // A raw handler may have taken the stream (a WebSocket upgrade):
@@ -1091,7 +1040,8 @@ public:
                         // Unread body: the error response must announce the close.
                         header_parser.get().keep_alive(false);
                     }
-                    bool const ka = co_await self.wrapped_soft_error_handler_(eptr, stream, header_parser.get(), signals);
+                    failure const f = failure::from_exception(eptr);
+                    bool const ka = co_await self.wrapped_soft_error_handler_(f, stream, header_parser.get(), signals);
                     co_return ka && !shutting_down && header_parser.is_done();
                 }
                 else
@@ -1119,12 +1069,13 @@ public:
 
                 if (req_ec)
                 {
+                    failure const f {req_ec};
                     if (!detail::is_transport_error(req_ec))
                     {
-                        co_await self.write_protocol_error(stream, req_ec, body_parser.get().base());
+                        co_await self.write_protocol_error(stream, f, body_parser.get().base());
                     }
                     // Invoke the hard error handler for server-side visibility.
-                    throw boost::system::system_error{req_ec};
+                    throw taar::exception {f};
                 }
 
                 // Get cancellation slot from current coroutine for request-scoped cancellation
@@ -1184,7 +1135,8 @@ public:
                 shutting_down = co_await detail::observe_shutdown() || shutting_down;
                 if (stream_error)
                 {
-                    if (shutting_down && detail::is_operation_aborted(stream_error))
+                    failure const sf = failure::from_exception(stream_error);
+                    if (shutting_down && detail::is_operation_aborted(sf))
                     {
                         // The generator's pending wait was cancelled by shutdown:
                         // nothing to report, the connection simply ends.
@@ -1192,9 +1144,11 @@ public:
                     }
                     // Headers and some chunks are already on the wire: no error
                     // response is possible. Surface it as a hard error instead.
-                    std::rethrow_exception(stream_error);
+                    throw taar::exception {sf};
                 }
-                if (shutting_down && detail::is_operation_aborted(eptr))
+                // Whatever escaped the handler is wrapped once; the hooks see this failure.
+                failure const f = failure::from_exception(eptr);
+                if (shutting_down && detail::is_operation_aborted(f))
                 {
                     // A streaming write interrupted by shutdown, likewise.
                     co_return false;
@@ -1202,7 +1156,7 @@ public:
 
                 // An exception is thrown within the request handler.
                 bool const ka = co_await self.wrapped_soft_error_handler_(
-                    eptr,
+                    f,
                     stream,
                     body_parser.get(),
                     signals);
@@ -1360,28 +1314,43 @@ public:
 
     /** Install a custom soft-error handler.
 
-        The handler is invoked when a registered request handler throws,
-        with the captured `std::exception_ptr`. Its return value is fed to
-        @ref boost::taar::response_from, written to the client, and
-        determines whether the session continues (`keep_alive() == true`)
-        or closes.
+        The handler is invoked as `handler(taar::failure const&)` when a
+        registered request handler throws. The session wraps the escaped
+        exception with @ref boost::taar::failure::from_exception once: a
+        @ref boost::taar::exception yields its own failure, a user's
+        exception is kept and can be recognised with
+        @ref boost::taar::failure::as. The handler returns anything
+        @ref boost::taar::response_from accepts, synchronously or as an
+        awaitable; the response is written to the client and determines
+        whether the session continues (`keep_alive() == true`) or closes.
+        A handler that throws escalates to the hard error handler.
 
-        Override this when the default 400-with-message behaviour is not
-        what you want, e.g. to map specific exceptions to specific status
-        codes, return JSON-formatted errors, or include a request id.
+        @code
+        session.set_soft_error_handler([](taar::failure const& f)
+        {
+            if (auto const* e = f.as<not_found>())
+                return taar::response_builder(e->what()).set_status(http::status::not_found);
+            return taar::response_builder(f.text()).set_status(taar::http_status_for(f));
+        });
+        @endcode
+
+        The default handler answers failures that @ref boost::taar::http_status_for
+        maps to a 4xx status with that status and `f.text()` as a
+        `text/plain` body, and escalates every other failure (user
+        exceptions, internal codes) to the hard error handler.
     */
     template <detail::soft_error_handler HandlerType>
     void set_soft_error_handler(HandlerType handler)
     {
         wrapped_soft_error_handler_ =
             [filter = response_filter_, handler = std::move(handler)](
-                std::exception_ptr eptr,
+                failure const& f,
                 Stream& stream,
                 boost::beast::http::request_header<>& request_header,
                 cancellation_signals& signals) mutable
             -> awaitable<bool>
             {
-                auto response = co_await response_from_invoke(handler, eptr);
+                auto response = co_await response_from_invoke(handler, f);
                 detail::finish_response(response, request_header.version(), detail::header_keep_alive(request_header), false);
                 detail::apply_response_filter(*filter, request_header, response);
                 bool keep_alive = response.keep_alive();
@@ -1392,11 +1361,17 @@ public:
 
     /** Install a custom hard-error handler.
 
-        Invoked when the session aborts because of a connection-level
-        failure (a transport error, a header that is too large, an I/O
-        exception). The handler receives the `std::exception_ptr` and is
-        expected to log or otherwise report it; the connection is already
-        being torn down by the time the handler runs.
+        Invoked as `handler(taar::failure const&)` when the session aborts
+        because of a connection-level failure (a transport error, a header
+        that is too large, an I/O exception), when a streamed response
+        fails after its header was sent, or when the soft error handler
+        escalates (the default does so for user exceptions; the hard
+        handler then sees the same failure). Transport errors carry their
+        `error_code`; exceptions are wrapped by
+        @ref boost::taar::failure::from_exception. The handler is expected
+        to log or otherwise report the failure (`f.chain()` renders it
+        with category tags); the connection is already being torn down by
+        the time the handler runs.
 
         The default handler silently discards the exception, which is
         almost never the right choice in production; install at least a
@@ -1412,19 +1387,19 @@ private:
 /// @cond
     std::vector<matcher_handler_type> matcher_handlers_;
     soft_error_handler_wrapper_type wrapped_soft_error_handler_;
-    hard_error_handler_type hard_error_handler_ = [](std::exception_ptr){};
+    hard_error_handler_type hard_error_handler_ = [](failure const&){};
     /// Shared with the error-handler wrappers so they stay valid across moves of this object.
     std::shared_ptr<detail::response_filter_type> response_filter_ = std::make_shared<detail::response_filter_type>();
 
     /// Answer a protocol-level failure (malformed request, header or body too large) before closing.
     awaitable<void> write_protocol_error(
         Stream& stream,
-        boost::system::error_code ec,
+        failure const& f,
         boost::beast::http::request_header<> const& header)
     {
         namespace http = boost::beast::http;
         unsigned const version = header.version() == 10 ? 10u : 11u;
-        http::response<http::empty_body> err_response {detail::select_error_status(ec), version};
+        http::response<http::empty_body> err_response {detail::protocol_error_status(f), version};
         err_response.keep_alive(false);
         err_response.prepare_payload();
         detail::apply_response_filter(*response_filter_, header, err_response);
