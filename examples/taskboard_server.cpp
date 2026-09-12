@@ -295,11 +295,10 @@ int main(int argc, char* argv[])
         with_default(rpc_arg("tags"), std::vector<std::string> {}),
         constrained(with_default(rpc_arg("page"), 1), {.minimum = 1}));
     rpc.method("tasks.complete", [&](int id) { return tasks.complete(id); }, rpc_arg("id"));
-    rpc.set_error_mapper([](std::exception_ptr ep)
+    rpc.set_error_mapper([](taar::failure const& f)
     {
-        try { std::rethrow_exception(ep); }
-        catch (not_authorized const& e) { return jsonrpc::error_info {-32001, e.what(), std::nullopt}; }
-        catch (...) { return jsonrpc::default_error_mapper(ep); }
+        if (auto const* e = f.as<not_authorized>()) return jsonrpc::error_info {-32001, e->what(), std::nullopt};
+        return jsonrpc::default_error_mapper(f);
     });
     session.register_request_handler(method == http::verb::post && target == "/rpc", rpc.handler());
 

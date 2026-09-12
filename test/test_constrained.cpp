@@ -193,7 +193,9 @@ BOOST_AUTO_TEST_CASE(test_constrained_jsonrpc_method)
     BOOST_TEST(post(rpc, R"({"jsonrpc":"2.0","id":1,"method":"sq","params":{"n":3}})").at("result").as_int64() == 9);
     auto err = post(rpc, R"({"jsonrpc":"2.0","id":2,"method":"sq","params":{"n":-1}})").at("error");
     BOOST_TEST(err.at("code").as_int64() == -32602);
-    BOOST_TEST(std::string {err.at("data").as_string()}.find("n must be >= 0") != std::string::npos);
+    // data is the failure's structured data plus its text.
+    BOOST_TEST(err.at("data").at("argument").as_string() == "n");
+    BOOST_TEST(std::string {err.at("data").at("message").as_string()}.find("n must be >= 0") != std::string::npos);
     // Positional parameters bind through the wrapper too.
     BOOST_TEST(post(rpc, R"({"jsonrpc":"2.0","id":3,"method":"sq","params":[4]})").at("result").as_int64() == 16);
 }

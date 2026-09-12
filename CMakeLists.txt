@@ -83,6 +83,7 @@ target_sources(
         include/boost/taar/mcp/arg.hpp
         include/boost/taar/mcp/content.hpp
         include/boost/taar/mcp/endpoint.hpp
+        include/boost/taar/mcp/error.hpp
         include/boost/taar/openapi/generator.hpp
         include/boost/taar/server/tcp.hpp
         include/boost/taar/server/tls.hpp

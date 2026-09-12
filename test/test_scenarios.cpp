@@ -405,9 +405,10 @@ BOOST_AUTO_TEST_CASE(test_scenario_mcp_elicitation_cancelled_mid_flight)
             outcome = "answered";
             co_return std::string {reply.at("action").as_string()};
         }
-        catch (boost::system::system_error const& err)
+        catch (taar::exception const& err)
         {
-            outcome = err.code() == boost::system::errc::operation_canceled ? "cancelled" : std::string {"other: "} + err.what();
+            outcome = err.error().is(boost::system::errc::make_error_code(boost::system::errc::operation_canceled))
+                ? "cancelled" : std::string {"other: "} + err.what();
             throw;
         }
     });

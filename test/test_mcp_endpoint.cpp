@@ -445,20 +445,56 @@ BOOST_AUTO_TEST_CASE(test_mcp_custom_tool_error_handler)
 {
     stateless_endpoint e {{.name = "s", .version = "1"}};
     build(e);
-    e.set_tool_error_handler([](std::exception_ptr ex) -> std::optional<std::string>
+    e.set_tool_error_handler([](taar::failure const& f) -> std::optional<std::string>
     {
-        try { std::rethrow_exception(ex); }
-        catch (division_by_zero const&) { return std::nullopt; } // escalate to a JSON-RPC error
-        catch (...) { return mcp::default_tool_error_handler(ex); }
+        if (f.as<division_by_zero>()) return std::nullopt;   // escalate to a JSON-RPC error
+        return mcp::default_tool_error_handler(f);
     });
-    e.rpc().set_error_mapper([](std::exception_ptr ex) -> jsonrpc::error_info
+    e.rpc().set_error_mapper([](taar::failure const& f) -> jsonrpc::error_info
     {
-        try { std::rethrow_exception(ex); }
-        catch (division_by_zero const& x) { return {-32001, x.what(), std::nullopt}; }
-        catch (...) { return jsonrpc::default_error_mapper(ex); }
+        if (auto const* x = f.as<division_by_zero>()) return {-32001, x->what(), std::nullopt};
+        return jsonrpc::default_error_mapper(f);
     });
     auto v = body_json(post(e, R"({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"divide","arguments":{"a":1,"b":0}}})"));
     BOOST_TEST(v.at("error").at("code").as_int64() == -32001);
+}
+
+BOOST_AUTO_TEST_CASE(test_mcp_error_category_and_default_tool_error_handler)
+{
+    using taar::failure;
+
+    // Wire codes are the enumerator values.
+    boost::system::error_code const nf = mcp::error::resource_not_found;
+    BOOST_TEST((nf.category() == mcp::error_category()));
+    BOOST_TEST(nf.value() == -32002);
+    BOOST_TEST(mcp::resource_not_found_code == -32002);
+    BOOST_TEST(static_cast<int>(mcp::error::request_cancelled) == -32800);
+    BOOST_TEST(std::string {mcp::error_category().name()} == "mcp");
+
+    // Protocol categories stay JSON-RPC errors; anything else is isError text.
+    BOOST_TEST(!mcp::default_tool_error_handler(failure {taar::error::argument_not_found}).has_value());
+    BOOST_TEST(!mcp::default_tool_error_handler(failure {jsonrpc::error::invalid_params}).has_value());
+    BOOST_TEST(!mcp::default_tool_error_handler(failure {mcp::error::client_error, "no"}).has_value());
+    auto const user = mcp::default_tool_error_handler(
+        failure::from_exception(std::make_exception_ptr(std::runtime_error {"boom"})));
+    BOOST_TEST_REQUIRE(user.has_value());
+    BOOST_TEST(*user == "boom");
+    auto const timeout = mcp::default_tool_error_handler(
+        failure {boost::system::errc::make_error_code(boost::system::errc::timed_out), "MCP request roots/list"});
+    BOOST_TEST_REQUIRE(timeout.has_value());
+    BOOST_TEST(*timeout == "MCP request roots/list");
+}
+
+BOOST_AUTO_TEST_CASE(test_mcp_resource_not_found_failure_keeps_wire_code)
+{
+    stateless_endpoint e {{.name = "s", .version = "1"}};
+    e.resource("calc://missing", "text/plain", "Always missing", []() -> std::string
+    {
+        throw taar::exception {taar::failure {mcp::error::resource_not_found, "gone"}};
+    });
+    auto v = body_json(post(e, R"({"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"calc://missing"}})"));
+    BOOST_TEST(v.at("error").at("code").as_int64() == -32002);
+    BOOST_TEST(v.at("error").at("message").as_string() == "gone");
 }
 
 // ---- resources ------------------------------------------------------------

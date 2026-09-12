@@ -391,12 +391,11 @@ BOOST_AUTO_TEST_CASE(test_jsonrpc_endpoint_custom_error_mapper)
 {
     auto rpc = make_endpoint();
     int mapper_calls = 0;
-    rpc->set_error_mapper([&](std::exception_ptr e) -> jsonrpc::error_info
+    rpc->set_error_mapper([&](taar::failure const& f) -> jsonrpc::error_info
     {
         ++mapper_calls;
-        try { std::rethrow_exception(e); }
-        catch (division_by_zero const& x) { return {-32001, x.what(), json::value {{"retry", false}}}; }
-        catch (...) { return jsonrpc::default_error_mapper(e); }
+        if (auto const* x = f.as<division_by_zero>()) return {-32001, x->what(), json::value {{"retry", false}}};
+        return jsonrpc::default_error_mapper(f);
     });
 
     auto v = body_json(post(*rpc, R"({"jsonrpc":"2.0","id":1,"method":"divide","params":{"a":1,"b":0}})"));
@@ -417,7 +416,7 @@ BOOST_AUTO_TEST_CASE(test_jsonrpc_endpoint_custom_error_mapper)
 BOOST_AUTO_TEST_CASE(test_jsonrpc_endpoint_mapper_that_throws_falls_back)
 {
     auto rpc = make_endpoint();
-    rpc->set_error_mapper([](std::exception_ptr) -> jsonrpc::error_info { throw std::runtime_error {"mapper broke"}; });
+    rpc->set_error_mapper([](taar::failure const&) -> jsonrpc::error_info { throw std::runtime_error {"mapper broke"}; });
     auto v = body_json(post(*rpc, R"({"jsonrpc":"2.0","id":1,"method":"divide","params":{"a":1,"b":0}})"));
     BOOST_TEST(v.at("error").at("code").as_int64() == -32603);
 }
@@ -436,6 +435,46 @@ BOOST_AUTO_TEST_CASE(test_jsonrpc_endpoint_jsonrpc_category_error_passes_through
     net::co_spawn(io, [&]() -> taar::awaitable<void> { out = co_await handler(contexts<>{}, req, mctx); }, net::detached);
     io.run();
     BOOST_TEST(body_json(*out).at("error").at("code").as_int64() == -32602);
+}
+
+BOOST_AUTO_TEST_CASE(test_jsonrpc_default_error_mapper_by_code)
+{
+    using taar::failure;
+
+    // JSON-RPC category: that code, the message or the code's text.
+    auto a = jsonrpc::default_error_mapper(failure {jsonrpc::error::method_not_found, "no such thing"});
+    BOOST_TEST(a.code == -32601);
+    BOOST_TEST(a.message == "no such thing");
+    BOOST_TEST(!a.data.has_value());
+    BOOST_TEST(jsonrpc::default_error_mapper(failure {jsonrpc::error::invalid_params}).message == "Invalid params.");
+
+    // Taar category without object data: data is text().
+    failure arg {taar::error::invalid_argument_format, "argument b (position 1)"};
+    arg.with_cause(failure {taar::error::invalid_number_format, "value 'x'"});
+    auto b = jsonrpc::default_error_mapper(arg);
+    BOOST_TEST(b.code == -32602);
+    BOOST_TEST(b.message == "Invalid params.");
+    BOOST_TEST_REQUIRE(b.data.has_value());
+    BOOST_TEST(b.data->as_string() == "argument b (position 1) (caused by: value 'x')");
+
+    // Taar category with object data: the object plus "message".
+    failure obj {taar::error::constraint_violated, "n must be >= 0"};
+    obj.with_data(json::object {{"argument", "n"}});
+    auto c = jsonrpc::default_error_mapper(obj);
+    BOOST_TEST(c.code == -32602);
+    BOOST_TEST_REQUIRE(c.data.has_value());
+    BOOST_TEST(c.data->at("argument").as_string() == "n");
+    BOOST_TEST(c.data->at("message").as_string() == "n must be >= 0");
+
+    // A user's exception and foreign codes: internal error, no data.
+    auto d = jsonrpc::default_error_mapper(failure::from_exception(std::make_exception_ptr(std::runtime_error {"boom"})));
+    BOOST_TEST(d.code == -32603);
+    BOOST_TEST(d.message == "boom");
+    BOOST_TEST(!d.data.has_value());
+    auto e = jsonrpc::default_error_mapper(failure {boost::system::errc::make_error_code(boost::system::errc::timed_out)});
+    BOOST_TEST(e.code == -32603);
+    BOOST_TEST(e.message == "Internal error.");
+    BOOST_TEST(!e.data.has_value());
 }
 
 BOOST_AUTO_TEST_CASE(test_jsonrpc_endpoint_duplicate_method_throws)

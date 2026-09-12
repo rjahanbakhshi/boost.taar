@@ -32,7 +32,6 @@
 #include <boost/json/parse.hpp>
 #include <boost/json/serialize.hpp>
 #include <boost/json/value.hpp>
-#include <boost/system/system_error.hpp>
 #include <exception>
 #include <functional>
 #include <memory>
@@ -56,70 +55,61 @@ struct error_info
     std::optional<boost::json::value> data;
 };
 
-/// Signature of the hook that maps exceptions thrown by method callables.
-using error_mapper = std::function<error_info(std::exception_ptr)>;
+/** Signature of the hook that maps a failed method call to a JSON-RPC error.
 
-/** The default exception-to-error mapping.
-
-    @li `boost::taar::exception` is mapped by its failure's code like the
-        `system_error` cases below, `what()` being the failure's chain.
-    @li `boost::system::system_error` in the JSON-RPC category: that code,
-        the exception's message.
-    @li `boost::system::system_error` in Taar's category (argument not found,
-        not convertible, ...): `-32602 Invalid params`, `data` carries the
-        detail.
-    @li Any other `std::exception`: `-32603 Internal error` with the
-        exception's `what()` as message.
-    @li Anything else: `-32603 Internal error`.
+    The endpoint wraps whatever a method callable throws with
+    @ref boost::taar::failure::from_exception once and hands the failure
+    to the mapper. A user's own exception is kept in the failure and can
+    be recognised with @ref boost::taar::failure::as.
 */
-inline error_info default_error_mapper(std::exception_ptr e)
+using error_mapper = std::function<error_info(taar::failure const&)>;
+
+/** The default failure-to-error mapping, by code only.
+
+    @li A code of the @ref jsonrpc::error category: that code, with the
+        failure's @ref boost::taar::failure::message (or the code's text
+        when the message is empty).
+    @li A code of Taar's category (argument not found, not convertible,
+        constraint violated, ...): `-32602 Invalid params`. When the
+        failure's data is an object, `data` is that object plus
+        `"message": text()`; otherwise `data` is the
+        @ref boost::taar::failure::text string.
+    @li Anything else, including @ref boost::taar::error::unknown_exception
+        (a user's own exception): `-32603 Internal error` with the
+        failure's message (the exception's `what()`), or the spec's
+        "Internal error." when it is empty; no `data`.
+*/
+inline error_info default_error_mapper(taar::failure const& f)
 {
-    try
+    auto const& code = f.code();
+    if (code.category() == jsonrpc::error_category())
     {
-        std::rethrow_exception(e);
+        return {code.value(), f.message().empty() ? code.message() : f.message(), std::nullopt};
     }
-    catch (taar::exception const& x)
+    if (code.category() == taar::error_category() && code != taar::error::unknown_exception)
     {
-        auto const& code = x.error().code();
-        if (code.category() == jsonrpc::error_category())
+        boost::json::value data;
+        if (auto const* obj = f.data().if_object())
         {
-            return {code.value(), x.what(), std::nullopt};
+            boost::json::object merged = *obj;
+            merged["message"] = f.text();
+            data = std::move(merged);
         }
-        if (code.category() == taar::error_category())
+        else
         {
-            return {
-                static_cast<int>(error::invalid_params),
-                jsonrpc::error_category().message(static_cast<int>(error::invalid_params)),
-                boost::json::value {x.what()}};
+            data = f.text();
         }
-        return {static_cast<int>(error::internal_error), x.what(), std::nullopt};
-    }
-    catch (boost::system::system_error const& x)
-    {
-        if (x.code().category() == jsonrpc::error_category())
-        {
-            return {x.code().value(), x.what(), std::nullopt};
-        }
-        if (x.code().category() == taar::error_category())
-        {
-            return {
-                static_cast<int>(error::invalid_params),
-                jsonrpc::error_category().message(static_cast<int>(error::invalid_params)),
-                boost::json::value {x.what()}};
-        }
-        return {static_cast<int>(error::internal_error), x.what(), std::nullopt};
-    }
-    catch (std::exception const& x)
-    {
-        return {static_cast<int>(error::internal_error), x.what(), std::nullopt};
-    }
-    catch (...)
-    {
         return {
-            static_cast<int>(error::internal_error),
-            jsonrpc::error_category().message(static_cast<int>(error::internal_error)),
-            std::nullopt};
+            static_cast<int>(error::invalid_params),
+            jsonrpc::error_category().message(static_cast<int>(error::invalid_params)),
+            std::move(data)};
     }
+    return {
+        static_cast<int>(error::internal_error),
+        f.message().empty()
+            ? jsonrpc::error_category().message(static_cast<int>(error::internal_error))
+            : f.message(),
+        std::nullopt};
 }
 
 /// Registration-time description of one method, for generators.
@@ -169,9 +159,10 @@ inline std::string message_for(error code)
     @li All responses, including error envelopes, use HTTP status 200 with
         `Content-Type: application/json`. Notifications (no `id`) produce
         202 with an empty body; so does a batch made only of notifications.
-    @li Exceptions thrown by method callables are turned into error
-        envelopes by the mapper installed with @ref set_error_mapper
-        (default: @ref default_error_mapper). The mapper is also invoked
+    @li Exceptions thrown by method callables are wrapped as a
+        @ref boost::taar::failure and turned into error envelopes by the
+        mapper installed with @ref set_error_mapper (default:
+        @ref default_error_mapper). The mapper is also invoked
         for notifications so it can log, but its result is discarded.
 */
 template <typename... Context>
@@ -218,22 +209,35 @@ public:
         return *this;
     }
 
-    /// Replace the exception-to-error mapping. See @ref default_error_mapper.
+    /** Replace the failure-to-error mapping. See @ref default_error_mapper.
+
+        @a mapper is invoked as `mapper(taar::failure const&)` and returns
+        the @ref error_info to send. A mapper that throws falls back to
+        @ref default_error_mapper.
+
+        @code
+        rpc.set_error_mapper([](taar::failure const& f) -> jsonrpc::error_info
+        {
+            if (auto const* e = f.as<division_by_zero>()) return {-32001, e->what(), std::nullopt};
+            return jsonrpc::default_error_mapper(f);
+        });
+        @endcode
+    */
     void set_error_mapper(error_mapper mapper)
     {
         mapper_ = std::move(mapper);
     }
 
-    /// Map an exception with the installed mapper (falls back to the default if the mapper throws).
-    error_info map_exception(std::exception_ptr e) const
+    /// Map a failure with the installed mapper (falls back to the default if the mapper throws).
+    error_info map_failure(taar::failure const& f) const
     {
         try
         {
-            return mapper_(e);
+            return mapper_(f);
         }
         catch (...)
         {
-            return default_error_mapper(e);
+            return default_error_mapper(f);
         }
     }
 
@@ -275,7 +279,7 @@ public:
         }
 
         auto scoped = begin_request(env, scope_key, co_await boost::asio::this_coro::executor);
-        std::exception_ptr failure;
+        std::exception_ptr eptr;
         boost::json::value result;
         try
         {
@@ -284,13 +288,14 @@ public:
         }
         catch (...)
         {
-            failure = std::current_exception();
+            eptr = std::current_exception();
         }
 
         std::optional<error_info> info;
-        if (failure)
+        if (eptr)
         {
-            info = map_exception(failure);      // also for notifications, so the mapper can log
+            // Wrapped once; also mapped for notifications, so the mapper can log.
+            info = map_failure(taar::failure::from_exception(eptr));
         }
         if (is_notification(env)) co_return std::nullopt;
         if (scoped.scope->cancelled())

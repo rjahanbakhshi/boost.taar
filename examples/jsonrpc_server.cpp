@@ -101,11 +101,10 @@ int main(int argc, char* argv[])
     rpc.method("log", "Fire-and-forget: send as a notification", &log_message, rpc_arg("text"));
 
     // Domain exceptions become JSON-RPC errors; everything else keeps the default mapping.
-    rpc.set_error_mapper([](std::exception_ptr e) -> jsonrpc::error_info
+    rpc.set_error_mapper([](taar::failure const& f) -> jsonrpc::error_info
     {
-        try { std::rethrow_exception(e); }
-        catch (division_by_zero const& x) { return {-32001, x.what(), std::nullopt}; }
-        catch (...) { return jsonrpc::default_error_mapper(e); }
+        if (auto const* x = f.as<division_by_zero>()) return {-32001, x->what(), std::nullopt};
+        return jsonrpc::default_error_mapper(f);
     });
 
     taar::context_store<std::string, calc_session> sessions {std::chrono::minutes {10}};

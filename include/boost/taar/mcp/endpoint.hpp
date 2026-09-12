@@ -26,6 +26,7 @@
 #include <boost/taar/matcher/context.hpp>
 #include <boost/taar/mcp/arg.hpp>
 #include <boost/taar/mcp/content.hpp>
+#include <boost/taar/mcp/error.hpp>
 #include <boost/taar/core/is_awaitable.hpp>
 #include <boost/taar/type_traits/callable.hpp>
 #include <boost/describe/members.hpp>
@@ -52,7 +53,7 @@
 #include <boost/json/parse.hpp>
 #include <boost/json/serialize.hpp>
 #include <boost/json/value.hpp>
-#include <boost/system/system_error.hpp>
+#include <boost/system/errc.hpp>
 #include <array>
 #include <atomic>
 #include <deque>
@@ -142,26 +143,6 @@ struct client_capabilities
     bool elicitation = false;           ///< Answers `elicitation/create`.
 };
 
-/** The client answered a server-to-client request with a JSON-RPC error.
-    Thrown by @ref endpoint::request and the helpers built on it.
-*/
-class client_error : public std::runtime_error
-{
-public:
-    client_error(int code, std::string message, boost::json::value data)
-        : std::runtime_error {std::move(message)}
-        , code_ {code}
-        , data_ {std::move(data)}
-    {}
-
-    int code() const noexcept { return code_; }
-    boost::json::value const& data() const noexcept { return data_; }
-
-private:
-    int code_;
-    boost::json::value data_;
-};
-
 /** Identity of the current MCP session, injectable into stateful tools and
     resources by declaring a `session_info const&` parameter. Lets a tool
     address its own client: `endpoint.notify(info.id, "notifications/...")`
@@ -198,8 +179,8 @@ inline bool is_supported_protocol_version(std::string_view v) noexcept
     return false;
 }
 
-/// JSON-RPC error code MCP assigns to an unknown resource URI.
-inline constexpr int resource_not_found_code = -32002;
+/// JSON-RPC error code MCP assigns to an unknown resource URI (@ref error::resource_not_found).
+inline constexpr int resource_not_found_code = static_cast<int>(error::resource_not_found);
 
 /// What a `completion/complete` request asks for.
 struct completion_request
@@ -274,46 +255,32 @@ struct resource_info
     std::vector<param_info> params;
 };
 
-/// Maps an exception from a tool callable to the `isError` text, or `nullopt` for a protocol error.
-using tool_error_handler = std::function<std::optional<std::string>(std::exception_ptr)>;
+/** Maps a failed tool call to the `isError` text, or `nullopt` for a protocol error.
 
-/** Default tool error mapping: argument and JSON-RPC-category failures stay
-    JSON-RPC errors; everything else becomes an `isError: true` result with
-    the exception's message as text.
+    Invoked as `handler(taar::failure const&)`; the endpoint wraps what the
+    tool threw with @ref boost::taar::failure::from_exception once. A
+    `nullopt` answer sends a JSON-RPC error built by the JSON-RPC error
+    mapper (see @ref jsonrpc::endpoint::set_error_mapper).
 */
-inline std::optional<std::string> default_tool_error_handler(std::exception_ptr e)
+using tool_error_handler = std::function<std::optional<std::string>(taar::failure const&)>;
+
+/** Default tool error mapping, by code only.
+
+    Codes of Taar's category (argument errors), the JSON-RPC category and
+    the MCP category (@ref error) stay protocol errors (`nullopt`).
+    Anything else, including @ref boost::taar::error::unknown_exception
+    (the tool's own exception), becomes an `isError: true` result whose
+    text is @ref boost::taar::failure::text (the exception's `what()`).
+*/
+inline std::optional<std::string> default_tool_error_handler(taar::failure const& f)
 {
-    try
-    {
-        std::rethrow_exception(e);
-    }
-    catch (taar::exception const& x)
-    {
-        auto const& code = x.error().code();
-        if (code.category() == taar::error_category() ||
-            code.category() == jsonrpc::error_category())
-        {
-            return std::nullopt;
-        }
-        return std::string {x.what()};
-    }
-    catch (boost::system::system_error const& x)
-    {
-        if (x.code().category() == taar::error_category() ||
-            x.code().category() == jsonrpc::error_category())
-        {
-            return std::nullopt;
-        }
-        return std::string {x.what()};
-    }
-    catch (std::exception const& x)
-    {
-        return std::string {x.what()};
-    }
-    catch (...)
-    {
-        return std::string {"unknown error"};
-    }
+    auto const& code = f.code();
+    bool const protocol =
+        (code.category() == taar::error_category() && code != taar::error::unknown_exception) ||
+        code.category() == jsonrpc::error_category() ||
+        code.category() == mcp::error_category();
+    if (protocol) return std::nullopt;
+    return f.text();
 }
 
 /// What an MCP prompt callable's argument providers receive (same shape as @ref tool_call).
@@ -549,7 +516,9 @@ inline std::string text_of(boost::json::value const& v)
         acknowledged with 202 and no body.
     @li Tool callables that throw produce an `isError: true` result; see
         @ref set_tool_error_handler. Argument errors and unknown tools are
-        JSON-RPC errors (-32602).
+        JSON-RPC errors (-32602). Failures carrying an MCP code with a
+        wire code of its own (@ref error::resource_not_found,
+        @ref error::request_cancelled) are sent with that code.
     @li `GET` opens the server-to-client event stream (stateful mode only)
         when @ref stream_handler is registered for it; otherwise 405.
         Messages queued with @ref notify or @ref broadcast are delivered
@@ -771,12 +740,17 @@ public:
 
         The request travels over the session's `GET` stream (or stdout on
         stdio); the client answers by posting a JSON-RPC response to the
-        endpoint. Returns the `result`. Throws @ref client_error when the
-        client answers with an error, `std::out_of_range` if the session is
-        unknown, `boost::system::system_error` with `errc::timed_out` after
-        @a timeout (zero means wait indefinitely) or `errc::operation_canceled`
-        if the session ends first. Cancelling the awaiting coroutine (for
-        instance through `request_scope`) abandons the request.
+        endpoint. Returns the `result`. Failures throw
+        @ref boost::taar::exception whose failure carries
+        @li @ref error::client_error when the client answers with an
+            error: the client's message, and data
+            `{"code": <client code>, "data": <client data or null>}`;
+        @li @ref error::unknown_session if the session is unknown;
+        @li `errc::timed_out` after @a timeout;
+        @li `errc::operation_canceled` if the session ends first.
+
+        Cancelling the awaiting coroutine (for instance through
+        `request_scope`) abandons the request.
 
         Usable from a tool: it does not need the session lock, which the
         calling tool already holds. A zero @a timeout means
@@ -791,7 +765,7 @@ public:
     {
         namespace net = boost::asio;
         auto entry = sessions_.store.peek(session_id);
-        if (!entry) throw std::out_of_range {"unknown MCP session: " + session_id};
+        if (!entry) throw taar::exception {failure {error::unknown_session, "unknown MCP session: " + session_id}};
         auto slot = entry->context();
         auto [id, channel] = slot->begin_request();
         struct cleanup
@@ -829,10 +803,10 @@ public:
         timer.cancel();
         if (!reply)
         {
-            throw boost::system::system_error {
-                timed_out->load() ? boost::system::errc::timed_out : boost::system::errc::operation_canceled,
-                boost::system::generic_category(),
-                "MCP request " + std::string {msg.at("method").as_string()} + " to session " + session_id};
+            throw taar::exception {failure {
+                boost::system::errc::make_error_code(
+                    timed_out->load() ? boost::system::errc::timed_out : boost::system::errc::operation_canceled),
+                "MCP request " + std::string {msg.at("method").as_string()} + " to session " + session_id}};
         }
         auto const& obj = reply->as_object();
         if (auto const* err = obj.if_contains("error"))
@@ -846,7 +820,9 @@ public:
                 if (auto const* m = eo->if_contains("message"); m && m->is_string()) message = std::string {m->as_string()};
                 if (auto const* d = eo->if_contains("data")) data = *d;
             }
-            throw client_error {code, std::move(message), std::move(data)};
+            failure f {error::client_error, std::move(message)};
+            f.with_data(boost::json::object {{"code", code}, {"data", std::move(data)}});
+            throw taar::exception {std::move(f)};
         }
         if (auto const* result = obj.if_contains("result")) co_return *result;
         co_return boost::json::value {nullptr};
@@ -901,7 +877,20 @@ public:
         client_notifications_[std::move(method)] = std::move(handler);
     }
 
-    /// Replace how tool exceptions are reported. See @ref default_tool_error_handler.
+    /** Replace how failed tool calls are reported. See @ref default_tool_error_handler.
+
+        @a h is invoked as `h(taar::failure const&)` and returns the
+        `isError` text, or `nullopt` to send a JSON-RPC error instead. A
+        handler that throws falls back to the default.
+
+        @code
+        endpoint.set_tool_error_handler([](taar::failure const& f) -> std::optional<std::string>
+        {
+            if (f.as<division_by_zero>()) return std::nullopt;     // a JSON-RPC error
+            return mcp::default_tool_error_handler(f);
+        });
+        @endcode
+    */
     void set_tool_error_handler(tool_error_handler h)
     {
         tool_error_ = std::move(h);
@@ -1364,13 +1353,13 @@ private:
             {
                 if (auto const* c = obj->if_contains("cursor"))
                 {
-                    if (!c->is_string()) throw boost::system::system_error {jsonrpc::error::invalid_params, "cursor must be a string"};
+                    if (!c->is_string()) throw taar::exception {failure {jsonrpc::error::invalid_params, "cursor must be a string"}};
                     auto const text = std::string {c->as_string()};
                     char* end = nullptr;
                     auto const parsed = std::strtoull(text.c_str(), &end, 10);
                     if (text.empty() || *end != '\0' || parsed > items.size())
                     {
-                        throw boost::system::system_error {jsonrpc::error::invalid_params, "invalid cursor"};
+                        throw taar::exception {failure {jsonrpc::error::invalid_params, "invalid cursor"}};
                     }
                     start = static_cast<std::size_t>(parsed);
                 }
@@ -1712,7 +1701,7 @@ private:
             : latest_protocol_version;
 
         initialize_outcome outcome;
-        std::exception_ptr failure;
+        std::exception_ptr eptr;
 
         if constexpr (stateful)
         {
@@ -1732,11 +1721,11 @@ private:
                     }
                     catch (...)
                     {
-                        failure = std::current_exception();
+                        eptr = std::current_exception();
                     }
                 }
             }
-            if (failure)
+            if (eptr)
             {
                 sessions_.store.erase(sid);
             }
@@ -1753,13 +1742,13 @@ private:
             }
             catch (...)
             {
-                failure = std::current_exception();
+                eptr = std::current_exception();
             }
         }
 
-        if (failure)
+        if (eptr)
         {
-            auto info = rpc_.map_exception(failure);
+            auto info = map_failure(taar::failure::from_exception(eptr));
             outcome.reply = jsonrpc::make_error_response(
                 id, info.code, std::move(info.message), std::move(info.data));
         }
@@ -1782,11 +1771,12 @@ private:
         {
             out = co_await dispatch_impl(ctxs, env, request, mctx);
         }
-        catch (boost::system::system_error const& e)
+        catch (taar::exception const& e)
         {
-            if (e.code().category() != jsonrpc::error_category()) throw;
+            auto const& f = e.error();
+            if (f.code().category() != jsonrpc::error_category()) throw;
             if (jsonrpc::is_notification(env)) co_return std::nullopt;
-            co_return error_envelope(id, e.code().value(), e.what());
+            co_return error_envelope(id, f.code().value(), f.message().empty() ? f.code().message() : f.message());
         }
         co_return out;
     }
@@ -2010,7 +2000,7 @@ private:
         }
 
         auto scoped = begin_scope(ctxs, env, co_await boost::asio::this_coro::executor);
-        std::exception_ptr failure;
+        std::exception_ptr eptr;
         boost::json::value value;
         try
         {
@@ -2019,12 +2009,12 @@ private:
         }
         catch (...)
         {
-            failure = std::current_exception();
+            eptr = std::current_exception();
         }
         if (scoped.scope->cancelled()) co_return std::nullopt;
-        if (failure)
+        if (eptr)
         {
-            auto info = rpc_.map_exception(failure);
+            auto info = map_failure(taar::failure::from_exception(eptr));
             co_return jsonrpc::make_error_response(id, info.code, std::move(info.message), std::move(info.data));
         }
         co_return jsonrpc::make_response(id, prompt_result(value, it->second.info.description));
@@ -2135,7 +2125,7 @@ private:
         }
 
         auto scoped = begin_scope(ctxs, env, co_await boost::asio::this_coro::executor);
-        std::exception_ptr failure;
+        std::exception_ptr eptr;
         boost::json::value value;
         try
         {
@@ -2144,16 +2134,18 @@ private:
         }
         catch (...)
         {
-            failure = std::current_exception();
+            eptr = std::current_exception();
         }
 
         if (scoped.scope->cancelled())
         {
             co_return std::nullopt;     // the client asked us to stop: no response
         }
-        if (failure)
+        if (eptr)
         {
-            if (auto text = map_tool_error(failure))
+            // Wrapped once; both hooks see this failure.
+            auto const f = taar::failure::from_exception(eptr);
+            if (auto text = map_tool_error(f))
             {
                 boost::json::object content_item;
                 content_item["type"] = "text";
@@ -2163,23 +2155,35 @@ private:
                 result["isError"] = true;
                 co_return jsonrpc::make_response(id, std::move(result));
             }
-            auto info = rpc_.map_exception(failure);
+            auto info = map_failure(f);
             co_return jsonrpc::make_error_response(id, info.code, std::move(info.message), std::move(info.data));
         }
 
         co_return jsonrpc::make_response(id, tool_result(value));
     }
 
-    std::optional<std::string> map_tool_error(std::exception_ptr e) const
+    std::optional<std::string> map_tool_error(taar::failure const& f) const
     {
         try
         {
-            return tool_error_(e);
+            return tool_error_(f);
         }
         catch (...)
         {
-            return default_tool_error_handler(e);
+            return default_tool_error_handler(f);
         }
+    }
+
+    /// The JSON-RPC error for @a f: MCP codes with a wire code keep it, the rest go through the JSON-RPC mapper.
+    jsonrpc::error_info map_failure(taar::failure const& f) const
+    {
+        if (f.is(error::resource_not_found) || f.is(error::request_cancelled))
+        {
+            std::optional<boost::json::value> data;
+            if (!f.data().is_null()) data = f.data();
+            return {f.code().value(), f.message().empty() ? f.code().message() : f.message(), std::move(data)};
+        }
+        return rpc_.map_failure(f);
     }
 
     awaitable<std::optional<boost::json::value>> read_resource(
@@ -2227,7 +2231,7 @@ private:
         }
 
         auto scoped = begin_scope(ctxs, env, co_await boost::asio::this_coro::executor);
-        std::exception_ptr failure;
+        std::exception_ptr eptr;
         boost::json::value value;
         try
         {
@@ -2236,15 +2240,15 @@ private:
         }
         catch (...)
         {
-            failure = std::current_exception();
+            eptr = std::current_exception();
         }
         if (scoped.scope->cancelled())
         {
             co_return std::nullopt;
         }
-        if (failure)
+        if (eptr)
         {
-            auto info = rpc_.map_exception(failure);
+            auto info = map_failure(taar::failure::from_exception(eptr));
             co_return jsonrpc::make_error_response(id, info.code, std::move(info.message), std::move(info.data));
         }
 

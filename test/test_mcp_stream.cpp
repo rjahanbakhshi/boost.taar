@@ -432,9 +432,12 @@ BOOST_AUTO_TEST_CASE(test_mcp_server_to_client_requests)
         {
             co_await e.create_message(me.id, json::object {{"maxTokens", 10}});
         }
-        catch (mcp::client_error const& err)
+        catch (taar::exception const& err)
         {
-            co_return std::to_string(err.code()) + " " + err.what() + " " + json::serialize(err.data());
+            auto const& f = err.error();
+            if (!f.is(mcp::error::client_error)) throw;
+            co_return std::to_string(f.data().at("code").as_int64()) + " " + f.message() + " " +
+                json::serialize(f.data().at("data"));
         }
         co_return "no error";
     });
@@ -444,9 +447,10 @@ BOOST_AUTO_TEST_CASE(test_mcp_server_to_client_requests)
         {
             co_await e.list_roots(me.id, std::chrono::milliseconds {20});
         }
-        catch (boost::system::system_error const& err)
+        catch (taar::exception const& err)
         {
-            co_return err.code() == boost::system::errc::timed_out ? "timed out" : std::string {"other: "} + err.what();
+            co_return err.error().is(boost::system::errc::make_error_code(boost::system::errc::timed_out))
+                ? "timed out" : std::string {"other: "} + err.what();
         }
         co_return "answered";
     });
@@ -548,7 +552,7 @@ BOOST_AUTO_TEST_CASE(test_mcp_server_to_client_requests)
     net::co_spawn(io, [&]() -> taar::awaitable<void>
     {
         try { co_await e.list_roots("nope"); }
-        catch (std::out_of_range const&) { threw = true; }
+        catch (taar::exception const& err) { threw = err.error().is(mcp::error::unknown_session); }
     }, net::detached);
     io.run();
     BOOST_TEST(threw);
@@ -612,9 +616,10 @@ BOOST_AUTO_TEST_CASE(test_mcp_request_default_timeout_bounds_the_wait)
         {
             co_await e.elicit(me.id, "?", json::object {{"type", "object"}});
         }
-        catch (boost::system::system_error const& err)
+        catch (taar::exception const& err)
         {
-            co_return err.code() == boost::system::errc::timed_out ? "timed out" : "other";
+            co_return err.error().is(boost::system::errc::make_error_code(boost::system::errc::timed_out))
+                ? "timed out" : "other";
         }
         co_return "answered";
     });
