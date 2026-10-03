@@ -78,6 +78,17 @@ occurrence of a query key, `?tag=a&tag=b`, into a container),
 `argument_not_found` and `constrained` to validate the value. User code
 can define new argument providers by satisfying the required expressions.
 
+Providers report through `taar::result<V>` (that is,
+`boost::system::result<V, taar::failure>`). The not-found signal is
+`taar::failure{taar::error::argument_not_found}`, with no message: it is
+the one failure that `with_default` and `std::optional` parameters absorb.
+Any other failure should carry a code that says what went wrong and a
+message that reads on its own, such as
+`taar::failure{taar::error::argument_ambiguous, "header 'x-id' occurs more than once"}`;
+the binder nests it as the cause of an `invalid_argument_format` failure
+naming the argument and its position (see
+[link boost_taar.design.errors Error mapping per surface]).
+
 [heading Required expressions]
 
 Given a provider `p`, a request `req` whose body type the provider
@@ -85,9 +96,14 @@ declares, and a `matcher::context` `ctx`:
 
 [table
 [[Expression][Semantics]]
-[[`p(req, ctx)`][Returns `boost::system::result<V>`. The value is passed
- through `rest_arg_cast` to the callable's parameter type; an error is
- reported to the soft error handler.]]
+[[`p(req, ctx)`][Returns `taar::result<V>`. The value is passed
+ through `rest_arg_cast` to the callable's parameter type. A failure
+ `f` with `f.is(taar::error::argument_not_found)` means the argument is
+ absent; any other failure is thrown as a `taar::exception` and reaches
+ the soft error handler (or the JSON-RPC mapper, or the MCP tool error
+ handler). A provider returning `boost::system::result<V>` with a plain
+ `error_code` is still accepted; its code becomes a failure without a
+ message.]]
 [[`p.name()`][The argument's name, used in diagnostics and documentation.]]
 [[`p.description()`][Optional. A human-readable description used by
  documentation generators. Named providers take it as a trailing

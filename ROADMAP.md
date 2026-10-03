@@ -46,6 +46,10 @@ rather than planned.
 
 ## Recently closed
 
+- Unified error mechanism: `taar::failure`, `taar::result<T>` and
+  `taar::exception`; every error hook takes `failure const&`, defaults map
+  by code (`http_status_for`, JSON-RPC mapper, MCP tool error handler),
+  and the `mcp::error` category replaces the `client_error` class.
 - RFC 6570 operators in MCP resource templates (`{+path}`, `{#frag}`,
   `{.ext}`, `{/seg}`, `{;p}`, `{?q}`, `{&q}`, comma lists, `*` and `:n`).
 - MCP `logging/setLevel` and `log()`, `completion/complete`, tool

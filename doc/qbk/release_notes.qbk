@@ -9,6 +9,27 @@
 
 [heading Unreleased]
 
+* Unified error mechanism. `taar::failure` is the one error value: an
+  `error_code` from any category, a message for the occurrence,
+  structured data, a nested cause, the source location and, when made
+  from a foreign exception, that exception. `text()` renders it for
+  people and `chain()` with category tags for logs; `as<E>()` returns the
+  kept exception if it is an `E`.
+* `taar::result<T>` (`boost::system::result<T, failure>`) is what
+  argument providers and parsers return; `value()` on a failure throws
+  `taar::exception`, the one exception type the library throws.
+  `failure::from_exception` wraps anything else exactly once.
+* Every error hook receives `taar::failure const&`: the session's soft
+  and hard error handlers, the JSON-RPC error mapper and the MCP tool
+  error handler. The defaults map by code: `http_status_for` for REST,
+  `jsonrpc::default_error_mapper`, `mcp::default_tool_error_handler`.
+  New taar code `error::unknown_exception`; new `mcp::error` category
+  (`resource_not_found`, `request_cancelled`, `client_error`,
+  `unknown_session`).
+* Library errors carry messages that stand on their own: argument
+  failures name the argument and its position and nest the provider or
+  cast failure; body and multipart limits state the limit; MCP request
+  timeouts state the method, session and timeout.
 * Contexts: `session::basic_http<Context>` creates one context object per
   connection; `handler::rest` callables request it (and any other context
   in scope) through leading `T&`, `T const&` or `shared_ptr<T>` parameters.
@@ -138,6 +159,48 @@
   `include/boost/taar/` to match the Boost modular layout.
 * Added `build.jam`, `meta/libraries.json`, and a `doc/` directory built on
   QuickBook + Doxygen for integration with the Boost documentation build.
+
+[heading Migration]
+
+Breaking changes of the unified error mechanism:
+
+* Hook signatures: `set_soft_error_handler`, `set_hard_error_handler`,
+  `jsonrpc::endpoint::set_error_mapper` and
+  `mcp::endpoint::set_tool_error_handler` take callables invoked with
+  `taar::failure const&` instead of `std::exception_ptr`. Replace
+  try/rethrow/catch ladders with `f.as<my_error>()`, `f.is(code)` or
+  `f.has(code)`; `f.rethrow()` still throws the original exception.
+* The library throws `taar::exception` where it threw
+  `boost::system::system_error` or `std::system_error`: argument casts
+  and the binder, `constrained`, cookie parsing, `parse_multipart`,
+  `body_reader::read_all` and `multipart_reader::read_all` (with
+  `body_limit`), streaming body transport errors, `chunked_response`
+  late metadata, `path_arg` registration checks, and `server::tcp` /
+  `server::tls` resolve failures. Catch `taar::exception` and inspect
+  `e.error().code()`; the codes are unchanged.
+* Argument providers return `taar::result<V>` instead of
+  `boost::system::result<V>`; the not-found signal is
+  `taar::failure{taar::error::argument_not_found}`.
+  `matcher::parse_template` and `parse_cookies` also return
+  `taar::result`. User providers returning `boost::system::result<V>`
+  still work.
+* The `mcp::client_error` exception class is removed. `request`,
+  `elicit`, `create_message` and `list_roots` throw `taar::exception`
+  whose failure carries `mcp::error::client_error` (data
+  `{"code": n, "data": ...}`), `errc::timed_out`,
+  `errc::operation_canceled` or `mcp::error::unknown_session`.
+* `mcp::error` is now an error-code enum in `<boost/taar/mcp/error.hpp>`;
+  resource-not-found and cancelled failures carry it and keep their wire
+  codes (`-32002`, `-32800`).
+* JSON-RPC `-32602` errors from argument failures carry `data` as the
+  failure's object data plus `"message": text()` (for argument errors
+  `{"argument": ..., "position": ..., "message": ...}`), or the `text()`
+  string when there is no object data. `-32603` internal errors carry no
+  `data`.
+* REST default soft-error bodies are `failure::text()` (no category
+  tags), e.g. `argument page (position 1) is invalid (caused by: ...)`;
+  failures that do not map to a `4xx` status escalate to the hard error
+  handler.
 
 [heading 0.0.46]
 

@@ -471,7 +471,7 @@ public:
 
         @throws boost::taar::exception carrying
                 `boost::beast::http::error::body_limit` once the part
-                exceeds @a limit bytes, @ref error::invalid_request_format
+                exceeds @a limit bytes, `error::invalid_request_format`
                 if the body is malformed, or the transport error.
     */
     awaitable<std::string> read_all(std::uint64_t limit = 16 * 1024 * 1024)

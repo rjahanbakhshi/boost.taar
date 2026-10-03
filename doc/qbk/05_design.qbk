@@ -29,8 +29,8 @@ reference documentation alone.
 * [link boost_taar.design.contexts Contexts and keyed state]: the three
   scopes of state a handler can ask for, and how `context_store` keeps
   them safe.
-* [link boost_taar.design.errors Error mapping per surface]: why domain
-  code throws plain exceptions and each layer maps them.
+* [link boost_taar.design.errors Error mapping per surface]: the one
+  error value (`failure`), and how each layer maps it to its protocol.
 * [link boost_taar.design.protocols Protocol decisions]: the choices made
   where JSON-RPC, MCP and OpenAPI leave room.
 
@@ -69,11 +69,17 @@ something that takes the connection down: a peer disconnect mid-read, a
 write that fails because the socket is closed.
 
 Both have pluggable handlers installed on a session via
-`set_soft_error_handler` and `set_hard_error_handler`. The default soft
-handler answers library argument errors with `400` and a short text body,
-a streaming handler's body limit with `413`, and rethrows everything else, which then reaches the hard error handler
-and closes the connection. Applications that throw their own exceptions
-from handlers install a soft error handler that maps them (see
+`set_soft_error_handler` and `set_hard_error_handler`, and both receive a
+`taar::failure const&` (see
+[link boost_taar.design.errors Error mapping per surface]). The session
+wraps whatever escapes a request handler into a failure exactly once and
+hands it to the soft handler. The default soft handler answers library
+argument and body errors with `400` and the failure's text, a body limit
+with `413`, and escalates everything else (user exceptions, internal
+codes) to the hard error handler, which sees the same failure; the
+connection is then closed. Transport errors go to the hard handler
+directly. Applications that throw their own exceptions from handlers
+install a soft error handler that recognises them with `f.as<E>()` (see
 `examples/rest_crud_server.cpp`).
 
 [endsect]
@@ -293,23 +299,156 @@ store's idle timeout is the session lifetime.
 [section:errors Error mapping per surface]
 
 Domain code throws plain exceptions and knows nothing about HTTP, JSON-RPC
-or MCP. Each layer maps exceptions where they cross into its protocol, with
-a default and a hook:
+or MCP. The library itself reports every error through one value type,
+and each layer maps that value to its protocol where it crosses into it,
+with a default and a hook.
+
+[heading One error value: `failure`]
+
+`boost::taar::failure` (in `<boost/taar/core/error.hpp>`) carries
+
+* an `error_code` from any category: Taar's own `taar::error`, Asio,
+  Beast, Boost.JSON, generic `errc`, `jsonrpc::error`, `mcp::error`, or
+  a user category;
+* a message for this occurrence that reads on its own ("query parameter
+  'tag' occurs more than once", "request body exceeds the read limit of
+  100 bytes"). It does not repeat the code's generic text;
+* optional structured data, a `boost::json::value`;
+* an optional nested cause, so a failure explains itself in layers;
+* the source location where it was raised;
+* optionally the foreign exception it was made from.
+
+`text()` renders the failure for people: each level prints its message,
+or the code's own text when the message is empty, and causes follow in
+`(caused by: ...)`. `chain()` adds `[category:value]` tags to every level
+and is meant for logs. `is(code)` tests the outermost code, `has(code)`
+the whole chain, and `root()` returns the innermost cause.
+
+`failure::from_exception(eptr)` turns any exception into a failure: a
+`taar::exception` yields its own failure unchanged; a
+`boost::system::system_error` or `std::system_error` yields its code with
+the exception's text as the message; any other exception becomes
+`taar::error::unknown_exception` with `what()` as the message. In every
+case but the first the original exception is kept, so `rethrow()` throws
+the user's own type again and `as<E>()` finds it.
+
+[heading `result<T>` and `taar::exception`]
+
+`taar::result<T>` is `boost::system::result<T, failure>`: the
+non-throwing shape used by argument providers and parsers. Accessing
+`value()` on a failed result throws through Boost.System's ADL hook
+`throw_exception_from_error`, which Taar defines for `failure` to throw
+`taar::exception`.
+
+`taar::exception` is the one exception type the library throws. It
+carries a `failure` (`error()`), and its `what()` is the failure's
+`chain()`. Registration-time programmer errors (a duplicate tool name, a
+`path_arg` that names no placeholder, an invalid template) are reported
+when the handler is registered: duplicate and unknown names as
+`std::logic_error`, template and `path_arg` mismatches as
+`taar::exception`.
+
+[heading How the binder nests failures]
+
+Argument providers return `taar::result<V>`. An absent argument is
+`failure{error::argument_not_found}` with no message; `with_default` and
+`std::optional` parameters absorb exactly that code. Any other provider
+failure, or an exception thrown by a `rest_arg_cast` (built-in or user),
+becomes the cause of an argument-level failure: code
+`error::invalid_argument_format`, message
+`argument page (position 1) is invalid`, data
+`{"argument": "page", "position": 1}`. Its `text()` then reads, for
+instance:
+
+[pre argument page (position 1) is invalid (caused by: value 'abc' is not a number (Invalid argument))]
+
+A `constrained`
+violation is not wrapped: it is `error::constraint_violated` with a
+message such as `page must be >= 1` and data `{"argument": "page"}`.
+JSON-RPC and MCP arguments (`rpc_arg`, `mcp_arg`, `uri_arg`) follow the
+same scheme.
+
+[heading Mapping by code, per surface]
+
+Each default mapper looks only at the code; none of them inspects
+exception types.
 
 [table
 [[Surface][Default][Hook]]
-[[REST][library argument errors -> `400`; others close the connection]
- [`set_soft_error_handler`]]
-[[JSON-RPC][argument errors -> `-32602` with the detail in `data`; unknown
- method -> `-32601`; other exceptions -> `-32603` with `what()`]
- [`set_error_mapper`]]
-[[MCP tools][argument errors -> `-32602`; other exceptions -> a result with
- `isError: true` and `what()` as text]
- [`set_tool_error_handler`, then the JSON-RPC mapper]]
+[[REST]
+ [`http_status_for(f)` decides: Taar's request codes (argument not found
+  or ambiguous, invalid argument, request, URL, content type, cookie,
+  boolean or number format, constraint violated) -> `400`; Beast
+  `body_limit` -> `413`; `header_limit` -> `431`. A failure mapped to a
+  `4xx` status is answered with that status and `f.text()` as a
+  `text/plain` body. Everything else maps to `500` and is escalated to
+  the hard error handler instead of being answered.]
+ [`set_soft_error_handler(h)`, `h(taar::failure const&)` returning
+  anything `response_from` accepts, or an awaitable of it]]
+[[JSON-RPC]
+ [`default_error_mapper(f)`: a `jsonrpc::error` code -> that code with
+  the failure's message (or the code's text); a Taar code other than
+  `unknown_exception` -> `-32602 Invalid params` with `data` equal to the
+  failure's object data plus `"message": text()`, or the `text()` string
+  when there is no object data; anything else (user exceptions) ->
+  `-32603 Internal error` with the failure's message and no `data`.
+  Unknown methods are `-32601`; a cancelled request is `-32800`.]
+ [`set_error_mapper(fn)`, `fn(taar::failure const&) -> error_info`]]
+[[MCP tools]
+ [`default_tool_error_handler(f)`: Taar (except `unknown_exception`),
+  `jsonrpc::error` and `mcp::error` codes stay protocol errors and go
+  through the JSON-RPC mapper; anything else becomes a result with
+  `isError: true` and `f.text()` as its text content.]
+ [`set_tool_error_handler(fn)`, with
+  `fn(taar::failure const&) -> std::optional<std::string>`; `nullopt`
+  means protocol error]]
 ]
 
-A throwing mapper falls back to the default, so an error in error handling
-cannot take a connection down.
+The MCP layer has its own category, `mcp::error`. Where MCP assigns a
+wire code the enumerator's value is that code and is sent as is:
+`resource_not_found` (`-32002`) and `request_cancelled` (`-32800`). The
+other enumerators describe failures of server-to-client requests
+(`request`, `elicit`, `create_message`, `list_roots`): `client_error`
+when the client answers with a JSON-RPC error (the failure's message is
+the client's message, its data `{"code": n, "data": ...}`) and
+`unknown_session`. A timeout is `errc::timed_out` and a session that ends
+first `errc::operation_canceled`, each with a message naming the method
+and the session.
+
+[heading Escalation]
+
+On the REST surface a failure whose status would be `500` (a user
+exception, an internal or transport code) is not turned into a response
+by the default soft handler: it is escalated to the hard error handler
+with the same failure, and the connection is closed. The hard handler is
+where an application logs; `f.chain()` gives the tagged rendering with
+the whole cause chain, and `f.where()` the raise site. A soft handler or
+mapper that throws is treated the same way: the session escalates, and
+the JSON-RPC and MCP endpoints fall back to their default mapper, so an
+error in error handling cannot take a connection down unexpectedly.
+
+[heading Recognising your own exceptions]
+
+A hook recognises a domain exception without a try/catch ladder with
+`failure::as<E>()`, which returns the kept exception if it is an `E` (or
+derives from it) and `nullptr` otherwise:
+
+    session.set_soft_error_handler([](taar::failure const& f)
+    {
+        if (auto const* e = f.as<not_found>())
+            return taar::response_builder(e->what()).set_status(http::status::not_found);
+        return taar::response_builder(f.text()).set_status(taar::http_status_for(f));
+    });
+
+    rpc.set_error_mapper([](taar::failure const& f) -> taar::jsonrpc::error_info
+    {
+        if (auto const* e = f.as<not_found>()) return {-32004, e->what(), std::nullopt};
+        return taar::jsonrpc::default_error_mapper(f);
+    });
+
+Domain code that wants a specific mapping without a hook can also throw
+`taar::exception{taar::failure{code, message}}` with a code the default
+mappers already know.
 
 [endsect]
 
@@ -357,8 +496,10 @@ Where the specifications leave room, Taar makes these choices:
   lock, so a tool can await its own client while it holds the session.
   Other requests from the same session wait meanwhile, so the wait is
   bounded by `server_info::request_timeout` (five minutes by default)
-  unless a call passes its own. An error reply throws `client_error`; a
-  timeout or the session ending throws `system_error`. `session_info` carries the client's identity and
+  unless a call passes its own. Failures throw `taar::exception`: an
+  error reply carries `mcp::error::client_error` with the client's code
+  and data, a timeout `errc::timed_out`, the session ending
+  `errc::operation_canceled`. `session_info` carries the client's identity and
   declared `capabilities`, so a tool can check before asking.
   `on_client_notification` hooks notifications the client sends, such as
   `notifications/roots/list_changed`.

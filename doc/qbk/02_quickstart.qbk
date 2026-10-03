@@ -327,6 +327,44 @@ locally:
 
     boost::asio::co_spawn(io, mcp.serve_stdio(), boost::asio::detached);
 
+[heading Errors]
+
+Handlers throw ordinary exceptions; the library reports its own errors as
+`taar::failure` values, and every error hook receives one. A hook
+recognises your exception type with `f.as<E>()` and leaves the rest to
+the default mapping (argument errors are `400`, `-32602` or a protocol
+error; anything unrecognised escalates or becomes an internal error):
+
+    struct not_found : std::runtime_error { using std::runtime_error::runtime_error; };
+
+    http_session.set_soft_error_handler([](taar::failure const& f)
+    {
+        if (auto const* e = f.as<not_found>())
+            return taar::response_builder(e->what()).set_status(http::status::not_found);
+        return taar::response_builder(f.text()).set_status(taar::http_status_for(f));
+    });
+
+    rpc.set_error_mapper([](taar::failure const& f) -> taar::jsonrpc::error_info
+    {
+        if (auto const* e = f.as<not_found>()) return {-32004, e->what(), std::nullopt};
+        return taar::jsonrpc::default_error_mapper(f);
+    });
+
+    mcp.set_tool_error_handler([](taar::failure const& f) -> std::optional<std::string>
+    {
+        if (f.as<not_found>()) return "no such note";
+        return taar::mcp::default_tool_error_handler(f);
+    });
+
+    http_session.set_hard_error_handler([](taar::failure const& f)
+    {
+        std::cerr << f.chain() << '\n';      // tagged, with the whole cause chain
+    });
+
+Library code throws `taar::exception`, whose `error()` is the failure.
+See [link boost_taar.design.errors Error mapping per surface] for the
+default mappings.
+
 [heading CORS]
 
 Browser clients need preflight answers and `Access-Control` headers on
