@@ -449,7 +449,9 @@ BOOST_AUTO_TEST_CASE(test_mcp_server_to_client_requests)
         }
         catch (taar::exception const& err)
         {
-            co_return err.error().is(boost::system::errc::make_error_code(boost::system::errc::timed_out))
+            auto const expected = "MCP request roots/list to session " + me.id + " timed out after 20ms";
+            co_return err.error().is(boost::system::errc::make_error_code(boost::system::errc::timed_out)) &&
+                    err.error().text() == expected
                 ? "timed out" : std::string {"other: "} + err.what();
         }
         co_return "answered";

@@ -664,4 +664,34 @@ BOOST_AUTO_TEST_CASE(test_e2e_slot_bound_by_the_spawner_still_stops_the_acceptor
     BOOST_TEST(!timed_out);
 }
 
+BOOST_AUTO_TEST_CASE(test_e2e_tcp_resolve_failure_is_a_taar_exception)
+{
+    net::io_context io;
+    taar::session::http session;
+    taar::cancellation_signals signals;
+    std::exception_ptr error;
+    net::co_spawn(
+        io,
+        taar::server::tcp("127.0.0.1", "taar-no-such-service", session, signals),
+        [&](std::exception_ptr e) { error = e; });
+    io.run();
+    BOOST_REQUIRE(error);
+    try
+    {
+        std::rethrow_exception(error);
+    }
+    catch (taar::exception const& e)
+    {
+        auto const& f = e.error();
+        BOOST_TEST(static_cast<bool>(f.code()));
+        BOOST_TEST(f.message() == "resolving 127.0.0.1:taar-no-such-service failed");
+        BOOST_REQUIRE(f.cause() != nullptr);
+        BOOST_TEST(f.cause()->code() == f.code());
+    }
+    catch (...)
+    {
+        BOOST_FAIL("expected taar::exception");
+    }
+}
+
 } // namespace

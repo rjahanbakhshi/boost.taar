@@ -15,7 +15,6 @@
 #include <boost/taar/core/body_reader.hpp>
 #include <boost/taar/core/error.hpp>
 #include <boost/asio/buffer.hpp>
-#include <boost/system/system_error.hpp>
 #include <algorithm>
 #include <cctype>
 #include <cstring>
@@ -253,7 +252,7 @@ private:
 
     [[noreturn]] static void malformed(char const* what)
     {
-        throw boost::system::system_error {error::invalid_request_format, what};
+        throw taar::exception {failure {error::invalid_request_format, what}};
     }
 
     void compact()
@@ -347,8 +346,8 @@ private:
 
 /** Parse a complete `multipart/form-data` body.
 
-    @throws boost::system::system_error with @ref error::invalid_request_format
-            when the body is malformed.
+    @throws boost::taar::exception carrying @ref error::invalid_request_format
+            and a message naming what is malformed.
 */
 inline multipart_form parse_multipart(std::string_view body, std::string_view boundary)
 {
@@ -374,7 +373,9 @@ inline multipart_form parse_multipart(std::string_view body, std::string_view bo
         case detail::multipart_scanner::event::finished:
             return form;
         case detail::multipart_scanner::event::need_more:
-            throw boost::system::system_error {error::invalid_request_format, "truncated multipart body"};
+            throw taar::exception {failure {
+                error::invalid_request_format,
+                "multipart body ends without a closing boundary"}};
         }
     }
 }
@@ -466,7 +467,13 @@ public:
         co_return std::string(scratch_.data(), n);
     }
 
-    /// Read the rest of the current part, bounded by @a limit.
+    /** Read the rest of the current part, bounded by @a limit.
+
+        @throws boost::taar::exception carrying
+                `boost::beast::http::error::body_limit` once the part
+                exceeds @a limit bytes, @ref error::invalid_request_format
+                if the body is malformed, or the transport error.
+    */
     awaitable<std::string> read_all(std::uint64_t limit = 16 * 1024 * 1024)
     {
         constexpr std::size_t chunk = 64 * 1024;
@@ -479,7 +486,9 @@ public:
             out.resize(old + n);
             if (out.size() > limit)
             {
-                throw boost::system::system_error {boost::beast::http::error::body_limit};
+                throw taar::exception {failure {
+                    boost::beast::http::error::body_limit,
+                    "multipart part exceeds the read limit of " + std::to_string(limit) + " bytes"}};
             }
         }
         co_return out;

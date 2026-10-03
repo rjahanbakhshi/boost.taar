@@ -531,7 +531,7 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_failure_shape)
     {
         auto const& f = e.error();
         BOOST_TEST(f.is(error::invalid_argument_format));
-        BOOST_TEST(f.message() == "argument zzz (position 2)");
+        BOOST_TEST(f.message() == "argument zzz (position 2) is invalid");
         BOOST_TEST(f.data().at("argument").as_string() == "zzz");
         BOOST_TEST(f.data().at("position").to_number<int>() == 2);
         BOOST_REQUIRE(f.cause() != nullptr);
@@ -547,7 +547,7 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_failure_shape)
     }
     catch (taar::exception const& e)
     {
-        BOOST_TEST(e.error().message() == "argument page (position 1)");
+        BOOST_TEST(e.error().message() == "argument page (position 1) is invalid");
         BOOST_REQUIRE(e.error().cause() != nullptr);
         BOOST_TEST(e.error().cause()->is(error::invalid_number_format));
         BOOST_TEST(e.error().cause()->message().find("'abc'") != std::string::npos);

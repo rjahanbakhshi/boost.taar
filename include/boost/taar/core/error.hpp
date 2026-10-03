@@ -149,11 +149,14 @@ class exception;
 
     @li an `error_code` from any category (@ref error, Asio, Beast,
         Boost.JSON, `jsonrpc::error`, generic `errc`, ...);
-    @li a message specific to this occurrence ("query parameter 'page'"),
-        which does not repeat the code's generic text;
+    @li a message specific to this occurrence ("query parameter 'page'
+        occurs more than once"), which does not repeat the code's generic
+        text and reads on its own, since @ref text prints it instead of
+        the code's text;
     @li optional structured data (a JSON value);
     @li an optional nested cause, so a failure can explain itself in
-        layers ("argument page (position 1)" caused by "value 'abc'");
+        layers ("argument page (position 1) is invalid" caused by
+        "value 'abc' is not a number");
     @li the source location where it was raised;
     @li optionally the foreign exception it was made from (see
         @ref from_exception), so a user can still @ref rethrow and catch

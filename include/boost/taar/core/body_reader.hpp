@@ -11,6 +11,7 @@
 #define BOOST_TAAR_CORE_BODY_READER_HPP
 
 #include <boost/taar/core/awaitable.hpp>
+#include <boost/taar/core/error.hpp>
 #include <boost/asio/buffer.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/beast/http/buffer_body.hpp>
@@ -18,7 +19,6 @@
 #include <boost/beast/http/message.hpp>
 #include <boost/beast/http/parser.hpp>
 #include <boost/beast/http/read.hpp>
-#include <boost/system/system_error.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -69,7 +69,13 @@ public:
         co_return std::string(scratch_.data(), n);
     }
 
-    /// Read everything that remains, bounded by @a limit (throws `body_limit` beyond it).
+    /** Read everything that remains, bounded by @a limit.
+
+        @throws boost::taar::exception carrying
+                `boost::beast::http::error::body_limit` once more than
+                @a limit bytes have arrived, or the transport error if
+                reading fails.
+    */
     awaitable<std::string> read_all(std::uint64_t limit = 16 * 1024 * 1024)
     {
         constexpr std::size_t chunk = 64 * 1024;
@@ -82,7 +88,9 @@ public:
             out.resize(old + n);
             if (out.size() > limit)
             {
-                throw boost::system::system_error {boost::beast::http::error::body_limit};
+                throw taar::exception {failure {
+                    boost::beast::http::error::body_limit,
+                    "request body exceeds the read limit of " + std::to_string(limit) + " bytes"}};
             }
         }
         co_return out;
@@ -146,7 +154,10 @@ body_reader make_body_reader(
             auto [ec, n] = co_await http::async_read_some(stream, buffer, parser);
             if (ec && ec != http::error::need_buffer)
             {
-                throw boost::system::system_error {ec};
+                // The outer level says what failed, the cause why; both
+                // carry the transport code so mappers see it unchanged.
+                throw taar::exception {
+                    failure {ec, "reading the request body failed"}.with_cause(failure {ec})};
             }
             co_return out.size() - parser.get().body().size;
         },

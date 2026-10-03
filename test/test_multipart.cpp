@@ -8,6 +8,8 @@
 //
 
 #include "e2e.hpp"
+#include <boost/taar/core/body_reader.hpp>
+#include <boost/taar/core/error.hpp>
 #include <boost/taar/core/multipart.hpp>
 #include <boost/taar/handler/rest.hpp>
 #include <boost/taar/handler/rest_arg.hpp>
@@ -15,10 +17,16 @@
 #include <boost/taar/matcher/target.hpp>
 #include <boost/taar/openapi/generator.hpp>
 #include <boost/taar/session/http.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/beast/http/error.hpp>
 #include <boost/json/parse.hpp>
 #include <boost/test/unit_test.hpp>
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <cstring>
+#include <exception>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -106,15 +114,103 @@ BOOST_AUTO_TEST_CASE(test_multipart_parse_quoting_and_lookalike_data)
 
 BOOST_AUTO_TEST_CASE(test_multipart_parse_rejects_malformed_bodies)
 {
-    BOOST_CHECK_THROW(taar::parse_multipart("no boundary at all", boundary), boost::system::system_error);
-    BOOST_CHECK_THROW(taar::parse_multipart(field("a", "1"), boundary), boost::system::system_error);          // no closing boundary
+    BOOST_CHECK_THROW(taar::parse_multipart("no boundary at all", boundary), taar::exception);
+    BOOST_CHECK_THROW(taar::parse_multipart(field("a", "1"), boundary), taar::exception);          // no closing boundary
     BOOST_CHECK_THROW(taar::parse_multipart("--" + boundary + "\r\nContent-Type: text/plain\r\n\r\nx\r\n" + closing(), boundary),
-        boost::system::system_error);                                                                             // no name
+        taar::exception);                                                                             // no name
     BOOST_CHECK_THROW(taar::parse_multipart("--" + boundary + "\r\nbroken header line\r\n\r\nx\r\n" + closing(), boundary),
-        boost::system::system_error);
-    BOOST_CHECK_THROW(taar::parse_multipart("--" + boundary + "??", boundary), boost::system::system_error);
+        taar::exception);
+    BOOST_CHECK_THROW(taar::parse_multipart("--" + boundary + "??", boundary), taar::exception);
     auto empty = taar::parse_multipart(closing(), boundary);
     BOOST_TEST(empty.parts.empty());
+
+    // The failure carries invalid_request_format and names what is malformed.
+    try
+    {
+        (void)taar::parse_multipart("--" + boundary + "\r\nContent-Type: text/plain\r\n\r\nx\r\n" + closing(), boundary);
+        BOOST_FAIL("no throw");
+    }
+    catch (taar::exception const& e)
+    {
+        BOOST_TEST(e.error().is(taar::error::invalid_request_format));
+        BOOST_TEST(e.error().text() == "multipart part without a name");
+    }
+}
+
+// ---- read limits ------------------------------------------------------------
+
+/// A body_reader delivering @a data from memory.
+taar::body_reader memory_reader(std::shared_ptr<std::string const> data)
+{
+    auto pos = std::make_shared<std::size_t>(0);
+    return taar::body_reader {
+        [data, pos](net::mutable_buffer out) -> taar::awaitable<std::size_t>
+        {
+            auto const n = std::min(out.size(), data->size() - *pos);
+            std::memcpy(out.data(), data->data() + *pos, n);
+            *pos += n;
+            co_return n;
+        },
+        [data, pos] { return *pos == data->size(); },
+        data->size()};
+}
+
+template <typename Coroutine>
+void run_coroutine(Coroutine coroutine)
+{
+    net::io_context io;
+    std::exception_ptr error;
+    bool done = false;
+    net::co_spawn(io, coroutine(), [&](std::exception_ptr e) { error = e; done = true; });
+    io.run();
+    BOOST_REQUIRE(done);
+    if (error) std::rethrow_exception(error);
+}
+
+BOOST_AUTO_TEST_CASE(test_body_reader_read_all_limit_is_a_body_limit_failure)
+{
+    auto const data = std::make_shared<std::string const>(pattern(300));
+    run_coroutine([&]() -> taar::awaitable<void>
+    {
+        auto reader = memory_reader(data);
+        bool caught = false;
+        try
+        {
+            (void)co_await reader.read_all(100);
+        }
+        catch (taar::exception const& e)
+        {
+            BOOST_TEST(e.error().is(http::error::body_limit));
+            BOOST_TEST(e.error().text() == "request body exceeds the read limit of 100 bytes");
+            BOOST_TEST(taar::http_status_for(e.error()) == http::status::payload_too_large);
+            caught = true;
+        }
+        BOOST_TEST(caught);
+    });
+}
+
+BOOST_AUTO_TEST_CASE(test_multipart_reader_read_all_limit_is_a_body_limit_failure)
+{
+    auto const data = std::make_shared<std::string const>(field("big", pattern(300)) + closing());
+    run_coroutine([&]() -> taar::awaitable<void>
+    {
+        auto reader = memory_reader(data);
+        taar::multipart_reader form {reader, boundary};
+        auto part = co_await form.next_part();
+        BOOST_REQUIRE(part.has_value());
+        bool caught = false;
+        try
+        {
+            (void)co_await form.read_all(100);
+        }
+        catch (taar::exception const& e)
+        {
+            BOOST_TEST(e.error().is(http::error::body_limit));
+            BOOST_TEST(e.error().text() == "multipart part exceeds the read limit of 100 bytes");
+            caught = true;
+        }
+        BOOST_TEST(caught);
+    });
 }
 
 BOOST_AUTO_TEST_CASE(test_multipart_scanner_is_chunk_boundary_agnostic)
@@ -241,6 +337,8 @@ BOOST_AUTO_TEST_CASE(test_e2e_multipart_form_arg_buffered)
         BOOST_TEST(v.at("tag").as_string() == "x");
         BOOST_TEST(res[1].result() == http::status::bad_request);     // wrong content type
         BOOST_TEST(res[2].result() == http::status::bad_request);     // malformed body
+        BOOST_TEST(res[2].body().find(
+            "malformed multipart body (caused by: unexpected bytes after a multipart boundary)") != std::string::npos);
         BOOST_TEST(res[3].body() == "pong");                           // connection still fine
     });
 }

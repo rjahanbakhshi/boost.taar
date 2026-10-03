@@ -51,7 +51,8 @@ namespace boost::taar {
         is ignored; only the outer's metadata is written).
 
     Metadata must precede all data yields. After the first data yield,
-    metadata yields throw with @ref error::late_chunk_metadata.
+    metadata yields throw @ref boost::taar::exception carrying
+    @ref error::late_chunk_metadata.
 
     A handler returning `chunked_response<T>` is dispatched through the
     chunked-encoding path of @ref boost::taar::session::http, which writes
@@ -153,7 +154,9 @@ public:
         {
             if (data_yielded_)
             {
-                throw boost::system::system_error{error::late_chunk_metadata};
+                throw taar::exception {failure {
+                    error::late_chunk_metadata,
+                    "chunked_response yielded a status after body data"}};
             }
             status_ = meta.value;
             return {};
@@ -163,7 +166,9 @@ public:
         {
             if (data_yielded_)
             {
-                throw boost::system::system_error{error::late_chunk_metadata};
+                throw taar::exception {failure {
+                    error::late_chunk_metadata,
+                    "chunked_response yielded a header after body data"}};
             }
             headers_.push_back(std::move(meta));
             return {};

@@ -50,7 +50,6 @@
 #include <boost/asio/signal_set.hpp>
 #include <boost/describe/class.hpp>
 #include <boost/json.hpp>
-#include <boost/system/system_error.hpp>
 #include <algorithm>
 #include <chrono>
 #include <iostream>

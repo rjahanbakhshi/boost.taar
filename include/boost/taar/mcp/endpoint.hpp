@@ -803,10 +803,19 @@ public:
         timer.cancel();
         if (!reply)
         {
+            auto what = "MCP request " + std::string {msg.at("method").as_string()} + " to session " + session_id;
+            if (timed_out->load())
+            {
+                auto const ms = std::chrono::duration_cast<std::chrono::milliseconds>(timeout).count();
+                what += ms % 1000 == 0
+                    ? " timed out after " + std::to_string(ms / 1000) + "s"
+                    : " timed out after " + std::to_string(ms) + "ms";
+                throw taar::exception {failure {
+                    boost::system::errc::make_error_code(boost::system::errc::timed_out), std::move(what)}};
+            }
             throw taar::exception {failure {
-                boost::system::errc::make_error_code(
-                    timed_out->load() ? boost::system::errc::timed_out : boost::system::errc::operation_canceled),
-                "MCP request " + std::string {msg.at("method").as_string()} + " to session " + session_id}};
+                boost::system::errc::make_error_code(boost::system::errc::operation_canceled),
+                std::move(what) + " cancelled: session ended"}};
         }
         auto const& obj = reply->as_object();
         if (auto const* err = obj.if_contains("error"))

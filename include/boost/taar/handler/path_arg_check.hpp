@@ -10,12 +10,12 @@
 #ifndef BOOST_TAAR_HANDLER_PATH_ARG_CHECK_HPP
 #define BOOST_TAAR_HANDLER_PATH_ARG_CHECK_HPP
 
+#include <boost/taar/core/error.hpp>
 #include <boost/taar/handler/rest_arg.hpp>
 #include <boost/taar/handler/rest_param.hpp>
 #include <boost/taar/matcher/metadata.hpp>
 #include <boost/taar/matcher/template_parser.hpp>
 #include <boost/taar/type_traits/specialization_of.hpp>
-#include <boost/system/system_error.hpp>
 #include <boost/system/errc.hpp>
 #include <format>
 #include <optional>
@@ -121,8 +121,9 @@ auto find_target_template(Operand const& op)
     @ref path_arg (or @ref with_default wrapping one) on @a handler must
     appear as a `{name}` or `{*name}` placeholder in the template string
     captured by @a op's `target_constraint`. A mismatch -- typo, dropped
-    placeholder, or wrong path -- throws `boost::system::system_error`
-    with a message naming the offending argument, so the failure surfaces
+    placeholder, or wrong path -- throws @ref boost::taar::exception
+    (code `errc::invalid_argument`, or the template parser's code for a
+    malformed template) with a message naming the offending argument, so the failure surfaces
     at server startup instead of at the first request.
 
     The check is a no-op when:
@@ -169,11 +170,11 @@ void validate_path_args_against_target(Operand const& op, Handler const& handler
                     auto parsed = matcher::parse_template(c.template_str);
                     if (parsed.has_error())
                     {
-                        throw boost::system::system_error{
+                        throw taar::exception {taar::failure {
                             parsed.error().code(),
                             std::format(
                                 "Invalid target template \"{}\" at handler registration",
-                                c.template_str)};
+                                c.template_str)}};
                     }
                     for (auto const& seg : parsed.value())
                     {
@@ -190,13 +191,13 @@ void validate_path_args_against_target(Operand const& op, Handler const& handler
         {
             if (!template_names.contains(name))
             {
-                throw boost::system::system_error{
+                throw taar::exception {taar::failure {
                     boost::system::errc::make_error_code(
                         boost::system::errc::invalid_argument),
                     std::format(
                         "path_arg(\"{}\") is not present as a placeholder in "
                         "target template \"{}\"",
-                        name, template_str)};
+                        name, template_str)}};
             }
         }
     }

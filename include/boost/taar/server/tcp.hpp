@@ -12,6 +12,7 @@
 
 #include <boost/taar/core/awaitable.hpp>
 #include <boost/taar/core/cancellation_signals.hpp>
+#include <boost/taar/core/error.hpp>
 #include <boost/taar/core/rebind_executor.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -29,7 +30,6 @@
 #include <functional>
 #include <memory>
 #include <type_traits>
-#include <system_error>
 #include <string>
 
 namespace boost::taar::server {
@@ -66,7 +66,8 @@ namespace boost::taar::server {
     @param local_endpoint_handler Optional callback invoked with the
                                  resolved local endpoint after `bind()`.
 
-    @throws std::system_error if name resolution fails.
+    @throws boost::taar::exception carrying the resolver's error code if
+            name resolution fails.
 */
 namespace detail {
 
@@ -135,7 +136,8 @@ awaitable<void> accept_loop(
     auto [ec, query] = co_await resolver.async_resolve(bind_host, bind_port);
     if (ec)
     {
-        throw std::system_error {ec};
+        throw taar::exception {
+            failure {ec, "resolving " + bind_host + ":" + bind_port + " failed"}.with_cause(failure {ec})};
     }
 
     rebind_executor<tcp::acceptor> acceptor {co_await this_coro::executor};

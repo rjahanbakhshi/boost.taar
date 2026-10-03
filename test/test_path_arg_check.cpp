@@ -7,6 +7,7 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
 
+#include <boost/taar/core/error.hpp>
 #include <boost/taar/handler/path_arg_check.hpp>
 #include <boost/taar/handler/rest.hpp>
 #include <boost/taar/handler/rest_arg.hpp>
@@ -15,7 +16,7 @@
 #include <boost/taar/matcher/operand.hpp>
 #include <boost/taar/matcher/target.hpp>
 #include <boost/beast/http/verb.hpp>
-#include <boost/system/system_error.hpp>
+#include <boost/system/errc.hpp>
 #include <boost/test/unit_test.hpp>
 
 namespace {
@@ -140,7 +141,25 @@ BOOST_AUTO_TEST_CASE(test_validate_throws_on_path_arg_typo)
     auto handler = rest([](std::string x) { return x; }, path_arg("ud"));
     BOOST_CHECK_THROW(
         validate_path_args_against_target(op, handler),
-        boost::system::system_error);
+        boost::taar::exception);
+}
+
+BOOST_AUTO_TEST_CASE(test_validate_failure_names_the_argument_and_template)
+{
+    operand op {target == "/users/{id}"};
+    auto handler = rest([](std::string x) { return x; }, path_arg("ud"));
+    try
+    {
+        validate_path_args_against_target(op, handler);
+        BOOST_FAIL("no throw");
+    }
+    catch (boost::taar::exception const& e)
+    {
+        auto const& f = e.error();
+        BOOST_TEST(f.is(boost::system::errc::make_error_code(boost::system::errc::invalid_argument)));
+        BOOST_TEST(f.text() ==
+            "path_arg(\"ud\") is not present as a placeholder in target template \"/users/{id}\"");
+    }
 }
 
 BOOST_AUTO_TEST_CASE(test_validate_throws_when_path_arg_has_no_placeholder)
@@ -150,7 +169,7 @@ BOOST_AUTO_TEST_CASE(test_validate_throws_when_path_arg_has_no_placeholder)
     auto handler = rest([](std::string x) { return x; }, path_arg("id"));
     BOOST_CHECK_THROW(
         validate_path_args_against_target(op, handler),
-        boost::system::system_error);
+        boost::taar::exception);
 }
 
 BOOST_AUTO_TEST_CASE(test_validate_throws_when_one_of_many_path_args_is_unmatched)
@@ -162,7 +181,7 @@ BOOST_AUTO_TEST_CASE(test_validate_throws_when_one_of_many_path_args_is_unmatche
         path_arg("fid"));   // fid does not appear in template
     BOOST_CHECK_THROW(
         validate_path_args_against_target(op, handler),
-        boost::system::system_error);
+        boost::taar::exception);
 }
 
 BOOST_AUTO_TEST_CASE(test_validate_matches_greedy_param_name_against_path_arg)
@@ -175,7 +194,7 @@ BOOST_AUTO_TEST_CASE(test_validate_matches_greedy_param_name_against_path_arg)
     BOOST_CHECK_NO_THROW(validate_path_args_against_target(op, handler_ok));
     BOOST_CHECK_THROW(
         validate_path_args_against_target(op, handler_bad),
-        boost::system::system_error);
+        boost::taar::exception);
 }
 
 } // namespace

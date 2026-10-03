@@ -50,7 +50,8 @@ namespace boost::taar::server {
     @param local_endpoint_handler Optional callback with the bound endpoint.
     @param handshake_timeout  Upper bound for the TLS handshake.
 
-    @throws std::system_error if name resolution fails.
+    @throws boost::taar::exception carrying the resolver's error code if
+            name resolution fails.
 */
 template <typename SessionHandler>
 [[nodiscard]] awaitable<void> tls(

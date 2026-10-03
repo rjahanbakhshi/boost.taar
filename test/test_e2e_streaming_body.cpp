@@ -203,6 +203,7 @@ BOOST_AUTO_TEST_CASE(test_e2e_streaming_body_limit_in_handler_is_a_soft_error)
         auto res = co_await e2e::send_all(port, {
             e2e::make_request(http::verb::post, "/limited", pattern(500), "text/plain")});
         BOOST_TEST(res[0].result() == http::status::payload_too_large);
+        BOOST_TEST(res[0].body().find("request body exceeds the read limit of 100 bytes") != std::string::npos);
         BOOST_TEST(!res[0].keep_alive());
     });
 }

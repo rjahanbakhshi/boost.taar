@@ -242,9 +242,10 @@ BOOST_AUTO_TEST_CASE(test_chunked_response_late_metadata)
             {
                 gen.rethrow_if_exception();
             }
-            catch (boost::system::system_error const& e)
+            catch (boost::taar::exception const& e)
             {
-                BOOST_TEST(e.code() == make_error_code(error::late_chunk_metadata));
+                BOOST_TEST(e.error().is(make_error_code(error::late_chunk_metadata)));
+                BOOST_TEST(e.error().message().find("after body data") != std::string::npos);
                 caught = true;
             }
             BOOST_TEST(caught);

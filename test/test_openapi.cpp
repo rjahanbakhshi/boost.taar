@@ -493,7 +493,7 @@ BOOST_AUTO_TEST_CASE(test_openapi_failed_registration_records_nothing)
             method == http::verb::get && target == "/users/{id}",
             rest(&get_user, path_arg("idd"), query_arg("verbose"), query_arg("page")),
             gen.describe("Fetch a user")),
-        boost::system::system_error);
+        taar::exception);
     BOOST_TEST(gen.operation_count() == 0u);
     // The corrected registration is then accepted under the same path.
     session.register_request_handler(

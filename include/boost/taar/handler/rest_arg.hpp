@@ -285,7 +285,7 @@ with_default(T, U) -> with_default<std::remove_cvref_t<T>, std::remove_cvref_t<U
     A provider failure (other than an absent argument that `with_default`
     or a `std::optional` parameter absorbs) or a failed cast throws
     @ref boost::taar::exception with @ref error::invalid_argument_format,
-    message `argument <name> (position N)`, data
+    message `argument <name> (position N) is invalid`, data
     `{"argument": name, "position": N}`, and the provider's failure (or
     the cast's exception, wrapped by @ref failure::from_exception) as the
     cause. A `constrained` provider's violation is thrown unwrapped.
@@ -394,8 +394,8 @@ decltype(auto) get_rest_arg(
         taar::failure f {
             error::invalid_argument_format,
             name.empty()
-                ? std::format("argument (position {})", position)
-                : std::format("argument {} (position {})", name, position)};
+                ? std::format("argument at position {} is invalid", position)
+                : std::format("argument {} (position {}) is invalid", name, position)};
         f.with_data(boost::json::object {
             {"argument", name},
             {"position", position}});
@@ -489,7 +489,7 @@ struct query_arg
         auto url_view = boost::urls::parse_origin_form(request.target());
         if (!url_view)
         {
-            return taar::failure {error::invalid_url_format, "request target"}
+            return taar::failure {error::invalid_url_format, "request target is not a valid URL"}
                 .with_cause(taar::failure {url_view.error()});
         }
 
@@ -561,7 +561,7 @@ struct query_list_arg
         auto url_view = boost::urls::parse_origin_form(request.target());
         if (!url_view)
         {
-            return taar::failure {error::invalid_url_format, "request target"}
+            return taar::failure {error::invalid_url_format, "request target is not a valid URL"}
                 .with_cause(taar::failure {url_view.error()});
         }
 
@@ -949,10 +949,10 @@ struct multipart_form_arg
         {
             return parse_multipart(request.body(), *boundary);
         }
-        catch (boost::system::system_error const&)
+        catch (taar::exception const& e)
         {
             return taar::failure {error::invalid_request_format, "malformed multipart body"}
-                .with_cause(taar::failure::from_exception(std::current_exception()));
+                .with_cause(e.error());
         }
     }
 
