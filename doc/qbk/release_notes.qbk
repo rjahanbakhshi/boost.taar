@@ -176,7 +176,7 @@ Breaking changes of the unified error mechanism:
   `body_reader::read_all` and `multipart_reader::read_all` (with
   `body_limit`), streaming body transport errors, `chunked_response`
   late metadata, `path_arg` registration checks, and `server::tcp` /
-  `server::tls` resolve failures. Catch `taar::exception` and inspect
+  `server::tls` resolve, bind and listen failures. Catch `taar::exception` and inspect
   `e.error().code()`; the codes are unchanged.
 * Argument providers return `taar::result<V>` instead of
   `boost::system::result<V>`; the not-found signal is

@@ -66,8 +66,8 @@ namespace boost::taar::server {
     @param local_endpoint_handler Optional callback invoked with the
                                  resolved local endpoint after `bind()`.
 
-    @throws boost::taar::exception carrying the resolver's error code if
-            name resolution fails.
+    @throws boost::taar::exception carrying the system error code if
+            name resolution, binding or listening fails.
 */
 namespace detail {
 
@@ -140,11 +140,22 @@ awaitable<void> accept_loop(
             failure {ec, "resolving " + bind_host + ":" + bind_port + " failed"}.with_cause(failure {ec})};
     }
 
+    // Report setup failures like the resolve failure: the outer level says
+    // what failed, the cause why, both carrying the system code.
+    auto const fail = [&](boost::system::error_code const& e, char const* what)
+    {
+        throw taar::exception {
+            failure {e, std::string {what} + " " + bind_host + ":" + bind_port + " failed"}.with_cause(failure {e})};
+    };
+
     rebind_executor<tcp::acceptor> acceptor {co_await this_coro::executor};
-    acceptor.open(query.begin()->endpoint().protocol());
-    acceptor.set_option(net::socket_base::reuse_address(true));
-    acceptor.bind(query.begin()->endpoint());
-    acceptor.listen(net::socket_base::max_listen_connections);
+    boost::system::error_code sec;
+    acceptor.open(query.begin()->endpoint().protocol(), sec);
+    if (!sec) acceptor.set_option(net::socket_base::reuse_address(true), sec);
+    if (!sec) acceptor.bind(query.begin()->endpoint(), sec);
+    if (sec) fail(sec, "binding");
+    acceptor.listen(net::socket_base::max_listen_connections, sec);
+    if (sec) fail(sec, "listening on");
 
     if (local_endpoint_handler)
     {

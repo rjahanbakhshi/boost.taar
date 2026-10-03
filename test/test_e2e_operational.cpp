@@ -694,4 +694,40 @@ BOOST_AUTO_TEST_CASE(test_e2e_tcp_resolve_failure_is_a_taar_exception)
     }
 }
 
+BOOST_AUTO_TEST_CASE(test_e2e_tcp_bind_failure_is_a_taar_exception)
+{
+    net::io_context io;
+
+    // Hold an ephemeral loopback port with a listening acceptor of our own.
+    net::ip::tcp::acceptor holder {io, {net::ip::address_v4::loopback(), 0}};
+    holder.listen();
+    auto const port = std::to_string(holder.local_endpoint().port());
+
+    taar::session::http session;
+    taar::cancellation_signals signals;
+    std::exception_ptr error;
+    net::co_spawn(
+        io,
+        taar::server::tcp("127.0.0.1", port, session, signals),
+        [&](std::exception_ptr e) { error = e; });
+    io.run();
+    BOOST_REQUIRE(error);
+    try
+    {
+        std::rethrow_exception(error);
+    }
+    catch (taar::exception const& e)
+    {
+        auto const& f = e.error();
+        BOOST_TEST(f.is(net::error::address_in_use));
+        BOOST_TEST(f.message() == "binding 127.0.0.1:" + port + " failed");
+        BOOST_REQUIRE(f.cause() != nullptr);
+        BOOST_TEST(f.cause()->is(net::error::address_in_use));
+    }
+    catch (...)
+    {
+        BOOST_FAIL("expected taar::exception");
+    }
+}
+
 } // namespace
