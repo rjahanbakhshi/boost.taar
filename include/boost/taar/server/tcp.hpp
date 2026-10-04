@@ -34,41 +34,6 @@
 
 namespace boost::taar::server {
 
-/** Coroutine that binds, listens, and accepts TCP connections.
-
-    Spawn one instance of this coroutine per listen endpoint. It resolves
-    @a bind_host / @a bind_port, opens an acceptor with `SO_REUSEADDR`,
-    starts listening on `max_listen_connections`, and then loops accepting
-    connections until cancellation is requested through @a signals.
-
-    Each accepted socket is forwarded to @a session_handler on its own
-    strand, so the `io_context` may be run by several threads. The handler
-    is responsible for the full lifetime of the connection, typically by
-    invoking a @ref boost::taar::session::http instance.
-
-    The acceptor and every connection register themselves with @a signals,
-    and `signals.emit()` may be called from any thread. A cancellation slot
-    bound to this coroutine by its spawner also stops it (safely, through
-    the acceptor's strand), though it is no longer needed.
-
-    @param bind_host             Host or address to bind. `"0.0.0.0"` and
-                                 `"::"` accept on all interfaces.
-    @param bind_port             Port string. `"0"` asks the OS to pick a port; use @a local_endpoint_handler
-                                 to learn the chosen port.
-    @param session_handler       A callable invoked as
-                                 @c session_handler(socket, signals). Usually
-                                 a @ref boost::taar::session::http instance
-                                 by reference.
-    @param signals               Cancellation pool. The same pool is shared
-                                 with spawned sessions so a single
-                                 @ref cancellation_signals::emit shuts the
-                                 server down.
-    @param local_endpoint_handler Optional callback invoked with the
-                                 resolved local endpoint after `bind()`.
-
-    @throws boost::taar::exception carrying the system error code if
-            name resolution, binding or listening fails.
-*/
 namespace detail {
 
 /// Cancellation filter that re-emits the spawner's cancellation through a strand-bound slot.
@@ -189,8 +154,50 @@ awaitable<void> accept_loop(
 
 } // namespace detail
 
+/** Coroutine that binds, listens, and accepts TCP connections.
+
+    Spawn one instance of this coroutine per listen endpoint. It resolves
+    @a bind_host / @a bind_port, opens an acceptor with `SO_REUSEADDR`,
+    starts listening on `max_listen_connections`, and then loops accepting
+    connections until cancellation is requested through @a signals.
+
+    Each accepted socket is forwarded to @a session_handler on its own
+    strand, made from @a connection_executor, so the `io_context` may be
+    run by several threads and connections are served in parallel. The handler
+    is responsible for the full lifetime of the connection, typically by
+    invoking a @ref boost::taar::session::http instance.
+
+    The acceptor and every connection register themselves with @a signals,
+    and `signals.emit()` may be called from any thread. A cancellation slot
+    bound to this coroutine by its spawner also stops it (safely, through
+    the acceptor's strand), though it is no longer needed.
+
+    @param connection_executor   The executor every connection strand is
+                                 made from: normally the `io_context` (or
+                                 thread pool) executor itself. The acceptor
+                                 runs on a strand of the executor this
+                                 coroutine is spawned on, independently.
+    @param bind_host             Host or address to bind. `"0.0.0.0"` and
+                                 `"::"` accept on all interfaces.
+    @param bind_port             Port string. `"0"` asks the OS to pick a port; use @a local_endpoint_handler
+                                 to learn the chosen port.
+    @param session_handler       A callable invoked as
+                                 @c session_handler(socket, signals). Usually
+                                 a @ref boost::taar::session::http instance
+                                 by reference.
+    @param signals               Cancellation pool. The same pool is shared
+                                 with spawned sessions so a single
+                                 @ref cancellation_signals::emit shuts the
+                                 server down.
+    @param local_endpoint_handler Optional callback invoked with the
+                                 resolved local endpoint after `bind()`.
+
+    @throws boost::taar::exception carrying the system error code if
+            name resolution, binding or listening fails.
+*/
 template <typename SessionHandler> // TODO: SessionHandler concept for callable with correct syntax
 [[nodiscard]] awaitable<void> tcp(
+    boost::asio::any_io_executor connection_executor,
     std::string bind_host,
     std::string bind_port,
     SessionHandler&& session_handler,
@@ -202,11 +209,10 @@ template <typename SessionHandler> // TODO: SessionHandler concept for callable 
         "server::tcp keeps a reference to the session handler for as long as it "
         "accepts connections: pass an object that outlives the server, not a temporary.");
 
-    auto base = co_await net::this_coro::executor;
     co_await detail::run_on_strand(signals, detail::accept_loop(
         std::move(bind_host),
         std::move(bind_port),
-        base,
+        std::move(connection_executor),
         std::move(local_endpoint_handler),
         [&](rebind_executor<net::ip::tcp::socket> socket, net::any_io_executor const& strand)
         {
@@ -214,6 +220,48 @@ template <typename SessionHandler> // TODO: SessionHandler concept for callable 
                 strand, signals,
                 std::forward<SessionHandler>(session_handler)(std::move(socket), signals));
         }));
+}
+
+/** Coroutine that binds, listens, and accepts TCP connections, making
+    connection strands from the executor it is spawned on.
+
+    Equivalent to the overload taking a `connection_executor`, with
+    `co_await this_coro::executor` in its place. Spawn it on the
+    `io_context` (or thread pool) executor itself:
+
+    @code
+    boost::asio::co_spawn(io, taar::server::tcp("0.0.0.0", "8080", session, signals),
+        boost::asio::detached);
+    @endcode
+
+    Spawned on a strand instead, every connection strand would be layered
+    on that strand and all connections would be serialised through it;
+    use the overload taking an explicit `connection_executor` in that case
+    (or whenever the spawning executor is not the one connections should
+    run on).
+
+    @throws boost::taar::exception carrying the system error code if
+            name resolution, binding or listening fails.
+*/
+template <typename SessionHandler>
+[[nodiscard]] awaitable<void> tcp(
+    std::string bind_host,
+    std::string bind_port,
+    SessionHandler&& session_handler,
+    cancellation_signals& signals,
+    std::function<void(boost::asio::ip::tcp::endpoint const&)> local_endpoint_handler = nullptr)
+{
+    static_assert(std::is_lvalue_reference_v<SessionHandler>,
+        "server::tcp keeps a reference to the session handler for as long as it "
+        "accepts connections: pass an object that outlives the server, not a temporary.");
+
+    co_await tcp(
+        co_await boost::asio::this_coro::executor,
+        std::move(bind_host),
+        std::move(bind_port),
+        session_handler,
+        signals,
+        std::move(local_endpoint_handler));
 }
 
 } // namespace boost::taar::server

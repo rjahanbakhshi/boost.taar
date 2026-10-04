@@ -20,6 +20,7 @@
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/asio/read.hpp>
 #include <boost/asio/steady_timer.hpp>
+#include <boost/asio/strand.hpp>
 #include <boost/asio/write.hpp>
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/read.hpp>
@@ -575,6 +576,84 @@ BOOST_AUTO_TEST_CASE(test_e2e_multithreaded_shutdown_from_foreign_thread)
 
     BOOST_TEST(served == clients);
     BOOST_TEST(io.stopped());
+}
+
+BOOST_AUTO_TEST_CASE(test_e2e_explicit_connection_executor_serves_connections_in_parallel_from_a_strand)
+{
+    constexpr int threads = 4;
+    constexpr int clients = 2;
+
+    net::io_context io;
+    taar::session::http session;
+
+    // The handler holds its thread (and so its strand) for 100 ms. Were the
+    // connection strands layered on the acceptor's strand, the two requests
+    // would be serialised and take at least 200 ms together.
+    std::atomic<int> inner_is_io_executor {0};
+    session.register_request_handler(
+        method == http::verb::get && target == "/slow",
+        rest([&]() -> taar::awaitable<std::string>
+        {
+            auto const ex = co_await net::this_coro::executor;
+            if (auto const* strand = ex.target<net::strand<net::any_io_executor>>())
+            {
+                if (strand->get_inner_executor().target<net::io_context::executor_type>())
+                    ++inner_is_io_executor;
+            }
+            std::this_thread::sleep_for(100ms);
+            co_return std::string {"done"};
+        }));
+
+    taar::cancellation_signals signals;
+    std::atomic<unsigned short> port {0};
+    net::co_spawn(
+        net::make_strand(io),
+        taar::server::tcp(io.get_executor(), "127.0.0.1", "0", session, signals,
+            [&](net::ip::tcp::endpoint const& ep) { port = ep.port(); }),
+        net::detached);
+
+    std::atomic<int> finished {0};
+    std::atomic<int> failures {0};
+    std::vector<std::chrono::steady_clock::duration> elapsed(clients);
+    for (int c = 0; c < clients; ++c)
+    {
+        net::co_spawn(io, [&, c]() -> taar::awaitable<void>
+        {
+            try
+            {
+                net::steady_timer timer {co_await net::this_coro::executor};
+                while (port == 0)
+                {
+                    timer.expires_after(1ms);
+                    co_await timer.async_wait(taar::use_awaitable);
+                }
+                auto socket = co_await connect(port);
+                beast::flat_buffer buffer;
+                auto const start = std::chrono::steady_clock::now();
+                co_await http::async_write(socket, e2e::make_request(http::verb::get, "/slow"));
+                if ((co_await read_response(socket, buffer)).body() != "done") ++failures;
+                elapsed[c] = std::chrono::steady_clock::now() - start;
+            }
+            catch (std::exception const&)
+            {
+                ++failures;
+            }
+            if (++finished == clients) signals.emit();
+        }, net::detached);
+    }
+
+    std::vector<std::jthread> pool;
+    for (int i = 0; i < threads; ++i) pool.emplace_back([&] { io.run(); });
+    pool.clear();
+
+    BOOST_TEST(finished == clients);
+    BOOST_TEST(failures == 0);
+    BOOST_TEST(inner_is_io_executor == clients);
+    for (auto const& e : elapsed)
+    {
+        BOOST_TEST(e < std::chrono::milliseconds {190},
+            "client took " << std::chrono::duration_cast<std::chrono::milliseconds>(e).count() << " ms");
+    }
 }
 
 BOOST_AUTO_TEST_CASE(test_e2e_shutdown_closes_after_in_flight_message_generator)

@@ -21,6 +21,7 @@
 #include <boost/taar/session/https.hpp>
 #include <boost/asio/ssl.hpp>
 #include <boost/asio/steady_timer.hpp>
+#include <boost/asio/strand.hpp>
 #include <boost/test/unit_test.hpp>
 #include <chrono>
 #include <exception>
@@ -197,6 +198,48 @@ BOOST_AUTO_TEST_CASE(test_e2e_tls_keep_alive_requests_and_streaming)
         auto [sec] = co_await stream.async_shutdown(net::as_tuple(taar::use_awaitable));
         BOOST_TEST((!sec || sec == net::ssl::error::stream_truncated || sec == net::error::eof));
     });
+}
+
+BOOST_AUTO_TEST_CASE(test_e2e_tls_explicit_connection_executor_when_spawned_on_a_strand)
+{
+    net::io_context io;
+    auto tls = server_tls();
+    auto session = make_session();
+    taar::cancellation_signals signals;
+    unsigned short port = 0;
+    std::exception_ptr client_error;
+
+    net::co_spawn(net::make_strand(io),
+        taar::server::tls(io.get_executor(), "127.0.0.1", "0", tls, session, signals,
+            [&](net::ip::tcp::endpoint const& ep) { port = ep.port(); }, 2s),
+        net::detached);
+
+    net::co_spawn(io, [&]() -> taar::awaitable<void>
+    {
+        try
+        {
+            net::steady_timer timer {co_await net::this_coro::executor};
+            while (port == 0)
+            {
+                timer.expires_after(1ms);
+                co_await timer.async_wait(taar::use_awaitable);
+            }
+            net::ssl::context client_ctx {net::ssl::context::tls_client};
+            client_ctx.set_verify_mode(net::ssl::verify_none);
+            auto stream = co_await connect_tls(client_ctx, port);
+            beast::flat_buffer buffer;
+            auto a = co_await send(stream, buffer, e2e::make_request(http::verb::get, "/hello"));
+            BOOST_TEST(a.body() == "hello over TLS");
+        }
+        catch (...)
+        {
+            client_error = std::current_exception();
+        }
+        signals.emit();
+    }, net::detached);
+
+    io.run();
+    if (client_error) std::rethrow_exception(client_error);
 }
 
 BOOST_AUTO_TEST_CASE(test_e2e_tls_rejects_plaintext_and_keeps_serving)
