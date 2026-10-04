@@ -34,7 +34,6 @@
 #include <boost/taar/core/cancellation_signals.hpp>
 #include <boost/taar/core/awaitable.hpp>
 #include <boost/taar/core/body_reader.hpp>
-#include <boost/taar/core/rebind_executor.hpp>
 #include <boost/taar/core/is_awaitable.hpp>
 #include <boost/taar/core/error.hpp>
 #include <boost/taar/type_traits/callable.hpp>
@@ -109,44 +108,52 @@ using handler_request_t = handler::detail::request_type_of<H>;
 template <typename H, typename Contexts>
 using handler_result_t = handler::detail::handler_result_t<H, Contexts>;
 
-template <typename StreamType>
+template <typename StreamType, typename Token>
 auto async_write(
     StreamType& stream,
-    ::boost::beast::http::message_generator&& generator)
+    ::boost::beast::http::message_generator&& generator,
+    Token&& token)
 {
     return ::boost::beast::async_write(
         stream,
-        std::move(generator));
+        std::move(generator),
+        std::forward<Token>(token));
 }
 
 template <
     typename StreamType,
     bool isRequest,
     typename Body,
-    typename Fields>
+    typename Fields,
+    typename Token>
 requires (beast::http::is_mutable_body_writer<Body>::value)
 auto async_write(
     StreamType& stream,
-    ::boost::beast::http::message<isRequest, Body, Fields>& message)
+    ::boost::beast::http::message<isRequest, Body, Fields>& message,
+    Token&& token)
 {
     return ::boost::beast::http::async_write(
         stream,
-        message);
+        message,
+        std::forward<Token>(token));
 }
 
 template <
     typename StreamType,
     bool isRequest,
     typename Body,
-    typename Fields>
+    typename Fields,
+    typename Token>
 requires (! beast::http::is_mutable_body_writer<Body>::value)
 auto async_write(
     StreamType& stream,
-    ::boost::beast::http::message<isRequest, Body, Fields> const& message)
+    ::boost::beast::http::message<isRequest, Body, Fields> const& message,
+    Token&& token)
 {
     return ::boost::beast::http::async_write(
         stream,
-        message);
+        message,
+        std::forward<Token>(token));
 }
 
 /** Write @a response; for a HEAD request only its header goes on the wire.
@@ -169,7 +176,11 @@ awaitable<void> write_response(StreamType& stream, Response&& response, bool hea
             co_return;
         }
     }
-    co_await ::boost::taar::session::detail::async_write(stream, std::forward<Response>(response));
+    // Write errors surface on the next read; the response is best effort.
+    auto [ec, n] = co_await ::boost::taar::session::detail::async_write(
+        stream, std::forward<Response>(response), use_awaitable_tuple);
+    (void)ec;
+    (void)n;
 }
 
 /// The peer closed (or the operation was cancelled) between requests: not an error.
@@ -392,7 +403,7 @@ awaitable<bool> write_chunked_response(
 
     http::response_serializer<http::empty_body> serializer {header_response};
     auto [header_ec, header_sz] = co_await http::async_write_header(
-        stream, serializer, net::as_tuple(net::deferred));
+        stream, serializer, use_awaitable_tuple);
     if (header_ec)
         co_return false;
 
@@ -406,7 +417,7 @@ awaitable<bool> write_chunked_response(
         auto [write_ec, write_sz] = co_await net::async_write(
             stream,
             http::make_chunk(net::buffer(body)),
-            net::as_tuple(net::deferred));
+            use_awaitable_tuple);
         if (write_ec)
             co_return false;
 
@@ -422,7 +433,7 @@ awaitable<bool> write_chunked_response(
             auto [chunk_ec, chunk_sz] = co_await net::async_write(
                 stream,
                 http::make_chunk(net::buffer(chunk_body)),
-                net::as_tuple(net::deferred));
+                use_awaitable_tuple);
             if (chunk_ec)
                 co_return false;
         }
@@ -448,7 +459,7 @@ awaitable<bool> write_chunked_response(
     co_await net::async_write(
         stream,
         http::make_chunk_last(),
-        net::as_tuple(net::deferred));
+        use_awaitable_tuple);
 
     co_return keep_alive;
 }
@@ -496,7 +507,7 @@ awaitable<bool> write_chunked_response(
     `http` is move-constructible but not copyable; share one instance among
     spawned sessions by reference.
 
-    @tparam Stream  The connection stream type. `rebind_executor<beast::tcp_stream>`
+    @tparam Stream  The connection stream type. `boost::beast::tcp_stream`
                     for plain HTTP (the default); `session::tls_stream` from
                     `<boost/taar/session/https.hpp>` for HTTPS, where the
                     @ref boost::taar::server::tls acceptor performs the
@@ -512,7 +523,7 @@ awaitable<bool> write_chunked_response(
                     default alias, @ref http, uses @ref no_context and
                     creates nothing per connection.
 */
-template <typename Context = no_context, typename Stream = rebind_executor<boost::beast::tcp_stream>>
+template <typename Context = no_context, typename Stream = boost::beast::tcp_stream>
 class basic_http
 {
 public:
@@ -651,11 +662,13 @@ public:
         Owns the socket, parses request headers, dispatches to matching
         handlers, writes responses, honours keep-alive, and terminates on
         cancellation, peer close, or after a non-keep-alive response.
+        The session runs on the socket's executor (the connection strand
+        when called by the server).
     */
     awaitable<void> operator()(
-        rebind_executor<boost::asio::ip::tcp::socket> socket,
+        boost::asio::ip::tcp::socket socket,
         cancellation_signals& signals)
-        requires std::constructible_from<Stream, rebind_executor<boost::asio::ip::tcp::socket>&&>
+        requires std::constructible_from<Stream, boost::asio::ip::tcp::socket&&>
     {
         return (*this)(Stream {std::move(socket)}, signals);
     }
@@ -664,8 +677,7 @@ public:
 
         Used by @ref boost::taar::server::tls after the handshake, and by
         any transport that builds its own stream (`Stream` is the class
-        template parameter, `rebind_executor<beast::tcp_stream>` by
-        default). On exit a TLS stream receives `close_notify` before the
+        template parameter, `boost::beast::tcp_stream` by default). On exit a TLS stream receives `close_notify` before the
         TCP shutdown.
     */
     awaitable<void> operator()(Stream stream, cancellation_signals& signals)
@@ -706,7 +718,8 @@ public:
                 auto [header_ec, header_sz] = co_await http::async_read_header(
                     stream,
                     buffer,
-                    header_parser);
+                    header_parser,
+                    use_awaitable_tuple);
 
                 if (header_ec)
                 {
@@ -825,10 +838,11 @@ public:
                     body_parser.body_limit(request_body_limit_);
                     if (!req_ec)
                     {
-                        std::tie(req_ec, req_sz) = co_await async_read(
+                        std::tie(req_ec, req_sz) = co_await http::async_read(
                             stream,
                             buffer,
-                            body_parser);
+                            body_parser,
+                            use_awaitable_tuple);
                     }
 
                     if (req_ec)
@@ -857,7 +871,8 @@ public:
                 response.prepare_payload();
                 auto [resp_ec, resp_sz] = co_await http::async_write(
                     stream,
-                    response);
+                    response,
+                    use_awaitable_tuple);
 
                 if (resp_ec)
                 {
@@ -892,10 +907,10 @@ public:
         co_await this_coro::throw_if_cancelled(false);
 
         // Close the TLS layer first, if there is one, then half-close TCP.
-        if constexpr (requires { stream.async_shutdown(net::as_tuple(use_awaitable)); })
+        if constexpr (requires { stream.async_shutdown(use_awaitable_tuple); })
         {
             boost::beast::get_lowest_layer(stream).expires_after(std::chrono::seconds {5});
-            auto [sec] = co_await stream.async_shutdown(net::as_tuple(use_awaitable));
+            auto [sec] = co_await stream.async_shutdown(use_awaitable_tuple);
             (void)sec;
         }
         boost::system::error_code ec;
@@ -908,7 +923,7 @@ public:
         std::array<char, 4096> sink {};
         for (std::size_t drained = 0; drained < 1024 * 1024;)
         {
-            auto [rec, n] = co_await boost::beast::get_lowest_layer(stream).async_read_some(net::buffer(sink));
+            auto [rec, n] = co_await boost::beast::get_lowest_layer(stream).async_read_some(net::buffer(sink), use_awaitable_tuple);
             if (rec) break;
             drained += n;
         }
@@ -1061,7 +1076,7 @@ public:
                 body_parser.body_limit(self.request_body_limit_);
                 if (!req_ec)
                 {
-                    std::tie(req_ec, req_sz) = co_await async_read(stream, buffer, body_parser);
+                    std::tie(req_ec, req_sz) = co_await http::async_read(stream, buffer, body_parser, use_awaitable_tuple);
                 }
 
                 auto version = body_parser.get().version();
@@ -1234,11 +1249,16 @@ public:
     /** Register a "raw" handler that takes ownership of the connection on match.
 
         Used for protocol upgrades such as WebSocket. On a match the handler
-        receives the parsed request header, the underlying stream (a
-        `tcp_stream`, or the TLS stream for an `https` session),
+        receives the parsed request header, the underlying stream (a plain
+        `boost::beast::tcp_stream`, or the plain
+        `boost::beast::ssl_stream<boost::beast::tcp_stream>` named
+        `session::tls_stream` for an `https` session),
         and the `flat_buffer` holding any bytes already read past the
         header. The session performs no further I/O on the stream and ends
-        the session as soon as the handler returns.
+        the session as soon as the handler returns. The stream's default
+        completion token is Asio's: pass a token such as
+        @ref boost::taar::use_awaitable explicitly, or wrap the stream (for
+        example in `beast::websocket::stream<beast::tcp_stream>`).
 
         The handler signature must be compatible with:
 
@@ -1403,7 +1423,7 @@ private:
         err_response.keep_alive(false);
         err_response.prepare_payload();
         detail::apply_response_filter(*response_filter_, header, err_response);
-        auto [wec, wsz] = co_await http::async_write(stream, err_response);
+        auto [wec, wsz] = co_await http::async_write(stream, err_response, use_awaitable_tuple);
         (void)wec;
         (void)wsz;
     }

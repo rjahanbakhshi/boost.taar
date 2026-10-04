@@ -25,7 +25,6 @@
 #include <boost/taar/matcher/target.hpp>
 #include <boost/taar/core/cancellation_signals.hpp>
 #include <boost/taar/core/ignore_and_rethrow.hpp>
-#include <boost/taar/core/rebind_executor.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/bind_cancellation_slot.hpp>
 #include <boost/asio/io_context.hpp>
@@ -58,7 +57,6 @@ int main(int argc, char* argv[])
     namespace taar = boost::taar;
     using taar::matcher::method;
     using taar::matcher::target;
-    using taar::rebind_executor;
     using awaitable_token = net::use_awaitable_t<net::any_io_executor>;
 
     net::io_context io_context;
@@ -84,13 +82,13 @@ int main(int argc, char* argv[])
         [](
             taar::matcher::context const&,
             http::request<http::empty_body>&& request,
-            rebind_executor<beast::tcp_stream>&& stream,
+            beast::tcp_stream&& stream,
             beast::flat_buffer&& buffer,
             taar::cancellation_signals&) -> taar::awaitable<void>
         {
             try
             {
-                using ws_stream_t = websocket::stream<rebind_executor<beast::tcp_stream>>;
+                using ws_stream_t = websocket::stream<beast::tcp_stream>;
                 ws_stream_t ws{std::move(stream)};
 
                 // Suggest the server identity in the upgrade response.

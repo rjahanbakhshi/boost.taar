@@ -570,7 +570,7 @@ BOOST_AUTO_TEST_CASE(test_http_session_raw_handler_takeover)
         [&server_seen_target, &server_seen_post](
             taar::matcher::context const&,
             http::request<http::empty_body>&& request,
-            taar::rebind_executor<tcp_stream>&& stream,
+            tcp_stream&& stream,
             flat_buffer&& buffer,
             taar::cancellation_signals&) -> taar::awaitable<void>
         {
@@ -590,14 +590,14 @@ BOOST_AUTO_TEST_CASE(test_http_session_raw_handler_takeover)
                 buffer.consume(buffer.size());
             }
             auto [rec, rsz] = co_await net::async_read_until(
-                stream, net::dynamic_buffer(line_buffer), '\n');
+                stream, net::dynamic_buffer(line_buffer), '\n', taar::use_awaitable_tuple);
             if (rec) co_return;
             server_seen_post.assign(line_buffer.data(), rsz);
 
             // Echo back, terminating with a newline so the client's read_until
             // completes deterministically.
             std::string const echoed = "echo:" + server_seen_post;
-            co_await net::async_write(stream, net::buffer(echoed));
+            co_await net::async_write(stream, net::buffer(echoed), taar::use_awaitable);
             co_return;
         }
     );

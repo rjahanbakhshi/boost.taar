@@ -12,7 +12,6 @@
 
 #include <boost/taar/core/awaitable.hpp>
 #include <boost/taar/core/cancellation_signals.hpp>
-#include <boost/taar/core/rebind_executor.hpp>
 #include <boost/taar/server/tcp.hpp>
 #include <boost/taar/session/https.hpp>
 #include <boost/asio/as_tuple.hpp>
@@ -77,7 +76,7 @@ template <typename SessionHandler>
         std::move(bind_port),
         std::move(connection_executor),
         std::move(local_endpoint_handler),
-        [&](rebind_executor<net::ip::tcp::socket> socket, net::any_io_executor const& strand)
+        [&](net::ip::tcp::socket socket, net::any_io_executor const& strand)
         {
             detail::spawn_session(
                 strand, signals,
@@ -85,10 +84,10 @@ template <typename SessionHandler>
                     -> awaitable<void>
                 {
                     session::tls_stream stream {
-                        rebind_executor<boost::beast::tcp_stream> {std::move(socket)}, tls};
+                        boost::beast::tcp_stream {std::move(socket)}, tls};
                     boost::beast::get_lowest_layer(stream).expires_after(handshake_timeout);
                     auto [ec] = co_await stream.async_handshake(
-                        net::ssl::stream_base::server, net::as_tuple(use_awaitable));
+                        net::ssl::stream_base::server, use_awaitable_tuple);
                     if (ec)
                     {
                         co_return;

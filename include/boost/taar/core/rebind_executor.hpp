@@ -22,8 +22,14 @@ namespace boost::taar {
     `beast::tcp_stream`, `tcp::acceptor`), this alias produces the
     corresponding type using `any_io_executor` and bound to the
     @ref boost::taar::use_awaitable_tuple completion token. The result is
-    the type Taar's coroutines use throughout, sparing the user from
-    spelling out the rebind boilerplate.
+    the type Taar's coroutines use internally for library-private objects
+    (resolver, acceptor), where returning `(error_code, result)` by default
+    is convenient; it is also handy for client sockets in user code.
+
+    Public handler types do not use it: session handlers receive a plain
+    `boost::asio::ip::tcp::socket`, and raw handlers a plain
+    `boost::beast::tcp_stream` (or `session::tls_stream`, a plain
+    `boost::beast::ssl_stream<boost::beast::tcp_stream>`).
 */
 template <typename T>
 using rebind_executor = typename T::template

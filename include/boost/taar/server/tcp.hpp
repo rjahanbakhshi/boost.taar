@@ -98,7 +98,7 @@ awaitable<void> accept_loop(
     using net::ip::tcp;
 
     rebind_executor<tcp::resolver> resolver {co_await this_coro::executor};
-    auto [ec, query] = co_await resolver.async_resolve(bind_host, bind_port);
+    auto [ec, query] = co_await resolver.async_resolve(bind_host, bind_port, use_awaitable_tuple);
     if (ec)
     {
         throw taar::exception {
@@ -131,7 +131,7 @@ awaitable<void> accept_loop(
          cs.cancelled() == net::cancellation_type::none;
          cs = co_await this_coro::cancellation_state)
     {
-        auto [aec, socket] = co_await acceptor.async_accept();
+        auto [aec, socket] = co_await acceptor.async_accept(use_awaitable_tuple);
         if (aec)
         {
             // A persistent failure (descriptor exhaustion, no buffers) would
@@ -146,7 +146,7 @@ awaitable<void> accept_loop(
         {
             auto strand = net::make_strand(base);
             auto const protocol = socket.local_endpoint().protocol();
-            rebind_executor<tcp::socket> on_strand {strand, protocol, socket.release()};
+            tcp::socket on_strand {strand, protocol, socket.release()};
             on_socket(std::move(on_strand), strand);
         }
     }
@@ -182,9 +182,12 @@ awaitable<void> accept_loop(
     @param bind_port             Port string. `"0"` asks the OS to pick a port; use @a local_endpoint_handler
                                  to learn the chosen port.
     @param session_handler       A callable invoked as
-                                 @c session_handler(socket, signals). Usually
-                                 a @ref boost::taar::session::http instance
-                                 by reference.
+                                 @c session_handler(socket, signals), where
+                                 `socket` is a `boost::asio::ip::tcp::socket`
+                                 already on the connection strand, and
+                                 returning `awaitable<void>`. Usually a
+                                 @ref boost::taar::session::http instance by
+                                 reference.
     @param signals               Cancellation pool. The same pool is shared
                                  with spawned sessions so a single
                                  @ref cancellation_signals::emit shuts the
@@ -214,7 +217,7 @@ template <typename SessionHandler> // TODO: SessionHandler concept for callable 
         std::move(bind_port),
         std::move(connection_executor),
         std::move(local_endpoint_handler),
-        [&](rebind_executor<net::ip::tcp::socket> socket, net::any_io_executor const& strand)
+        [&](net::ip::tcp::socket socket, net::any_io_executor const& strand)
         {
             detail::spawn_session(
                 strand, signals,

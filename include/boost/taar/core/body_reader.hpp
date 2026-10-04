@@ -151,7 +151,7 @@ body_reader make_body_reader(
             parser.get().body().data = out.data();
             parser.get().body().size = out.size();
             parser.get().body().more = true;
-            auto [ec, n] = co_await http::async_read_some(stream, buffer, parser);
+            auto [ec, n] = co_await http::async_read_some(stream, buffer, parser, use_awaitable_tuple);
             if (ec && ec != http::error::need_buffer)
             {
                 // The outer level says what failed, the cause why; both

@@ -10,7 +10,6 @@
 #ifndef BOOST_TAAR_SESSION_HTTPS_HPP
 #define BOOST_TAAR_SESSION_HTTPS_HPP
 
-#include <boost/taar/core/rebind_executor.hpp>
 #include <boost/taar/session/http.hpp>
 #include <boost/beast/core/tcp_stream.hpp>
 #include <boost/beast/ssl/ssl_stream.hpp>
@@ -20,8 +19,8 @@
 
 namespace boost::taar::session {
 
-/// The stream an HTTPS session runs on: TLS over Beast's `tcp_stream`.
-using tls_stream = boost::beast::ssl_stream<rebind_executor<boost::beast::tcp_stream>>;
+/// The stream an HTTPS session runs on: TLS over Beast's plain `tcp_stream`.
+using tls_stream = boost::beast::ssl_stream<boost::beast::tcp_stream>;
 
 /** HTTPS session: @ref basic_http over a TLS stream.
 

@@ -307,11 +307,11 @@ BOOST_AUTO_TEST_CASE(test_e2e_streaming_websocket_echo_upgrade)
         [](
             taar::matcher::context const&,
             http::request<http::empty_body>&& request,
-            taar::rebind_executor<beast::tcp_stream>&& stream,
+            beast::tcp_stream&& stream,
             beast::flat_buffer&& buffer,
             taar::cancellation_signals&) -> taar::awaitable<void>
         {
-            websocket::stream<taar::rebind_executor<beast::tcp_stream>> ws {std::move(stream)};
+            websocket::stream<beast::tcp_stream> ws {std::move(stream)};
             co_await ws.async_accept(request, awaitable_token {});
             try
             {
