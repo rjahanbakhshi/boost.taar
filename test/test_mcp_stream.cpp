@@ -569,6 +569,79 @@ BOOST_AUTO_TEST_CASE(test_mcp_server_to_client_requests)
     BOOST_TEST(stray.result_int() == 202);
 }
 
+BOOST_AUTO_TEST_CASE(test_mcp_request_fails_when_its_session_is_deleted)
+{
+    using namespace std::chrono_literals;
+    endpoint e {{.name = "s", .version = "1", .request_timeout = 10s}};
+    std::string seen;
+    e.tool("ask", "Elicit", [&](mcp::session_info const& me) -> taar::awaitable<std::string>
+    {
+        try
+        {
+            co_await e.elicit(me.id, "?", json::object {{"type", "object"}});
+        }
+        catch (taar::exception const& err)
+        {
+            seen = err.error().text();
+            co_return err.error().is(boost::system::errc::make_error_code(boost::system::errc::operation_canceled)) &&
+                    seen.find("session ended") != std::string::npos
+                ? "session ended" : "other: " + seen;
+        }
+        co_return "answered";
+    });
+    auto init = post(e, http::verb::post,
+        R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25",)"
+        R"("capabilities":{"elicitation":{}},"clientInfo":{"name":"agent","version":"0.1"}}})");
+    std::string const sid {init["Mcp-Session-Id"]};
+
+    auto handler = e.handler();
+    auto gen = open_stream(e, sid);
+    net::io_context io;
+    gen.set_executor(io.get_executor());
+    taar::matcher::context mctx;
+    http::request<http::string_body> call {http::verb::post, "/mcp", 11};
+    call.set(http::field::content_type, "application/json");
+    call.set("Mcp-Session-Id", sid);
+    call.body() = R"({"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"ask"}})";
+    call.prepare_payload();
+    http::request<http::string_body> del {http::verb::delete_, "/mcp", 11};
+    del.set("Mcp-Session-Id", sid);
+    del.prepare_payload();
+
+    std::optional<http::response<http::string_body>> tool_res;
+    std::optional<http::response<http::string_body>> del_res;
+    bool stream_ended = false;
+    auto const started = std::chrono::steady_clock::now();
+    net::co_spawn(io, [&]() -> taar::awaitable<void>
+    {
+        tool_res = co_await handler(taar::handler::contexts<> {}, call, mctx);
+    }, net::detached);
+    net::co_spawn(io, [&]() -> taar::awaitable<void>
+    {
+        auto [ec0, hello] = co_await gen.next();
+        BOOST_REQUIRE(hello.has_value());
+        auto [ec1, frame] = co_await gen.next();
+        BOOST_REQUIRE(frame.has_value());
+        BOOST_TEST(json::parse(frame_data(*frame)).at("method").as_string() == "elicitation/create");
+        // The client never answers; it ends the session instead.
+        del_res = co_await handler(taar::handler::contexts<> {}, del, mctx);
+        auto [ec2, after] = co_await gen.next();
+        stream_ended = !after.has_value();
+    }, net::detached);
+    io.run();
+
+    BOOST_TEST((std::chrono::steady_clock::now() - started) < 5s);     // not the request timeout
+    BOOST_REQUIRE(del_res.has_value());
+    BOOST_TEST(del_res->result() == http::status::ok);
+    BOOST_TEST(stream_ended);
+    BOOST_TEST(seen == "MCP request elicitation/create to session " + sid + " cancelled: session ended");
+    // The tool finished normally after catching, so the call is still answered with its result.
+    BOOST_REQUIRE(tool_res.has_value());
+    BOOST_TEST(tool_res->result() == http::status::ok);
+    auto const reply = json::parse(tool_res->body());
+    BOOST_TEST(reply.at("result").at("content").as_array()[0].at("text").as_string() == "session ended");
+}
+
 BOOST_AUTO_TEST_CASE(test_mcp_stream_queue_is_bounded_without_a_stream)
 {
     endpoint e {{.name = "s", .version = "1", .stream_history = 5}};

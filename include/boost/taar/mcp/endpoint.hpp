@@ -419,11 +419,28 @@ struct session_slot
         return channel->push(response);
     }
 
+    /** End the session: close its event stream and fail every pending
+        server-to-client request (their `request()` calls throw
+        `errc::operation_canceled`). Idempotent.
+
+        Called by the endpoint just before it erases the session: the
+        slot itself may outlive the erase, since a running tool or a
+        waiting `request()` still holds it.
+    */
+    void end()
+    {
+        mailbox->close();
+        std::map<std::string, std::shared_ptr<reply_channel>> closing;
+        {
+            std::lock_guard<std::mutex> const g {pending_mutex};
+            closing.swap(pending);
+        }
+        for (auto& [_, channel] : closing) channel->close();
+    }
+
     ~session_slot()
     {
-        // Ends any open event stream and fails pending requests once the session is gone.
-        mailbox->close();
-        for (auto& [_, channel] : pending) channel->close();
+        end();
     }
 };
 
@@ -1174,7 +1191,7 @@ public:
                 {
                     if (outcome.session)
                     {
-                        if (session) sessions_.store.erase(session->key());
+                        if (session) end_session(session->key());
                         session = outcome.session;
                         // Forward this session's notifications to stdout.
                         net::co_spawn(ex, [mailbox = session->context()->mailbox, state]() -> awaitable<void>
@@ -1233,7 +1250,7 @@ public:
         }
         if constexpr (stateful)
         {
-            if (session) sessions_.store.erase(session->key());
+            if (session) end_session(session->key());
         }
         state->outbox->close();
         co_await state->writer_done.async_receive(use_awaitable);
@@ -1313,7 +1330,7 @@ public:
                 {
                     co_return plain(request, http::status::bad_request, "Missing Mcp-Session-Id");
                 }
-                if (!sessions_.store.erase(std::string {sid->value()}))
+                if (!end_session(std::string {sid->value()}))
                 {
                     co_return plain(request, http::status::not_found, "Unknown or expired session");
                 }
@@ -1736,7 +1753,7 @@ private:
             }
             if (eptr)
             {
-                sessions_.store.erase(sid);
+                end_session(sid);
             }
             else
             {
@@ -2181,6 +2198,13 @@ private:
         {
             return default_tool_error_handler(f);
         }
+    }
+
+    /// End session @a sid (close its stream, fail its pending requests) and erase it; false if unknown.
+    bool end_session(std::string const& sid)
+    {
+        if (auto entry = sessions_.store.peek(sid)) entry->context()->end();
+        return sessions_.store.erase(sid);
     }
 
     /// The JSON-RPC error for @a f: MCP codes with a wire code keep it, the rest go through the JSON-RPC mapper.

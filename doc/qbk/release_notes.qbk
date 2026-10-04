@@ -30,6 +30,10 @@
   failures name the argument and its position and nest the provider or
   cast failure; body and multipart limits state the limit; MCP request
   timeouts state the method, session and timeout.
+* MCP: ending a session (`DELETE`, end of stdio input, a replaced stdio
+  session) closes its event stream and fails its pending server-to-client
+  requests at once with `errc::operation_canceled`; before, they waited
+  for `request_timeout`.
 * Contexts: `session::basic_http<Context>` creates one context object per
   connection; `handler::rest` callables request it (and any other context
   in scope) through leading `T&`, `T const&` or `shared_ptr<T>` parameters.
