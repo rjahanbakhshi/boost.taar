@@ -10,6 +10,7 @@
 #ifndef BOOST_TAAR_MATCHER_CONTEXT_HPP
 #define BOOST_TAAR_MATCHER_CONTEXT_HPP
 
+#include <boost/taar/core/request_attributes.hpp>
 #include <unordered_map>
 #include <string>
 
@@ -38,6 +39,15 @@ struct context
         bare `{*}` form stores it under the key `"*"`.
     */
     std::unordered_map<std::string, std::string> path_args;
+
+    /** Values attached to the request by interceptors and guards.
+
+        Filled by session interceptors (`basic_http::add_interceptor`)
+        and `handler::guard` checks, read by handlers directly or through
+        `handler::attribute_arg<T>()`. Routing only resets
+        @ref path_args between candidate routes; attributes survive it.
+    */
+    request_attributes attributes;
 };
 
 } // namespace boost::taar::matcher

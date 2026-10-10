@@ -46,6 +46,7 @@ target_sources(
         include/boost/taar/core/member_function_of.hpp
         include/boost/taar/core/multipart.hpp
         include/boost/taar/core/rebind_executor.hpp
+        include/boost/taar/core/request_attributes.hpp
         include/boost/taar/core/response_builder.hpp
         include/boost/taar/core/response_from.hpp
         include/boost/taar/core/response_from_tag.hpp

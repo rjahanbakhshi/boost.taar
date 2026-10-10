@@ -22,6 +22,7 @@
 #include <boost/taar/type_traits/always_false.hpp>
 #include <boost/taar/type_traits/specialization_of.hpp>
 #include <boost/taar/type_traits/string_like.hpp>
+#include <boost/core/type_name.hpp>
 #include <boost/beast/http/string_body.hpp>
 #include <boost/beast/http/message.hpp>
 #include <boost/beast/http/field.hpp>
@@ -1109,6 +1110,59 @@ struct body_size_arg
         return request.body().size();
     }
 };
+
+/** Argument provider that reads a request attribute of type `T`.
+
+    Returns a copy of the value stored under `T` in
+    @ref boost::taar::matcher::context::attributes, typically by a session
+    interceptor or a `handler::guard` check, or
+    @ref error::argument_not_found when none is stored, so a
+    `std::optional<T>` parameter or `with_default` makes it optional. It
+    reads only the matcher context, so it works in `rest(...)`,
+    `jsonrpc::endpoint::method(...)` and `mcp::endpoint::tool(...)` alike.
+    It is not a client-supplied input: OpenAPI omits it, and JSON-RPC and
+    MCP leave it out of the parameter list and the input schema.
+
+    @code
+    struct principal { std::string user; };
+
+    session.register_request_handler(
+        method == http::verb::get && target == "/me",
+        taar::handler::rest(
+            [](principal const& p) { return p.user; },
+            taar::handler::attribute_arg<principal>()));
+    @endcode
+
+    @tparam T The attribute type; must be copy-constructible.
+*/
+template <typename T>
+struct attribute_arg
+{
+    /// The attribute type's name, for diagnostics.
+    std::string name() const
+    {
+        return boost::core::type_name<T>();
+    }
+
+    taar::result<T> operator()(
+        boost::beast::http::request_header<> const&,
+        matcher::context const& context) const
+    {
+        if (auto const* value = context.attributes.template find<T>())
+        {
+            return *value;
+        }
+        return taar::failure {error::argument_not_found};
+    }
+};
+
+namespace detail {
+
+/// True if @a P is an @ref attribute_arg.
+template <typename P>
+inline constexpr bool is_attribute_arg_v = type_traits::specialization_of<attribute_arg, P>;
+
+} // namespace detail
 
 } // boost::taar::handler
 

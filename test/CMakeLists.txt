@@ -39,6 +39,7 @@ target_sources(
         test_e2e_tls.cpp
         test_error.cpp
         test_http_session.cpp
+        test_interceptors.cpp
         test_is_http_response.cpp
         test_jsonrpc.cpp
         test_jsonrpc_endpoint.cpp

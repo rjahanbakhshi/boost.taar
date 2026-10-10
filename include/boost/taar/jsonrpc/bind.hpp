@@ -97,13 +97,18 @@ std::vector<param_info> describe_params(ProvidersTuple const& providers, std::in
     [[maybe_unused]] auto describe_one = [&]<std::size_t I>()
     {
         using provider_type = std::remove_cvref_t<std::tuple_element_t<I, ProvidersTuple>>;
-        auto info = make_param_info<type_traits::callable_arg<Callable, Offset + I>>(
-            std::get<I>(providers).name(),
-            handler::detail::arg_provider_description(std::get<I>(providers)),
-            !is_optional_v<type_traits::callable_arg<Callable, Offset + I>> &&
-                !handler::detail::strip_default<provider_type>::defaulted);
-        handler::detail::annotate_param(info, std::get<I>(providers));
-        out.push_back(std::move(info));
+        // A request attribute is set by the server, not sent by the client.
+        if constexpr (!handler::detail::is_attribute_arg_v<
+            typename handler::detail::strip_default<provider_type>::type>)
+        {
+            auto info = make_param_info<type_traits::callable_arg<Callable, Offset + I>>(
+                std::get<I>(providers).name(),
+                handler::detail::arg_provider_description(std::get<I>(providers)),
+                !is_optional_v<type_traits::callable_arg<Callable, Offset + I>> &&
+                    !handler::detail::strip_default<provider_type>::defaulted);
+            handler::detail::annotate_param(info, std::get<I>(providers));
+            out.push_back(std::move(info));
+        }
     };
     (describe_one.template operator()<Is>(), ...);
     return out;
