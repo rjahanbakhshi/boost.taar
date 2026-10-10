@@ -31,6 +31,8 @@
 #include <boost/asio/cancellation_signal.hpp>
 #include <boost/beast/http/message_generator.hpp>
 #include <boost/test/unit_test.hpp>
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <exception>
@@ -39,6 +41,7 @@
 #include <string>
 #include <variant>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -587,9 +590,12 @@ BOOST_AUTO_TEST_CASE(test_e2e_explicit_connection_executor_serves_connections_in
     taar::session::http session;
 
     // The handler holds its thread (and so its strand) for 100 ms. Were the
-    // connection strands layered on the acceptor's strand, the two requests
-    // would be serialised and take at least 200 ms together.
+    // connection strands layered on the acceptor's strand, the two handler
+    // intervals could not overlap, however slow or fast the host.
+    using clock = std::chrono::steady_clock;
     std::atomic<int> inner_is_io_executor {0};
+    std::atomic<int> next_slot {0};
+    std::array<std::pair<clock::time_point, clock::time_point>, clients> intervals {};
     session.register_request_handler(
         method == http::verb::get && target == "/slow",
         rest([&]() -> taar::awaitable<std::string>
@@ -600,7 +606,10 @@ BOOST_AUTO_TEST_CASE(test_e2e_explicit_connection_executor_serves_connections_in
                 if (strand->get_inner_executor().target<net::io_context::executor_type>())
                     ++inner_is_io_executor;
             }
+            auto const slot = next_slot++;
+            auto const entered = clock::now();
             std::this_thread::sleep_for(100ms);
+            if (slot < clients) intervals[slot] = {entered, clock::now()};
             co_return std::string {"done"};
         }));
 
@@ -614,7 +623,6 @@ BOOST_AUTO_TEST_CASE(test_e2e_explicit_connection_executor_serves_connections_in
 
     std::atomic<int> finished {0};
     std::atomic<int> failures {0};
-    std::vector<std::chrono::steady_clock::duration> elapsed(clients);
     for (int c = 0; c < clients; ++c)
     {
         net::co_spawn(io, [&, c]() -> taar::awaitable<void>
@@ -629,10 +637,8 @@ BOOST_AUTO_TEST_CASE(test_e2e_explicit_connection_executor_serves_connections_in
                 }
                 auto socket = co_await connect(port);
                 beast::flat_buffer buffer;
-                auto const start = std::chrono::steady_clock::now();
                 co_await http::async_write(socket, e2e::make_request(http::verb::get, "/slow"));
                 if ((co_await read_response(socket, buffer)).body() != "done") ++failures;
-                elapsed[c] = std::chrono::steady_clock::now() - start;
             }
             catch (std::exception const&)
             {
@@ -642,18 +648,28 @@ BOOST_AUTO_TEST_CASE(test_e2e_explicit_connection_executor_serves_connections_in
         }, net::detached);
     }
 
+    auto const start = clock::now();
     std::vector<std::jthread> pool;
     for (int i = 0; i < threads; ++i) pool.emplace_back([&] { io.run(); });
     pool.clear();
+    auto const total = clock::now() - start;
 
     BOOST_TEST(finished == clients);
     BOOST_TEST(failures == 0);
+    BOOST_TEST(next_slot == clients);
     BOOST_TEST(inner_is_io_executor == clients);
-    for (auto const& e : elapsed)
-    {
-        BOOST_TEST(e < std::chrono::milliseconds {190},
-            "client took " << std::chrono::duration_cast<std::chrono::milliseconds>(e).count() << " ms");
-    }
+
+    // Serialised handlers would run back to back: the later one would enter
+    // only after the earlier one left.
+    std::ranges::sort(intervals);
+    BOOST_TEST((intervals[1].first < intervals[0].second),
+        "second handler entered "
+            << std::chrono::duration_cast<std::chrono::milliseconds>(intervals[1].first - intervals[0].second).count()
+            << " ms after the first left");
+
+    // Sanity bound only, so that a stall still fails.
+    BOOST_TEST((total < std::chrono::seconds {2}),
+        "exchange took " << std::chrono::duration_cast<std::chrono::milliseconds>(total).count() << " ms");
 }
 
 BOOST_AUTO_TEST_CASE(test_e2e_shutdown_closes_after_in_flight_message_generator)
