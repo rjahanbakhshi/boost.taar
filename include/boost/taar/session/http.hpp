@@ -1256,9 +1256,9 @@ public:
         and the `flat_buffer` holding any bytes already read past the
         header. The session performs no further I/O on the stream and ends
         the session as soon as the handler returns. The stream's default
-        completion token is Asio's: pass a token such as
-        @ref boost::taar::use_awaitable explicitly, or wrap the stream (for
-        example in `beast::websocket::stream<beast::tcp_stream>`).
+        completion token is Asio's, as is that of a
+        `beast::websocket::stream<beast::tcp_stream>` built on it: pass a
+        token such as `taar::use_awaitable` explicitly.
 
         The handler signature must be compatible with:
 

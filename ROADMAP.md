@@ -46,6 +46,11 @@ rather than planned.
 
 ## Recently closed
 
+- Executor surface: `server::tcp`/`server::tls` take an explicit
+  connection executor (a server spawned on a strand no longer serialises
+  its connections), handler stream types are plain Beast types
+  (`beast::tcp_stream`, `ssl_stream<tcp_stream>`, `tcp::socket`), and the
+  design chapter documents the executor model.
 - Unified error mechanism: `taar::failure`, `taar::result<T>` and
   `taar::exception`; every error hook takes `failure const&`, defaults map
   by code (`http_status_for`, JSON-RPC mapper, MCP tool error handler),

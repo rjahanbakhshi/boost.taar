@@ -81,6 +81,12 @@ acceptor on port 8080:
         io.run();
     }
 
+The server is spawned on `io` itself and makes each connection's strand
+from it; to spawn it anywhere else (on a strand, say), pass the
+connection executor first, as in
+`taar::server::tcp(io.get_executor(), "0.0.0.0", "8080", http_session, signals)`
+(see [link boost_taar.design.async The asynchronous model]).
+
 For a full version that includes signal handling and graceful shutdown,
 see the [link boost_taar.examples examples chapter].
 

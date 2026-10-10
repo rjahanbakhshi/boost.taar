@@ -42,7 +42,7 @@ namespace boost::taar::server {
 
     @param connection_executor The executor every connection strand is made
                               from, normally the `io_context` (or thread
-                              pool) executor itself; see @ref tcp.
+                              pool) executor itself; see `server::tcp`.
     @param bind_host          Host or address to bind.
     @param bind_port          Port string; `"0"` lets the OS pick.
     @param tls                The TLS context holding certificate, key and

@@ -9,6 +9,19 @@
 
 [heading Unreleased]
 
+* `server::tcp` and `server::tls` overloads taking the executor that
+  connection strands are made from as their first argument, so a server
+  spawned on a strand no longer serialises its connections. The
+  existing overloads use the executor they are spawned on, as before.
+* Handler stream types are plain __Beast__ types: a session handler is
+  called with a `boost::asio::ip::tcp::socket`, a raw handler receives
+  `boost::beast::tcp_stream&&` (or `session::tls_stream&&`, now
+  `beast::ssl_stream<beast::tcp_stream>`). `session::http` is
+  `basic_http<no_context, beast::tcp_stream>`. Inside the library every
+  operation passes its completion token explicitly.
+* The design chapter documents the executor model: what
+  `this_coro::executor` is inside a handler, what is serialised, and
+  that registration happens before `io.run()`.
 * Unified error mechanism. `taar::failure` is the one error value: an
   `error_code` from any category, a message for the occurrence,
   structured data, a nested cause, the source location and, when made
@@ -165,6 +178,31 @@
   QuickBook + Doxygen for integration with the Boost documentation build.
 
 [heading Migration]
+
+Breaking changes of the executor surface clean-up:
+
+* Raw handlers declare `boost::beast::tcp_stream&& stream` instead of
+  `taar::rebind_executor<boost::beast::tcp_stream>&& stream`, and a
+  WebSocket upgrade becomes
+  `websocket::stream<beast::tcp_stream> ws {std::move(stream)}`. These
+  streams use Asio's default completion token: operations that relied on
+  the rebound tuple default now pass `taar::use_awaitable_tuple` (for
+  `auto [ec, n] = co_await ...`) or `taar::use_awaitable`. HTTPS raw
+  handlers keep declaring `session::tls_stream&&`, which is now the plain
+  `beast::ssl_stream<beast::tcp_stream>`.
+* A custom session handler passed to `server::tcp` is called with a
+  `boost::asio::ip::tcp::socket` instead of
+  `taar::rebind_executor<boost::asio::ip::tcp::socket>`.
+  `session::basic_http::operator()` takes the plain socket too; a rebound
+  socket still converts to it implicitly.
+* `taar::awaitable<T>` is `boost::asio::awaitable<T, any_io_executor>`
+  (previously bound to `io_context::executor_type`), which changes mangled
+  names: rebuild everything that includes taar. Completion tokens spelled
+  `use_awaitable_t<io_context::executor_type>` must become
+  `taar::use_awaitable` (or `use_awaitable_t<any_io_executor>`).
+* `taar::rebind_executor` stays, as a convenience for library-private
+  objects and client sockets; it no longer appears in any handler
+  signature.
 
 Breaking changes of the unified error mechanism:
 
