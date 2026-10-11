@@ -38,6 +38,7 @@ target_sources(
         include/boost/taar/core/error.hpp
         include/boost/taar/core/form_kvp.hpp
         include/boost/taar/core/ignore_and_rethrow.hpp
+        include/boost/taar/core/interceptor.hpp
         include/boost/taar/core/is_async_generator.hpp
         include/boost/taar/core/is_awaitable.hpp
         include/boost/taar/core/is_chunked_response.hpp

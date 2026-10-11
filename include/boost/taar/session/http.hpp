@@ -36,6 +36,7 @@
 #include <boost/taar/core/body_reader.hpp>
 #include <boost/taar/core/is_awaitable.hpp>
 #include <boost/taar/core/error.hpp>
+#include <boost/taar/core/interceptor.hpp>
 #include <boost/taar/type_traits/callable.hpp>
 #include <boost/beast/http/error.hpp>
 #include <boost/beast/http/read.hpp>
@@ -57,6 +58,7 @@
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/url/url_view.hpp>
 #include <functional>
+#include <optional>
 #include <memory>
 #include <type_traits>
 #include <vector>
@@ -486,6 +488,10 @@ awaitable<bool> write_chunked_response(
     @li A user-written callable with the signature
         `(request, context) -> message_generator` or an awaitable variant.
 
+    Cross-cutting checks (authentication, request ids, rate limits) are
+    registered with @ref add_interceptor; they run on every request header
+    before routing and can reject it before its body is read.
+
     Protocol upgrades (WebSocket, HTTP/2 etc.) are supported through
     @ref register_raw_handler, which hands the socket, the parsed header,
     and any post-header bytes to the handler and then closes the session
@@ -564,6 +570,14 @@ private:
 
     using hard_error_handler_type = std::move_only_function<void(failure const&)>;
 
+    using interceptor_type = std::move_only_function<
+        awaitable<interceptor_result>(
+            boost::beast::http::request_header<> const&,
+            matcher::context&,
+            boost::urls::url_view const&,
+            cookies const&,
+            detail::contexts_for<Context> const&)>;
+
 /// @endcond
 public:
     basic_http()
@@ -624,8 +638,8 @@ public:
 
     /** Install a hook that runs on every response header before it is written.
 
-        Applies to handler responses, soft-error responses, the stock 404
-        and the header of chunked responses; raw handlers that return a
+        Applies to handler responses, interceptor rejections, soft-error
+        responses, the stock 404 and the header of chunked responses; raw handlers that return a
         `message_generator` are opaque and bypass it. Use it for CORS
         (`taar::cors::response_filter()`), a `Server` header, or security
         headers.
@@ -756,6 +770,22 @@ public:
                     }
                 }
 
+                // Interceptors decide on the header alone: before a route is
+                // chosen, before 405/404 and HEAD handling, before any body
+                // byte is read. A rejection or a failure answers the request.
+                if (!interceptors_.empty())
+                {
+                    auto const answered = co_await run_interceptors(
+                        stream, header_parser, context, parsed_target, parsed_cookies, signals, conn_ctx);
+                    if (answered)
+                    {
+                        if (!*answered) break;
+                        continue;
+                    }
+                }
+
+                // Only the path arguments are reset between candidate
+                // routes: attributes set by interceptors must survive.
                 auto iter = std::ranges::find_if(matcher_handlers_,
                     [&](auto&& matcher_handler) -> bool
                     {
@@ -1332,6 +1362,109 @@ public:
             });
     }
 
+    /** Run @a interceptor on every request, before routing.
+
+        Interceptors run in registration order right after the request
+        header is parsed and validated: before a route is selected,
+        before the `405`/`404` answers and HEAD-from-GET handling, before
+        any body byte is read, and for raw handlers too. The callable takes
+        leading context parameters injected by type (the session's
+        `Context&`, `Context const&` or `std::shared_ptr<Context>`), then
+        `(boost::beast::http::request_header<> const&, matcher::context&)`,
+        and returns @ref boost::taar::interceptor_result, directly or as
+        an awaitable. It must not be a generic lambda.
+
+        @li `taar::proceed()` (`std::nullopt`) passes the request on to
+            the next interceptor and then to routing. Attributes stored in
+            `matcher::context::attributes` are visible to the handler that
+            runs.
+        @li `taar::reject(status, text)` or any response short-circuits:
+            later interceptors and the handler do not run, and the
+            response is written with its version and keep-alive aligned to
+            the request and the response filter applied (so CORS headers
+            reach a browser on a `401`). If the request declares a body,
+            the body is not read and the connection closes after the
+            rejection.
+        @li An exception goes to the soft error handler, exactly as a
+            handler exception does.
+
+        Interceptors run shielded from cancellation like plain handlers; a
+        shutdown requested meanwhile makes the request's answer close the
+        connection.
+
+        @code
+        session.add_interceptor([](http::request_header<> const& req, taar::matcher::context& ctx)
+        {
+            auto const auth = req[http::field::authorization];
+            if (!auth.starts_with("Bearer "))
+                return taar::reject(http::status::unauthorized);
+            ctx.attributes.set(principal {std::string {auth.substr(7)}});
+            return taar::proceed();
+        });
+        @endcode
+
+        The registered callable does not refer to the session, which stays
+        movable.
+    */
+    template <typename Interceptor> requires(
+        std::is_move_constructible_v<std::decay_t<Interceptor>>)
+    void add_interceptor(Interceptor interceptor)
+    {
+        interceptors_.emplace_back(
+            [interceptor = std::move(interceptor)](
+                boost::beast::http::request_header<> const& request,
+                matcher::context& context,
+                boost::urls::url_view const&,
+                cookies const&,
+                detail::contexts_for<Context> const& conn_ctx) mutable
+            -> awaitable<interceptor_result>
+            {
+                return handler::detail::invoke_interceptor(interceptor, conn_ctx, request, context);
+            });
+    }
+
+    /** Run @a interceptor on the requests @a matcher accepts.
+
+        Same as the one-argument overload, but the interceptor runs only
+        when the matcher accepts the request header. The matcher is
+        evaluated the way routes are; path arguments a target template
+        extracts go into a scratch context that is discarded, and the
+        interceptor receives the request's own context. Typical uses:
+
+        @code
+        // Let CORS preflights through unauthenticated.
+        session.add_interceptor(!(method == http::verb::options), require_token);
+        // Keep the health check public.
+        session.add_interceptor(!(target == "/health"), require_token);
+        @endcode
+    */
+    template <typename MatcherType, typename Interceptor> requires(
+        matcher::is_matcher<std::decay_t<MatcherType>> &&
+        std::is_move_constructible_v<std::decay_t<Interceptor>>)
+    void add_interceptor(MatcherType&& matcher, Interceptor interceptor)
+    {
+        matcher::operand operand {std::forward<MatcherType>(matcher)};
+        needs_parsed_target_ |= decltype(operand)::with_parsed_target;
+        needs_parsed_cookies_ |= decltype(operand)::with_parsed_cookies;
+
+        interceptors_.emplace_back(
+            [operand = std::move(operand), interceptor = std::move(interceptor)](
+                boost::beast::http::request_header<> const& request,
+                matcher::context& context,
+                boost::urls::url_view const& parsed_target,
+                cookies const& parsed_cookies,
+                detail::contexts_for<Context> const& conn_ctx) mutable
+            -> awaitable<interceptor_result>
+            {
+                matcher::context scratch;
+                if (!operand(request, scratch, parsed_target, parsed_cookies))
+                {
+                    co_return std::nullopt;
+                }
+                co_return co_await handler::detail::invoke_interceptor(interceptor, conn_ctx, request, context);
+            });
+    }
+
     /** Install a custom soft-error handler.
 
         The handler is invoked as `handler(taar::failure const&)` when a
@@ -1410,6 +1543,74 @@ private:
     hard_error_handler_type hard_error_handler_ = [](failure const&){};
     /// Shared with the error-handler wrappers so they stay valid across moves of this object.
     std::shared_ptr<detail::response_filter_type> response_filter_ = std::make_shared<detail::response_filter_type>();
+    std::vector<interceptor_type> interceptors_;
+
+    /** Run the interceptors on a parsed header.
+
+        @returns `std::nullopt` when every interceptor lets the request
+                 proceed; otherwise the request was answered (a rejection,
+                 or the soft error handler's response to a failure) and
+                 the value says whether the connection stays open.
+    */
+    awaitable<std::optional<bool>> run_interceptors(
+        Stream& stream,
+        boost::beast::http::request_parser<boost::beast::http::buffer_body>& header_parser,
+        matcher::context& context,
+        boost::urls::url_view const& parsed_target,
+        cookies const& parsed_cookies,
+        cancellation_signals& signals,
+        detail::contexts_for<Context> const& conn_ctx)
+    {
+        namespace http = boost::beast::http;
+        auto& req_header = header_parser.get();
+        bool const body_done = header_parser.is_done();
+
+        // Shielded like a plain handler: a shutdown lets them finish.
+        interceptor_result rejection;
+        std::exception_ptr eptr;
+        co_await detail::shield_from_cancellation();
+        try
+        {
+            for (auto& interceptor : interceptors_)
+            {
+                rejection = co_await interceptor(req_header, context, parsed_target, parsed_cookies, conn_ctx);
+                if (rejection) break;
+            }
+        }
+        catch (...)
+        {
+            eptr = std::current_exception();
+        }
+        bool const shutting_down = co_await detail::observe_shutdown();
+
+        if (!rejection && !eptr)
+        {
+            // The shutdown was observed here, so the handler will not see
+            // it: its answer must close the connection.
+            if (shutting_down) req_header.keep_alive(false);
+            co_return std::nullopt;
+        }
+
+        if (!body_done)
+        {
+            // The body was not read: the answer must announce the close.
+            req_header.keep_alive(false);
+        }
+
+        if (eptr)
+        {
+            bool const ka = co_await wrapped_soft_error_handler_(
+                failure::from_exception(eptr), stream, req_header, signals);
+            co_return ka && !shutting_down && body_done;
+        }
+
+        auto response = std::move(*rejection);
+        detail::finish_response(response, req_header.version(), req_header.keep_alive(), shutting_down);
+        detail::apply_response_filter(*response_filter_, req_header, response);
+        bool const ka = response.keep_alive();
+        co_await detail::write_response(stream, std::move(response), req_header.method() == http::verb::head);
+        co_return ka;
+    }
 
     /// Answer a protocol-level failure (malformed request, header or body too large) before closing.
     awaitable<void> write_protocol_error(

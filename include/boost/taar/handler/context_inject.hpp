@@ -10,7 +10,10 @@
 #ifndef BOOST_TAAR_HANDLER_CONTEXT_INJECT_HPP
 #define BOOST_TAAR_HANDLER_CONTEXT_INJECT_HPP
 
+#include <boost/taar/core/awaitable.hpp>
 #include <boost/taar/core/body_reader.hpp>
+#include <boost/taar/core/interceptor.hpp>
+#include <boost/taar/core/is_awaitable.hpp>
 #include <boost/taar/core/response_from.hpp>
 #include <boost/taar/matcher/context.hpp>
 #include <boost/taar/type_traits/callable.hpp>
@@ -315,6 +318,50 @@ template <typename CallableType, std::size_t... CtxIs>
 constexpr bool leading_params_are_contexts(std::index_sequence<CtxIs...>)
 {
     return (!std::is_void_v<requested_context_t<type_traits::callable_arg<CallableType, CtxIs>>> && ...);
+}
+
+/** Invoke an interceptor (or a `guard` check) with contexts injected.
+
+    @a f takes leading context parameters, injected by type from @a ctxs,
+    then `(boost::beast::http::request_header<> const&, matcher::context&)`,
+    and returns `interceptor_result` directly or through an awaitable.
+*/
+template <typename F, typename Contexts>
+awaitable<interceptor_result> invoke_interceptor(
+    F& f,
+    Contexts const& ctxs,
+    boost::beast::http::request_header<> const& header,
+    matcher::context& mctx)
+{
+    constexpr std::size_t arity = type_traits::callable_args_count<F>;
+    static_assert(arity >= 2,
+        "An interceptor takes (boost::beast::http::request_header<> const&, "
+        "boost::taar::matcher::context&), optionally preceded by context "
+        "parameters, and returns taar::interceptor_result or an awaitable of it.");
+
+    auto call = [&]<std::size_t... Js>(std::index_sequence<Js...>) -> decltype(auto)
+    {
+        return std::invoke(
+            f,
+            context_arg<type_traits::callable_arg<F, Js>>(ctxs)...,
+            header,
+            mctx);
+    };
+    using result_type = decltype(call(std::make_index_sequence<arity - 2> {}));
+
+    if constexpr (is_awaitable<result_type>)
+    {
+        static_assert(std::is_convertible_v<awaitable_result_t<result_type>, interceptor_result>,
+            "An asynchronous interceptor must produce taar::interceptor_result.");
+        co_return co_await call(std::make_index_sequence<arity - 2> {});
+    }
+    else
+    {
+        static_assert(std::is_convertible_v<result_type, interceptor_result>,
+            "An interceptor must return taar::interceptor_result (taar::proceed() "
+            "or taar::reject(...)) or an awaitable of it.");
+        co_return call(std::make_index_sequence<arity - 2> {});
+    }
 }
 
 } // namespace detail
