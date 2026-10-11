@@ -24,9 +24,9 @@ namespace boost::taar {
 
     `std::nullopt` lets the request proceed; a response rejects it and is
     written to the client instead of running the route's handler. Build
-    the values with @ref proceed and @ref reject, or construct a response
-    directly when the rejection needs custom headers or a body other than
-    plain text.
+    the values with `taar::proceed()` and `taar::reject()`, or construct
+    a response directly when the rejection needs custom headers or a body
+    other than plain text.
 */
 using interceptor_result = std::optional<
     boost::beast::http::response<boost::beast::http::string_body>>;

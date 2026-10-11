@@ -10,13 +10,15 @@
 // validated arguments and an OpenAPI document; the same operations as
 // JSON-RPC methods; an MCP server with annotated tools, a templated
 // resource, a prompt with argument completion, elicitation and logging; a
-// per-user event stream; CORS; and a multi-threaded io_context that shuts
-// down cleanly on SIGINT.
+// per-user event stream; CORS; interceptors for request ids and admin
+// authorization; and a multi-threaded io_context that shuts down cleanly
+// on SIGINT.
 //
 //   ./taskboard_server 8080
 //   curl -si localhost:8080/tasks -d '{"title":"write docs","tags":["docs"]}'      # Set-Cookie: sid=...
 //   curl -s 'localhost:8080/tasks?tag=docs&page=1' -b 'sid=...'
 //   curl -s localhost:8080/tasks/1 -X DELETE -H 'Authorization: Bearer admin'
+//   curl -si localhost:8080/tasks/1 -X DELETE                                       # 401, never reaches the handler
 //   curl -s localhost:8080/openapi.json | jq .components
 //   curl -s localhost:8080/rpc -d '{"jsonrpc":"2.0","id":1,"method":"tasks.list","params":{"tags":["docs"]}}'
 //   curl -N localhost:8080/events -b 'sid=...'                                      # per-user stream
@@ -30,6 +32,7 @@
 #include <boost/taar/core/context_store.hpp>
 #include <boost/taar/core/cors.hpp>
 #include <boost/taar/core/error.hpp>
+#include <boost/taar/core/interceptor.hpp>
 #include <boost/taar/core/ignore_and_rethrow.hpp>
 #include <boost/taar/handler/constrained.hpp>
 #include <boost/taar/handler/rest.hpp>
@@ -51,6 +54,7 @@
 #include <boost/describe/class.hpp>
 #include <boost/json.hpp>
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <iostream>
 #include <memory>
@@ -169,15 +173,27 @@ struct agent_session
 
 struct not_authorized : std::runtime_error { using runtime_error::runtime_error; };
 
+/// Who an interceptor authenticated, attached to the request as an attribute.
+struct principal
+{
+    std::string name;
+};
+
+/// The request's correlation id: the client's X-Request-Id, or a minted one.
+struct request_id
+{
+    std::string value;
+};
+
 } // namespace
 
 int main(int argc, char* argv[])
 {
     using taar::matcher::method;
     using taar::matcher::target;
+    using taar::handler::attribute_arg;
     using taar::handler::constrained;
     using taar::handler::description;
-    using taar::handler::header_arg;
     using taar::handler::json_body_arg;
     using taar::handler::path_arg;
     using taar::handler::query_arg;
@@ -199,8 +215,41 @@ int main(int argc, char* argv[])
 
     taar::session::http session;
     taar::cors cors;
-    session.set_response_filter(cors.response_filter());
+    // CORS headers on every response, rejections included; the client's
+    // request id is echoed back so it can correlate the answer.
+    session.set_response_filter(
+        [cors_filter = cors.response_filter()](http::request_header<> const& req, http::response_header<>& res)
+        {
+            cors_filter(req, res);
+            if (auto const id = req["X-Request-Id"]; !id.empty()) res.set("X-Request-Id", id);
+        });
     session.register_request_handler(method == http::verb::options, cors.preflight_handler());
+
+    // ---- interceptors ---------------------------------------------------------
+    // They run on the request header, before routing and before any body is
+    // read. The first attaches a request id every handler can ask for.
+    std::atomic<unsigned> next_request {1};
+    session.add_interceptor([&](http::request_header<> const& req, taar::matcher::context& ctx)
+    {
+        auto id = std::string {req["X-Request-Id"]};
+        if (id.empty()) id = "req-" + std::to_string(next_request++);
+        ctx.attributes.set(request_id {std::move(id)});
+        return taar::proceed();
+    });
+
+    // Deleting a task needs the admin token. Scoped to that route only (DELETE
+    // /mcp ends an MCP session and must stay open); a rejected request's body
+    // is never read.
+    session.add_interceptor(
+        method == http::verb::delete_ && target == "/tasks/{id}",
+        [](http::request_header<> const& req, taar::matcher::context& ctx)
+        {
+            auto const auth = req[http::field::authorization];
+            if (auth.empty()) return taar::reject(http::status::unauthorized, "admin token required");
+            if (auth != "Bearer admin") return taar::reject(http::status::forbidden, "not an admin token");
+            ctx.attributes.set(principal {"admin"});
+            return taar::proceed();
+        });
 
     // A domain error becomes a 403 on REST (JSON-RPC maps it below, MCP
     // reports it as a tool error); argument problems stay 400 with their
@@ -256,16 +305,18 @@ int main(int argc, char* argv[])
         }, constrained(path_arg("id", "Task id"), {.minimum = 1})),
         doc.describe({.summary = "Fetch a task", .tags = {"tasks"}, .responses = {{"200", "The task"}, {"404", "No such task"}}}));
 
-    // Authorization is read by header_arg, so the generator documents the
-    // operation under the bearer scheme instead of listing a header parameter.
+    // The interceptor above has authorized the request; the handler reads who
+    // it is. attribute_arg is not a client input, so the OpenAPI operation
+    // names its security scheme explicitly.
     session.register_request_handler(
         method == http::verb::delete_ && target == "/tasks/{id}",
-        rest([&](std::string const& auth, int id)
+        rest([&](principal const& who, request_id const& rid, int id)
         {
-            if (auth != "Bearer admin") throw not_authorized {"admin token required"};
-            return tasks.remove(id);
-        }, header_arg(http::field::authorization), constrained(path_arg("id"), {.minimum = 1})),
-        doc.describe({.summary = "Delete a task", .tags = {"admin"}}));
+            bool const removed = tasks.remove(id);
+            std::clog << rid.value << ": " << who.name << " deleted task " << id << (removed ? "" : " (absent)") << '\n';
+            return removed;
+        }, attribute_arg<principal>(), attribute_arg<request_id>(), constrained(path_arg("id"), {.minimum = 1})),
+        doc.describe({.summary = "Delete a task", .tags = {"admin"}, .security = {"bearer"}}));
 
     // Per-user stream: the entry is locked only until the stream is produced,
     // so the user's other requests keep flowing while it is open.

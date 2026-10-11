@@ -29,6 +29,9 @@ reference documentation alone.
 * [link boost_taar.design.contexts Contexts and keyed state]: the three
   scopes of state a handler can ask for, and how `context_store` keeps
   them safe.
+* [link boost_taar.design.interceptors Interceptors and guards]: where
+  cross-cutting checks run, how they short-circuit, and how they hand
+  attributes to handlers.
 * [link boost_taar.design.errors Error mapping per surface]: the one
   error value (`failure`), and how each layer maps it to its protocol.
 * [link boost_taar.design.protocols Protocol decisions]: the choices made
@@ -341,6 +344,95 @@ in-flight entry must never be swept. Keys minted by the store are 128
 random bits as hexadecimal, safe in cookies and headers. Set-Cookie uses
 `Path=/; HttpOnly; SameSite=Lax` by default and never sets an expiry: the
 store's idle timeout is the session lifetime.
+
+[endsect]
+
+[section:interceptors Interceptors and guards]
+
+Authentication, request ids, rate limits and similar cross-cutting checks
+need to run before the handler, see the request, and either let it pass,
+attach something for the handler, or answer it themselves. Taar has two
+places for them.
+
+[heading Session interceptors]
+
+`basic_http::add_interceptor(fn)` runs `fn` on every request;
+`add_interceptor(matcher, fn)` on the requests the matcher accepts. They
+run in registration order right after the request header is parsed:
+
+* before a route is selected, so they apply to every route, raw
+  (WebSocket) handlers included;
+* before the `405 Method Not Allowed`, `404` and HEAD-from-GET handling,
+  so an unauthenticated client learns nothing about which paths or
+  methods exist;
+* before any body byte is read.
+
+`fn` takes the session's contexts by type (as handlers do), then
+`(http::request_header<> const&, matcher::context&)`, and returns
+`taar::interceptor_result`, an optional response, directly or as an
+awaitable. `taar::proceed()` is `std::nullopt`: the next interceptor runs,
+then routing. `taar::reject(status, text)` builds a `text/plain`
+response; any response short-circuits: later interceptors and the
+handler do not run.
+
+A rejection is written like any other response: its version and
+keep-alive follow the request and the response filter runs on it, so a
+browser sees the CORS headers on a `401` and can read it. The request
+body has not been read; when the request declares one the connection
+closes after the rejection rather than reading and discarding a body the
+server has already refused (an upload of a gigabyte gets its `401` at
+once). An interceptor that throws is handled like a handler that throws:
+the soft error handler receives the failure and can recognise a domain
+exception with `f.as<E>()`.
+
+The matcher form evaluates the matcher on the header exactly as a route
+does. Path arguments a target template extracts go into a scratch context
+that is discarded; the interceptor receives the request's own context.
+Two scopes come up constantly:
+
+    // CORS preflights carry no credentials: let them through.
+    session.add_interceptor(!(method == http::verb::options), require_token);
+    // A public health check.
+    session.add_interceptor(!(target == "/health"), require_token);
+
+Scope carefully when several protocols share a session: `DELETE /mcp`
+ends an MCP session, so an interceptor meant for `DELETE /tasks/{id}`
+should name the target rather than only the method.
+
+[heading Request attributes]
+
+`matcher::context` carries a small type-indexed bag,
+`request_attributes`, with `set(value)`, `find<T>()` and `contains<T>()`.
+An interceptor stores what it learned (`ctx.attributes.set(principal {...})`)
+and the handler that later runs reads it, directly through the context or
+with the `attribute_arg<T>()` provider, which works in `rest`,
+`jsonrpc::endpoint::method` and `mcp::endpoint::tool` alike. One value is
+kept per type, so define a type per attribute rather than storing bare
+strings. Routing resets only the path arguments between candidate routes;
+attributes survive it. An absent attribute is `argument_not_found`, so a
+`std::optional<T>` parameter or `with_default` makes it optional.
+`attribute_arg` is not a client input: OpenAPI, the JSON-RPC parameter
+list and the MCP `inputSchema` leave it out.
+
+[heading Route guards]
+
+`handler::guard(check, inner)` decorates one route. `check` has the
+interceptor signature and runs when the route's handler is invoked; on a
+rejection that response is the route's answer (converted to the inner's
+response type, or sent as a one-shot chunked response when the inner
+streams), otherwise the inner handler runs and sees the attributes the
+check set. The guard forwards `params()` and the path-argument names, so
+OpenAPI and the registration checks see the inner handler, and it composes
+with `with_session` in either order: inside `with_session` the check can
+ask for the keyed context.
+
+Choose between the two by when the decision must happen. A guard runs
+after routing and after the body has been read (the inner handler
+decides how the body is read), so it suits checks that belong to one
+route and may depend on its keyed state. A scoped interceptor
+(`add_interceptor(method == http::verb::delete_ && target == "/tasks/{id}", check)`)
+runs before the body is read and before routing answers, which is what a
+check guarding an upload, or hiding which routes exist, needs.
 
 [endsect]
 

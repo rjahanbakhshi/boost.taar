@@ -1116,7 +1116,7 @@ struct body_size_arg
     Returns a copy of the value stored under `T` in
     @ref boost::taar::matcher::context::attributes, typically by a session
     interceptor or a `handler::guard` check, or
-    @ref error::argument_not_found when none is stored, so a
+    `error::argument_not_found` when none is stored, so a
     `std::optional<T>` parameter or `with_default` makes it optional. It
     reads only the matcher context, so it works in `rest(...)`,
     `jsonrpc::endpoint::method(...)` and `mcp::endpoint::tool(...)` alike.

@@ -9,6 +9,19 @@
 
 [heading Unreleased]
 
+* Interceptors: `basic_http::add_interceptor(fn)` and
+  `add_interceptor(matcher, fn)` run checks on every request header,
+  before routing, before `405`/`404` and HEAD handling and before the body
+  is read. They return `taar::interceptor_result` (`taar::proceed()`,
+  `taar::reject(status, text)`), directly or as an awaitable; a rejection
+  goes through the response filter and closes the connection when a body
+  was declared. Raw handlers pass through them too.
+* `handler::guard(check, inner)`: the same check on one route, after the
+  body is read; works over typed and streaming handlers and composes with
+  `with_session`.
+* Request attributes: `matcher::context::attributes` holds values that
+  interceptors and guards attach, and `handler::attribute_arg<T>()`
+  delivers them to REST handlers, JSON-RPC methods and MCP tools.
 * `server::tcp` and `server::tls` overloads taking the executor that
   connection strands are made from as their first argument, so a server
   spawned on a strand no longer serialises its connections. The

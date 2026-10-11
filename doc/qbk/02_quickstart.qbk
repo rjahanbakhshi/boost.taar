@@ -371,6 +371,35 @@ Library code throws `taar::exception`, whose `error()` is the failure.
 See [link boost_taar.design.errors Error mapping per surface] for the
 default mappings.
 
+[heading Authorization]
+
+An interceptor checks every request header before routing, before any
+body is read, and can reject it; what it learns travels to the handler as
+a request attribute:
+
+    struct principal { std::string user; };
+
+    http_session.add_interceptor(
+        !(method == http::verb::options),            // let CORS preflights through
+        [](http::request_header<> const& req, taar::matcher::context& ctx)
+        {
+            auto const auth = req[http::field::authorization];
+            if (!auth.starts_with("Bearer "))
+                return taar::reject(http::status::unauthorized);
+            ctx.attributes.set(principal {lookup_user(auth.substr(7))});
+            return taar::proceed();
+        });
+
+    http_session.register_request_handler(
+        method == http::verb::get && target == "/me",
+        taar::handler::rest([](principal const& p) { return p.user; },
+            taar::handler::attribute_arg<principal>()));
+
+`attribute_arg` works the same way in JSON-RPC methods and MCP tools
+served by the session. For a check on one route only, wrap its handler in
+`taar::handler::guard(check, handler)`; see
+[link boost_taar.design.interceptors Interceptors and guards].
+
 [heading CORS]
 
 Browser clients need preflight answers and `Access-Control` headers on

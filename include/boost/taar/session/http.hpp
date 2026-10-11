@@ -1371,7 +1371,7 @@ public:
         leading context parameters injected by type (the session's
         `Context&`, `Context const&` or `std::shared_ptr<Context>`), then
         `(boost::beast::http::request_header<> const&, matcher::context&)`,
-        and returns @ref boost::taar::interceptor_result, directly or as
+        and returns `taar::interceptor_result`, directly or as
         an awaitable. It must not be a generic lambda.
 
         @li `taar::proceed()` (`std::nullopt`) passes the request on to

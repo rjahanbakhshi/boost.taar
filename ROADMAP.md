@@ -46,6 +46,10 @@ rather than planned.
 
 ## Recently closed
 
+- Interceptors and route guards: `basic_http::add_interceptor` (before
+  routing and before the body is read), `handler::guard`, request
+  attributes on `matcher::context` and `attribute_arg<T>()` on every
+  surface.
 - Executor surface: `server::tcp`/`server::tls` take an explicit
   connection executor (a server spawned on a strand no longer serialises
   its connections), handler stream types are plain Beast types

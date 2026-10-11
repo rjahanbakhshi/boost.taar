@@ -61,7 +61,9 @@ with the `curl` commands that exercise it.
  arguments, OpenAPI with a bearer scheme and components), JSON-RPC and
  MCP (annotated tools, templated resources, prompt completion,
  elicitation, logging), plus a per-user event stream under `with_session`,
- CORS, and a multi-threaded `io_context` with graceful shutdown.]]
+ CORS, a request-id interceptor, an admin-token interceptor scoped to
+ one route that hands a principal to the handler through `attribute_arg`,
+ and a multi-threaded `io_context` with graceful shutdown.]]
 [[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/mcp_stdio_server.cpp mcp_stdio_server.cpp]]
  [The same MCP tools served over stdio, the transport desktop clients
  launch locally.]]

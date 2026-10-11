@@ -98,10 +98,10 @@ chunked_response<T> rejection_stream(boost::beast::http::response<boost::beast::
 
 /** Handler decorator that runs a check before the inner handler.
 
-    Produced by @ref guard. The check has the interceptor signature
+    Produced by `guard`. The check has the interceptor signature
     (leading context parameters injected by type, then
     `boost::beast::http::request_header<> const&` and
-    `matcher::context&`) and returns @ref boost::taar::interceptor_result,
+    `matcher::context&`) and returns `taar::interceptor_result`,
     directly or through an awaitable. On `std::nullopt` the inner handler
     runs with the same contexts, request and matcher context, so
     attributes the check stored are visible to it; on a response that
@@ -225,7 +225,7 @@ struct guard_handler
     @endcode
 
     @param check A callable with the interceptor signature returning
-                 @ref boost::taar::interceptor_result or an awaitable of
+                 `taar::interceptor_result` or an awaitable of
                  it. It must not be a generic lambda (its parameters are
                  inspected to inject contexts).
     @param inner The handler to run when the check lets the request
