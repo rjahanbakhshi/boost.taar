@@ -53,6 +53,7 @@ target_sources(
         include/boost/taar/core/response_from_tag.hpp
         include/boost/taar/handler/constrained.hpp
         include/boost/taar/handler/context_inject.hpp
+        include/boost/taar/handler/guard.hpp
         include/boost/taar/handler/htdocs.hpp
         include/boost/taar/handler/path_arg_check.hpp
         include/boost/taar/handler/rest.hpp

@@ -8,16 +8,24 @@
 //
 
 #include "e2e.hpp"
+#include <boost/taar/core/async_generator.hpp>
+#include <boost/taar/core/chunked_response.hpp>
+#include <boost/taar/core/chunked_response_meta.hpp>
+#include <boost/taar/core/context_store.hpp>
 #include <boost/taar/core/cors.hpp>
 #include <boost/taar/core/interceptor.hpp>
 #include <boost/taar/core/request_attributes.hpp>
+#include <boost/taar/handler/guard.hpp>
 #include <boost/taar/handler/rest.hpp>
 #include <boost/taar/handler/rest_arg.hpp>
+#include <boost/taar/handler/session_key.hpp>
+#include <boost/taar/handler/with_session.hpp>
 #include <boost/taar/jsonrpc/endpoint.hpp>
 #include <boost/taar/matcher/context.hpp>
 #include <boost/taar/matcher/method.hpp>
 #include <boost/taar/matcher/target.hpp>
 #include <boost/taar/mcp/endpoint.hpp>
+#include <boost/taar/openapi/generator.hpp>
 #include <boost/taar/session/http.hpp>
 #include <boost/asio/read.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -31,6 +39,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace {
@@ -41,10 +50,12 @@ namespace json = boost::json;
 namespace taar = boost::taar;
 namespace jsonrpc = boost::taar::jsonrpc;
 namespace mcp = boost::taar::mcp;
+namespace openapi = boost::taar::openapi;
 
 using taar::matcher::method;
 using taar::matcher::target;
 using taar::handler::attribute_arg;
+using taar::handler::guard;
 using taar::handler::rest;
 
 struct principal { std::string user; };
@@ -479,6 +490,163 @@ BOOST_AUTO_TEST_CASE(test_interceptor_connection_context_injection)
         // A new connection has a fresh context.
         auto b = co_await e2e::send_all(port, {e2e::make_request(http::verb::get, "/other")});
         BOOST_TEST(b[0].body() == "1");
+    });
+}
+
+taar::interceptor_result require_admin(http::request_header<> const& req, taar::matcher::context& ctx)
+{
+    if (req["X-Role"] != "admin") return taar::reject(http::status::forbidden, "admins only");
+    ctx.attributes.set(principal {"admin"});
+    return taar::proceed();
+}
+
+e2e::request as_admin(e2e::request req)
+{
+    req.set("X-Role", "admin");
+    return req;
+}
+
+BOOST_AUTO_TEST_CASE(test_guard_typed_and_streaming_inner)
+{
+    net::io_context io;
+    taar::session::http session;
+    taar::cors cors;
+    session.set_response_filter(cors.response_filter());
+
+    session.register_request_handler(
+        method == http::verb::get && target == "/secret/{id}",
+        guard(&require_admin,
+            rest([](std::string id, principal const& p) { return id + ":" + p.user; },
+                taar::handler::path_arg("id"), attribute_arg<principal>())));
+    session.register_request_handler(
+        method == http::verb::get && target == "/stream",
+        guard(&require_admin,
+            rest([]() -> taar::chunked_response<std::string>
+            {
+                co_yield taar::set_header("X-Stream", "1");
+                co_yield std::string {"a"};
+                co_yield std::string {"b"};
+            })));
+    session.register_request_handler(
+        method == http::verb::get && target == "/gen",
+        guard(
+            [](http::request_header<> const& req, taar::matcher::context& ctx) -> taar::awaitable<taar::interceptor_result>
+            {
+                net::steady_timer timer {co_await net::this_coro::executor};
+                timer.expires_after(std::chrono::milliseconds {2});
+                co_await timer.async_wait(taar::use_awaitable);
+                co_return require_admin(req, ctx);
+            },
+            rest([]() -> taar::async_generator<std::string>
+            {
+                co_yield std::string {"x"};
+                co_yield std::string {"y"};
+            })));
+
+    e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
+    {
+        auto denied = e2e::make_request(http::verb::get, "/secret/3");
+        denied.set(http::field::origin, "http://app.example");
+        auto r = co_await e2e::send_all(port, {
+            denied,
+            as_admin(e2e::make_request(http::verb::get, "/secret/3")),
+            e2e::make_request(http::verb::get, "/stream"),
+            as_admin(e2e::make_request(http::verb::get, "/stream")),
+            e2e::make_request(http::verb::get, "/gen"),
+            as_admin(e2e::make_request(http::verb::get, "/gen"))});
+
+        BOOST_TEST(r[0].result() == http::status::forbidden);
+        BOOST_TEST(r[0].body() == "admins only");
+        BOOST_TEST(r[0][http::field::access_control_allow_origin] == "*");
+        BOOST_TEST(r[1].body() == "3:admin");
+
+        BOOST_TEST(r[2].result() == http::status::forbidden);
+        BOOST_TEST(r[2].body() == "admins only");
+        BOOST_TEST(r[2][http::field::content_type] == "text/plain");
+        BOOST_TEST(r[3].result() == http::status::ok);
+        BOOST_TEST(r[3].body() == "ab");
+        BOOST_TEST(r[3]["X-Stream"] == "1");
+
+        BOOST_TEST(r[4].result() == http::status::forbidden);
+        BOOST_TEST(r[5].body() == "xy");
+    });
+}
+
+BOOST_AUTO_TEST_CASE(test_guard_forwards_params_to_openapi)
+{
+    taar::session::http session;
+    openapi::generator gen {{.title = "t", .version = "1"}};
+
+    auto handler = guard(&require_admin,
+        rest([](int id, std::string q, principal const& p) { return std::to_string(id) + q + p.user; },
+            taar::handler::path_arg("id", "Item id"), taar::handler::query_arg("q"), attribute_arg<principal>()));
+    BOOST_TEST(handler.path_arg_names() == std::vector<std::string> {"id"});
+    BOOST_TEST(handler.params().size() == 3u);
+    static_assert(std::is_same_v<decltype(handler)::inner_type::request_type, decltype(handler)::request_type>);
+
+    session.register_request_handler(method == http::verb::get && target == "/items/{id}", std::move(handler), gen.describe("Item"));
+    auto const op = gen.document().at("paths").at("/items/{id}").at("get");
+    auto const& params = op.at("parameters").as_array();
+    BOOST_TEST(params.size() == 2u);
+    BOOST_TEST(params[0].at("name").as_string() == "id");
+    BOOST_TEST(params[0].at("description").as_string() == "Item id");
+    BOOST_TEST(params[1].at("name").as_string() == "q");
+}
+
+struct cart { int items = 0; };
+
+BOOST_AUTO_TEST_CASE(test_guard_composes_with_with_session)
+{
+    using taar::handler::session_policy;
+    using taar::handler::with_session;
+    namespace session_key = taar::handler::session_key;
+
+    net::io_context io;
+    taar::session::http session;
+    taar::context_store<std::string, cart> carts {std::chrono::minutes {10}};
+
+    // Guard inside with_session: the check sees the keyed context.
+    session.register_request_handler(
+        method == http::verb::post && target == "/add",
+        with_session(carts, session_key::header("X-Session"), session_policy::create_if_missing,
+            guard(
+                [](cart const& c, http::request_header<> const&, taar::matcher::context&)
+                {
+                    if (c.items >= 2) return taar::reject(http::status::conflict, "cart full");
+                    return taar::proceed();
+                },
+                rest([](cart& c) { return ++c.items; }))));
+
+    // Guard outside with_session: the check runs before the entry is locked.
+    session.register_request_handler(
+        method == http::verb::get && target == "/cart",
+        guard(&require_admin,
+            with_session(carts, session_key::header("X-Session"), session_policy::require,
+                rest([](cart const& c, principal const& p) { return p.user + ":" + std::to_string(c.items); },
+                    attribute_arg<principal>()))));
+
+    e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
+    {
+        auto first = co_await e2e::send_all(port, {e2e::make_request(http::verb::post, "/add")});
+        BOOST_TEST(first[0].body() == "1");
+        std::string const key {first[0]["X-Session"]};
+        BOOST_TEST(!key.empty());
+
+        auto keyed = [&](e2e::request req)
+        {
+            req.set("X-Session", key);
+            return req;
+        };
+        auto r = co_await e2e::send_all(port, {
+            keyed(e2e::make_request(http::verb::post, "/add")),
+            keyed(e2e::make_request(http::verb::post, "/add")),
+            keyed(e2e::make_request(http::verb::get, "/cart")),
+            as_admin(keyed(e2e::make_request(http::verb::get, "/cart")))});
+        BOOST_TEST(r[0].body() == "2");
+        BOOST_TEST(r[1].result() == http::status::conflict);
+        BOOST_TEST(r[1].body() == "cart full");
+        BOOST_TEST(r[2].result() == http::status::forbidden);
+        BOOST_TEST(r[3].body() == "admin:2");
     });
 }
 
