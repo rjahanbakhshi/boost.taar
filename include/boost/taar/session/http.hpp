@@ -55,6 +55,7 @@
 #include <boost/beast/core/tcp_stream.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/asio/error.hpp>
+#include <boost/asio/multiple_exceptions.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/url/url_view.hpp>
 #include <functional>
@@ -268,10 +269,21 @@ template <typename R>
 inline constexpr bool is_streaming_result =
     is_chunked_response<awaitable_result_t<R>> || is_async_generator<awaitable_result_t<R>>;
 
-/// True if @a f carries `operation_aborted` (a wait cancelled by shutdown).
-inline bool is_operation_aborted(failure const& f) noexcept
+/** True if @a f carries `operation_aborted` (a wait cancelled by shutdown).
+
+    Concurrent waits joined with the awaitable operators (`a && b`) that
+    are all cancelled report `asio::multiple_exceptions`; its first
+    exception decides.
+*/
+inline bool is_operation_aborted(failure const& f)
 {
-    return f.is(boost::asio::error::operation_aborted);
+    if (f.is(boost::asio::error::operation_aborted)) return true;
+    if (auto const* multiple = f.as<boost::asio::multiple_exceptions>())
+    {
+        return multiple->first_exception() &&
+            is_operation_aborted(failure::from_exception(multiple->first_exception()));
+    }
+    return false;
 }
 
 /// Hook run on every response header before it is written (CORS, Server, security headers).

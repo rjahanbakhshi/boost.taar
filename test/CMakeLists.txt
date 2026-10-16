@@ -21,6 +21,7 @@ target_sources(
         test_async_channel.cpp
         test_async_generator.cpp
         test_callable_with.cpp
+        test_cancellation.cpp
         test_chunk_body_from.cpp
         test_chunked_response.cpp
         test_connection_context.cpp
