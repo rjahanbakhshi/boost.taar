@@ -105,7 +105,9 @@ chunked_response<T> rejection_stream(boost::beast::http::response<boost::beast::
     directly or through an awaitable. On `std::nullopt` the inner handler
     runs with the same contexts, request and matcher context, so
     attributes the check stored are visible to it; on a response that
-    response is the route's answer.
+    response is the route's answer. The check receives a copy of the
+    request's matcher context; the attributes it stores are carried over
+    to the request's context, other changes are discarded.
 
     The inner handler may produce a typed `boost::beast::http::response`,
     a `message_generator`, or a stream (`chunked_response<T>` or
@@ -148,11 +150,13 @@ struct guard_handler
     {
         using produced_type = detail::produced_t<Inner, Contexts>;
 
-        // The session owns a mutable context per request and lends it to
-        // the handler as const; the check stores attributes into it, so
-        // that the inner handler (and a stream it produces) sees them.
-        auto& context = const_cast<matcher::context&>(mctx);
-        auto rejection = co_await detail::invoke_interceptor(check_, ctxs, request, context);
+        // The check takes the interceptor signature (a mutable context);
+        // it works on a copy, and the attributes it stores are moved into
+        // the request's context (attributes are mutable through const), so
+        // the inner handler and a stream it produces see them.
+        matcher::context scratch {mctx};
+        auto rejection = co_await detail::invoke_interceptor(check_, ctxs, request, scratch);
+        mctx.attributes = std::move(scratch.attributes);
 
         if constexpr (detail::is_stream_v<produced_type>)
         {

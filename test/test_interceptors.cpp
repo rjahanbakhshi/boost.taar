@@ -650,4 +650,36 @@ BOOST_AUTO_TEST_CASE(test_guard_composes_with_with_session)
     });
 }
 
+BOOST_AUTO_TEST_CASE(test_guard_with_const_matcher_context)
+{
+    // A handler called directly with a const context: the check's attribute
+    // still reaches the inner handler, without writing through a const_cast.
+    auto handler = guard(&require_admin,
+        rest([](principal const& p) { return p.user; }, attribute_arg<principal>()));
+    using request_type = decltype(handler)::request_type;
+
+    auto call = [&](bool admin)
+    {
+        request_type req {http::verb::get, "/", 11};
+        if (admin) req.set("X-Role", "admin");
+        taar::matcher::context const ctx {};
+        net::io_context io;
+        std::optional<http::response<http::string_body>> out;
+        net::co_spawn(io, [&]() -> taar::awaitable<void>
+        {
+            out = co_await handler(taar::handler::contexts<> {}, req, ctx);
+        }, net::detached);
+        io.run();
+        BOOST_TEST(ctx.attributes.contains<principal>() == admin);
+        return *out;
+    };
+
+    auto const ok = call(true);
+    BOOST_TEST(ok.result() == http::status::ok);
+    BOOST_TEST(ok.body() == "admin");
+    auto const denied = call(false);
+    BOOST_TEST(denied.result() == http::status::forbidden);
+    BOOST_TEST(denied.body() == "admins only");
+}
+
 } // namespace

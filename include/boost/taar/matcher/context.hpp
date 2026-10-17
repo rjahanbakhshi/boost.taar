@@ -47,7 +47,8 @@ struct context
         `handler::attribute_arg<T>()`. Routing only resets
         @ref path_args between candidate routes; attributes survive it.
     */
-    request_attributes attributes;
+    // Mutable: a per-request annotation that decorators such as `guard` add through the const context handlers receive.
+    mutable request_attributes attributes;
 };
 
 } // namespace boost::taar::matcher
