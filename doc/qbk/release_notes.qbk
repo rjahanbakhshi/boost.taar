@@ -9,6 +9,12 @@
 
 [heading Unreleased]
 
+* Cancellation coverage: tests drive shutdown, client disconnect,
+  `jsonrpc::endpoint::cancel` and MCP `notifications/cancelled` into
+  nested waits, streams, awaitable operators and explicit checks, and the
+  new `cancellation_server` example shows the model end to end. A stream
+  suspended in `a && b` that shutdown cancels no longer reports a
+  spurious hard error (`asio::multiple_exceptions` of aborted waits).
 * Interceptors: `basic_http::add_interceptor(fn)` and
   `add_interceptor(matcher, fn)` run checks on every request header,
   before routing, before `405`/`404` and HEAD handling and before the body

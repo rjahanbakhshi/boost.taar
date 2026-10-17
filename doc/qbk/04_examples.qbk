@@ -37,6 +37,13 @@ with the `curl` commands that exercise it.
  stream from an `async_generator`, files streamed from disk with spliced
  generators, and uploads consumed through `body_reader` and
  `multipart_reader` without buffering.]]
+[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/cancellation_server.cpp cancellation_server.cpp]]
+ [The cancellation model end to end: an event stream that stops when its
+ client disconnects or the server shuts down, a JSON-RPC job that checks
+ its `request_scope` and is cancelled by id through `endpoint::cancel`, an
+ MCP tool with progress cancelled by `notifications/cancelled`, and a plain
+ handler that finishes on `SIGINT` while the streams stop. RAII guards in
+ the nested helpers log every interrupted frame.]]
 [[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/proxy_server.cpp proxy_server.cpp]]
  [Asynchronous handlers: a coroutine that fetches an upstream URL with
  Beast and returns the response, plus a timer-based delay route.]]

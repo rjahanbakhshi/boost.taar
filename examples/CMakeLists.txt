@@ -4,6 +4,7 @@ find_package(Boost 1.84 CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 
 set(TAAR_EXAMPLES
+    cancellation_server
     connection_state_server
     cookie_session_server
     hello_server

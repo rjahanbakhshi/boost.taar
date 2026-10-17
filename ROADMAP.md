@@ -43,9 +43,18 @@ rather than planned.
 - A streaming handler under `with_session` runs its body without the
   entry's lock; state it shares with other requests needs its own
   synchronisation.
+- A client that disconnects during a stream is noticed at the stream's
+  next write: a stream suspended in a long wait between chunks keeps
+  waiting until that wait ends.
+- Plain handlers are shielded from shutdown, including one reading a
+  streamed request body: a client that stops sending mid-upload holds
+  shutdown of that connection until it closes (no idle timeout yet).
 
 ## Recently closed
 
+- Cancellation coverage across shutdown, client disconnect, JSON-RPC
+  cancel and MCP `notifications/cancelled`, with the `cancellation_server`
+  example; aborted `a && b` waits no longer surface as hard errors.
 - Interceptors and route guards: `basic_http::add_interceptor` (before
   routing and before the body is read), `handler::guard`, request
   attributes on `matcher::context` and `attribute_arg<T>()` on every

@@ -256,6 +256,29 @@ handlers stay cancellable, because an open-ended stream would otherwise
 hold the process up; the cancellation propagates into the generator's
 pending `co_await` and the connection is dropped.
 
+Cancellation reaches nested work on every path, and the frames it
+interrupts unwind (RAII runs); `test/test_cancellation.cpp` checks each
+one and `examples/cancellation_server.cpp` shows them side by side:
+
+* /shutdown/ cancels a streaming handler wherever it is suspended: a
+  timer between chunks, a helper coroutine several `co_await`s deep, a
+  spliced inner stream, an `async_generator`, both branches of `a && b`
+  or `a || b`, or a loop polling `this_coro::cancellation_state`. Plain
+  handlers, including one reading a streamed request body, are shielded:
+  they finish, and their answer carries `Connection: close`. A shielded
+  body read waits for the client, so a client that stops sending
+  mid-upload holds that connection open until it closes.
+* /client disconnect/ during a stream is noticed at the stream's next
+  write; the generator is then destroyed with its nested frames. A stream
+  suspended in a long wait between chunks keeps waiting until that wait
+  ends, since the session is not reading the socket while it streams.
+* /JSON-RPC/ `endpoint::cancel(id)` emits on the request's
+  `request_scope`, interrupting every `co_await` in the method; a method
+  can also poll `scope.cancelled()`. The answer is a `-32800` error.
+* /MCP/ `notifications/cancelled` does the same for a tool call, over
+  HTTP (the cancelled call is answered `202` with no body) and stdio (no
+  reply line), as well as for a tool suspended in `elicit()`.
+
 `basic_http` is parameterised on its stream type. The default is Beast's
 `tcp_stream`; `session::https` instantiates it over
 `beast::ssl_stream<tcp_stream>`, and `server::tls` owns the handshake so
