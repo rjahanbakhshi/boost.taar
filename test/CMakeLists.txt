@@ -18,8 +18,10 @@ target_sources(
         type_traits/test_specialization_of.cpp
         e2e.hpp
         test.cpp
+        test_accept_encoding.cpp
         test_async_channel.cpp
         test_async_generator.cpp
+        test_byte_range.cpp
         test_callable_with.cpp
         test_cancellation.cpp
         test_chunk_body_from.cpp
@@ -38,7 +40,9 @@ target_sources(
         test_e2e_streaming.cpp
         test_e2e_streaming_body.cpp
         test_e2e_tls.cpp
+        test_entity_tag.cpp
         test_error.cpp
+        test_http_date.cpp
         test_http_session.cpp
         test_interceptors.cpp
         test_is_http_response.cpp
@@ -54,6 +58,7 @@ target_sources(
         test_mcp_endpoint.cpp
         test_mcp_stdio.cpp
         test_mcp_stream.cpp
+        test_mime.cpp
         test_multipart.cpp
         test_openapi.cpp
         test_member_function_of.cpp
@@ -68,6 +73,7 @@ target_sources(
         test_rest_arg_cast_user.cpp
         test_routing_edges.cpp
         test_scenarios.cpp
+        test_segmented_body.cpp
         test_tcp_server.cpp
         test_template_parser.cpp
         test_with_session.cpp

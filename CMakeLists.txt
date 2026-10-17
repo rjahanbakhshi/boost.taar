@@ -21,11 +21,13 @@ set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 23)
 target_sources(
     ${PROJECT_NAME}
     PUBLIC FILE_SET HEADERS BASE_DIRS include FILES
+        include/boost/taar/core/accept_encoding.hpp
         include/boost/taar/core/async_channel.hpp
         include/boost/taar/core/async_generator.hpp
         include/boost/taar/core/awaitable.hpp
         include/boost/taar/core/base64.hpp
         include/boost/taar/core/body_reader.hpp
+        include/boost/taar/core/byte_range.hpp
         include/boost/taar/core/cancellation_signals.hpp
         include/boost/taar/core/chunk_body_from.hpp
         include/boost/taar/core/chunk_body_from_tag.hpp
@@ -35,8 +37,10 @@ target_sources(
         include/boost/taar/core/context_store.hpp
         include/boost/taar/core/cookies.hpp
         include/boost/taar/core/cors.hpp
+        include/boost/taar/core/entity_tag.hpp
         include/boost/taar/core/error.hpp
         include/boost/taar/core/form_kvp.hpp
+        include/boost/taar/core/http_date.hpp
         include/boost/taar/core/ignore_and_rethrow.hpp
         include/boost/taar/core/interceptor.hpp
         include/boost/taar/core/is_async_generator.hpp
@@ -45,12 +49,14 @@ target_sources(
         include/boost/taar/core/is_http_response.hpp
         include/boost/taar/core/json_schema.hpp
         include/boost/taar/core/member_function_of.hpp
+        include/boost/taar/core/mime.hpp
         include/boost/taar/core/multipart.hpp
         include/boost/taar/core/rebind_executor.hpp
         include/boost/taar/core/request_attributes.hpp
         include/boost/taar/core/response_builder.hpp
         include/boost/taar/core/response_from.hpp
         include/boost/taar/core/response_from_tag.hpp
+        include/boost/taar/core/segmented_body.hpp
         include/boost/taar/handler/constrained.hpp
         include/boost/taar/handler/context_inject.hpp
         include/boost/taar/handler/guard.hpp
