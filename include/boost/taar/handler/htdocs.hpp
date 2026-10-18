@@ -10,7 +10,9 @@
 #ifndef BOOST_TAAR_HANDLER_HTDOCS_HPP
 #define BOOST_TAAR_HANDLER_HTDOCS_HPP
 
+#include <boost/taar/core/entity_tag.hpp>
 #include <boost/taar/core/error.hpp>
+#include <boost/taar/core/http_date.hpp>
 #include <boost/taar/core/mime.hpp>
 #include <boost/taar/core/segmented_body.hpp>
 #include <boost/taar/matcher/context.hpp>
@@ -21,8 +23,10 @@
 #include <boost/url/parse.hpp>
 #include <boost/url/url_view.hpp>
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <format>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -34,6 +38,150 @@
 #include <vector>
 
 namespace boost::taar::handler {
+
+/** A `Cache-Control` rule of @ref htdocs_options::cache_rules.
+
+    Rules are tried in order on the served file's decoded path relative to
+    the root (no leading slash, e.g. `assets/app.3f9a1c2e.js`); the first
+    whose @ref match returns true supplies the header value.
+
+    @code
+    options.cache_rules = {
+        taar::handler::cache_rule::glob("assets/**", "public, max-age=86400"),
+        {[](std::string_view p) { return p.ends_with(".html"); }, "no-cache"},
+    };
+    @endcode
+*/
+struct cache_rule
+{
+    /// Predicate on the relative path.
+    std::function<bool(std::string_view)> match;
+
+    /// The `Cache-Control` value sent when @ref match accepts the path.
+    std::string value;
+
+    /** A rule matching a glob pattern (see @ref cache_rules::glob_match).
+
+        @param pattern `*` matches within a segment, `**` across segments,
+                       `?` one character. A pattern without `/` is matched
+                       against the file name only (`*.css` matches
+                       `a/b/site.css`).
+        @param value   The `Cache-Control` value.
+    */
+    static cache_rule glob(std::string pattern, std::string value);
+};
+
+/// Helpers for building @ref cache_rule lists.
+namespace cache_rules {
+
+/** True if @a path matches the glob @a pattern.
+
+    `*` matches any run of characters except `/`, `**` any run including
+    `/`, and `?` one character other than `/`; everything else matches
+    itself (case-sensitive). A pattern containing no `/` is matched
+    against the last segment of @a path only.
+*/
+inline bool glob_match(std::string_view pattern, std::string_view path)
+{
+    if (pattern.find('/') == std::string_view::npos)
+    {
+        if (auto const slash = path.rfind('/'); slash != std::string_view::npos) path.remove_prefix(slash + 1);
+    }
+    // Dynamic programming over path positions: O(pattern * path), no backtracking.
+    // reach[j]: the pattern consumed so far matches path[0, j).
+    std::vector<bool> reach(path.size() + 1, false), next(path.size() + 1);
+    reach[0] = true;
+    std::size_t p = 0;
+    while (p < pattern.size())
+    {
+        std::fill(next.begin(), next.end(), false);
+        if (pattern[p] == '*')
+        {
+            bool const cross = p + 1 < pattern.size() && pattern[p + 1] == '*';
+            if (cross && p + 2 < pattern.size() && pattern[p + 2] == '/')
+            {
+                // "**/": zero or more whole segments.
+                bool seen = false;
+                for (std::size_t j = 0; j <= path.size(); ++j)
+                {
+                    next[j] = reach[j] || (seen && j > 0 && path[j - 1] == '/');
+                    if (reach[j]) seen = true;
+                }
+                p += 3;
+            }
+            else
+            {
+                for (std::size_t j = 0; j <= path.size(); ++j)
+                {
+                    next[j] = reach[j] || (j > 0 && next[j - 1] && (cross || path[j - 1] != '/'));
+                }
+                p += cross ? 2 : 1;
+            }
+        }
+        else
+        {
+            char const c = pattern[p];
+            for (std::size_t j = 0; j < path.size(); ++j)
+            {
+                next[j + 1] = reach[j] && (c == '?' ? path[j] != '/' : path[j] == c);
+            }
+            ++p;
+        }
+        reach.swap(next);
+    }
+    return reach[path.size()];
+}
+
+/** True if the file name in @a path carries a content hash, as bundlers emit:
+    `app.3f9a1c2e.js`, `chunk-5ZQ3X2AB.js`, `3f9a1c2e4b.css`.
+
+    The name without its last extension is split at `.` and `-`; a part
+    of at least 8 characters from `[A-Za-z0-9_]` containing both a digit
+    and a letter counts as a hash. A heuristic: provide your own
+    predicate when your names follow another scheme.
+*/
+inline bool looks_content_hashed(std::string_view path) noexcept
+{
+    if (auto const slash = path.rfind('/'); slash != std::string_view::npos) path.remove_prefix(slash + 1);
+    if (auto const dot = path.rfind('.'); dot != std::string_view::npos && dot != 0) path = path.substr(0, dot);
+    while (!path.empty())
+    {
+        auto const sep = path.find_first_of(".-");
+        auto const part = path.substr(0, sep);
+        path = sep == std::string_view::npos ? std::string_view {} : path.substr(sep + 1);
+        if (part.size() < 8) continue;
+        bool digit = false, alpha = false, valid = true;
+        for (char const c : part)
+        {
+            if (c >= '0' && c <= '9') digit = true;
+            else if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) alpha = true;
+            else if (c != '_') valid = false;
+        }
+        if (valid && digit && alpha) return true;
+    }
+    return false;
+}
+
+/** The usual policy for bundled front ends: content-hashed file names
+    (@ref looks_content_hashed) are cached for a year as `immutable`, and
+    HTML documents are revalidated on every use (`no-cache`).
+*/
+inline std::vector<cache_rule> immutable_hashed()
+{
+    return {
+        {[](std::string_view p) { return looks_content_hashed(p); }, "public, max-age=31536000, immutable"},
+        {[](std::string_view p) { return glob_match("*.html", p) || glob_match("*.htm", p); }, "no-cache"},
+    };
+}
+
+} // namespace cache_rules
+
+inline cache_rule cache_rule::glob(std::string pattern, std::string value)
+{
+    return {
+        [pattern = std::move(pattern)](std::string_view p) { return cache_rules::glob_match(pattern, p); },
+        std::move(value)};
+}
 
 /** Configuration of an @ref htdocs handler.
 
@@ -95,6 +243,14 @@ struct htdocs_options
 
     /// Send `X-Content-Type-Options: nosniff` with every served file.
     bool nosniff = true;
+
+    /** `Cache-Control` rules, first match wins (see @ref cache_rule and
+        @ref cache_rules::immutable_hashed). Empty by default.
+    */
+    std::vector<cache_rule> cache_rules {};
+
+    /// `Cache-Control` for files no rule matches; empty (the default) sends none.
+    std::string default_cache_control {};
 
     /** Called for every served file (200, 206, 304) with the file's
         relative path and the response header, just before the response
@@ -212,13 +368,24 @@ private:
 /// @cond
     enum class outcome { file, redirect, not_found, forbidden, error };
 
-    struct file_info
+    /// One representation of a file on disk: the file itself or a precompressed sibling.
+    struct variant
     {
-        std::filesystem::path path;         // the file on disk
-        std::string relative;               // decoded path relative to the root
+        std::string encoding;               // Content-Encoding; empty for the file itself
+        std::filesystem::path path;
         std::uint64_t size = 0;
         std::filesystem::file_time_type mtime {};
+        std::string etag;
+    };
+
+    struct file_info
+    {
+        std::string relative;               // decoded path relative to the root
         std::string content_type;
+        std::optional<std::string> cache_control;
+        std::string last_modified;          // HTTP-date
+        std::chrono::sys_seconds last_modified_time {};
+        std::vector<variant> variants;      // [0] is the file itself
     };
 
     struct lookup
@@ -441,16 +608,60 @@ private:
         return state_->default_type;
     }
 
+    static std::chrono::system_clock::time_point to_system(std::filesystem::file_time_type t)
+    {
+#if defined(_MSC_VER)
+        return std::chrono::clock_cast<std::chrono::system_clock>(t);
+#else
+        return std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+            std::chrono::file_clock::to_sys(t));
+#endif
+    }
+
+    /// Strong validator from size, modification time and coding.
+    static std::string make_etag(std::uint64_t size, std::filesystem::file_time_type mtime, std::string_view encoding)
+    {
+        auto const ns = std::chrono::duration_cast<std::chrono::nanoseconds>(mtime.time_since_epoch()).count();
+        auto tag = std::format("\"{:x}-{:x}", size, static_cast<std::uint64_t>(ns));
+        if (!encoding.empty())
+        {
+            tag += '-';
+            tag += encoding;
+        }
+        tag += '"';
+        return tag;
+    }
+
+    std::optional<std::string> cache_control_for(std::string_view relative) const
+    {
+        for (auto const& rule : state_->options.cache_rules)
+        {
+            if (rule.match && rule.match(relative)) return rule.value;
+        }
+        if (!state_->options.default_cache_control.empty()) return state_->options.default_cache_control;
+        return std::nullopt;
+    }
+
     lookup make_file(std::filesystem::path const& p, std::string relative) const
     {
         std::error_code ec;
+        variant identity;
+        identity.size = std::filesystem::file_size(p, ec);
+        if (ec) return {classify(ec), nullptr};
+        identity.mtime = std::filesystem::last_write_time(p, ec);
+        if (ec) return {classify(ec), nullptr};
+        identity.path = p;
+        identity.etag = make_etag(identity.size, identity.mtime, {});
+
         auto info = std::make_shared<file_info>();
-        info->size = std::filesystem::file_size(p, ec);
-        if (ec) return {classify(ec), nullptr};
-        info->mtime = std::filesystem::last_write_time(p, ec);
-        if (ec) return {classify(ec), nullptr};
-        info->path = p;
+        auto modified = std::chrono::floor<std::chrono::seconds>(to_system(identity.mtime));
+        // Never claim a modification later than now (RFC 9110 8.8.2.1).
+        modified = std::min(modified, std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()));
+        info->last_modified_time = modified;
+        info->last_modified = format_http_date(modified);
         info->content_type = content_type_for(relative);
+        info->cache_control = cache_control_for(relative);
+        info->variants.push_back(std::move(identity));
         info->relative = std::move(relative);
         return {outcome::file, std::move(info)};
     }
@@ -573,23 +784,82 @@ private:
         return serve_file(request, *found.file, fallback);
     }
 
+    enum class precondition { proceed, failed, not_modified };
+
+    /// RFC 9110 13.2.2 steps 1-4 for a GET or HEAD.
+    static precondition evaluate_preconditions(
+        request_type const& request,
+        std::string_view etag,
+        std::chrono::sys_seconds last_modified)
+    {
+        namespace http = boost::beast::http;
+        if (auto const it = request.find(http::field::if_match); it != request.end())
+        {
+            if (!etag_list_matches(it->value(), etag, false)) return precondition::failed;
+        }
+        else if (auto const ius = request.find(http::field::if_unmodified_since); ius != request.end())
+        {
+            auto const date = parse_http_date(ius->value());
+            if (date && last_modified > *date) return precondition::failed;
+        }
+        if (auto const it = request.find(http::field::if_none_match); it != request.end())
+        {
+            if (etag_list_matches(it->value(), etag, true)) return precondition::not_modified;
+        }
+        else if (auto const ims = request.find(http::field::if_modified_since); ims != request.end())
+        {
+            auto const date = parse_http_date(ims->value());
+            if (date && last_modified <= *date) return precondition::not_modified;
+        }
+        return precondition::proceed;
+    }
+
+    /// Validators and caching headers shared by 200, 206 and 304.
+    void set_representation_headers(
+        response_type& res,
+        file_info const& info,
+        variant const& chosen,
+        bool fallback) const
+    {
+        namespace http = boost::beast::http;
+        res.set(http::field::etag, chosen.etag);
+        res.set(http::field::last_modified, info.last_modified);
+        if (fallback) res.set(http::field::cache_control, "no-cache");
+        else if (info.cache_control) res.set(http::field::cache_control, *info.cache_control);
+        if (state_->options.nosniff) res.set("X-Content-Type-Options", "nosniff");
+    }
+
     response_type serve_file(request_type const& request, file_info const& info, bool fallback) const
     {
         namespace http = boost::beast::http;
         auto const& options = state_->options;
+        variant const& chosen = info.variants.front();
 
         response_type res {http::status::ok, request.version()};
         res.keep_alive(request.keep_alive());
-        res.set(http::field::content_type, info.content_type);
-        if (options.nosniff) res.set("X-Content-Type-Options", "nosniff");
-        if (fallback) res.set(http::field::cache_control, "no-cache");
 
-        std::uint64_t size = info.size;
+        switch (evaluate_preconditions(request, chosen.etag, info.last_modified_time))
+        {
+        case precondition::failed:
+            return error_response(request, http::status::precondition_failed);
+        case precondition::not_modified:
+            res.result(http::status::not_modified);
+            set_representation_headers(res, info, chosen, fallback);
+            if (options.on_response) options.on_response(info.relative, res.base());
+            return res;
+        case precondition::proceed:
+            break;
+        }
+
+        res.set(http::field::content_type, info.content_type);
+        set_representation_headers(res, info, chosen, fallback);
+
+        std::uint64_t size = chosen.size;
         if (request.method() == http::verb::get && size > 0)
         {
             boost::beast::file file;
             boost::system::error_code ec;
-            file.open(path_utf8(info.path).c_str(), boost::beast::file_mode::scan, ec);
+            file.open(path_utf8(chosen.path).c_str(), boost::beast::file_mode::scan, ec);
             if (ec)
             {
                 auto const kind = classify(ec);

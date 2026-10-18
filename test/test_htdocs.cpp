@@ -8,11 +8,13 @@
 //
 
 #include "e2e.hpp"
+#include <boost/taar/core/http_date.hpp>
 #include <boost/taar/handler/htdocs.hpp>
 #include <boost/taar/matcher/method.hpp>
 #include <boost/taar/matcher/target.hpp>
 #include <boost/taar/session/http.hpp>
 #include <boost/test/unit_test.hpp>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <random>
@@ -372,6 +374,179 @@ BOOST_AUTO_TEST_CASE(test_htdocs_content_types_charset_and_overrides)
     o.nosniff = false;
     BOOST_TEST(!get(htdocs {o}, "/a.png").head.count("X-Content-Type-Options"));
     BOOST_TEST(get(htdocs {root.options()}, "/a.unknownext")[http::field::content_type] == "application/octet-stream");
+}
+
+// ---------------------------------------------------------------------------
+// Validators and conditional requests
+
+/// Set the modification time of @a p to @a when (whole seconds).
+void set_mtime(fs::path const& p, std::chrono::sys_seconds when)
+{
+    fs::last_write_time(p, std::chrono::file_clock::from_sys(when));
+}
+
+std::chrono::sys_seconds const jan_2020 = std::chrono::sys_days {std::chrono::year {2020} / 1 / 1} + std::chrono::hours {12};
+
+BOOST_AUTO_TEST_CASE(test_htdocs_etag_and_last_modified)
+{
+    docroot root;
+    auto const p = root.write("a.txt", std::string(300, 'a'));
+    set_mtime(p, jan_2020);
+    htdocs handler {root.options()};
+    auto r = get(handler, "/a.txt");
+    BOOST_TEST(r[http::field::last_modified] == "Wed, 01 Jan 2020 12:00:00 GMT");
+    auto const etag = r[http::field::etag];
+    BOOST_TEST(etag.starts_with("\"12c-"));                 // hex size first
+    BOOST_TEST(etag.ends_with("\""));
+    BOOST_TEST(etag.find("W/") == std::string::npos);       // strong
+    BOOST_TEST(get(handler, "/a.txt")[http::field::etag] == etag);   // stable
+
+    // A change of content and time changes the validator.
+    root.write("a.txt", std::string(301, 'a'));
+    set_mtime(p, jan_2020 + std::chrono::seconds {5});
+    BOOST_TEST(get(handler, "/a.txt")[http::field::etag] != etag);
+
+    // A modification time in the future is not announced.
+    set_mtime(p, std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()) + std::chrono::hours {48});
+    auto const lm = taar::parse_http_date(get(handler, "/a.txt")[http::field::last_modified]);
+    BOOST_TEST_REQUIRE(lm.has_value());
+    BOOST_TEST((*lm <= std::chrono::system_clock::now()));
+}
+
+BOOST_AUTO_TEST_CASE(test_htdocs_if_none_match_and_if_modified_since)
+{
+    docroot root;
+    set_mtime(root.write("a.txt", "abc"), jan_2020);
+    htdocs_options o = root.options();
+    o.cache_rules = {taar::handler::cache_rule::glob("*.txt", "max-age=60")};
+    htdocs handler {o};
+    auto const etag = get(handler, "/a.txt")[http::field::etag];
+
+    auto r = get(handler, "/a.txt", {{"If-None-Match", etag}});
+    BOOST_TEST(static_cast<int>(r.status()) == 304);
+    BOOST_TEST(r.body.empty());
+    BOOST_TEST(r[http::field::etag] == etag);
+    BOOST_TEST(r[http::field::last_modified] == "Wed, 01 Jan 2020 12:00:00 GMT");
+    BOOST_TEST(r[http::field::cache_control] == "max-age=60");
+    BOOST_TEST(!r.has(http::field::content_length));
+    BOOST_TEST(!r.has(http::field::content_type));
+
+    // Weak comparison, lists and "*".
+    BOOST_TEST(static_cast<int>(get(handler, "/a.txt", {{"If-None-Match", "W/" + etag}}).status()) == 304);
+    BOOST_TEST(static_cast<int>(get(handler, "/a.txt", {{"If-None-Match", "\"x\", " + etag}}).status()) == 304);
+    BOOST_TEST(static_cast<int>(get(handler, "/a.txt", {{"If-None-Match", "*"}}).status()) == 304);
+    BOOST_TEST(static_cast<int>(get(handler, "/a.txt", {{"If-None-Match", "\"other\""}}).status()) == 200);
+    // HEAD revalidates too.
+    BOOST_TEST(static_cast<int>(call(handler, "/a.txt", {{"If-None-Match", etag}}, http::verb::head).status()) == 304);
+
+    BOOST_TEST(static_cast<int>(get(handler, "/a.txt", {{"If-Modified-Since", "Wed, 01 Jan 2020 12:00:00 GMT"}}).status()) == 304);
+    BOOST_TEST(static_cast<int>(get(handler, "/a.txt", {{"If-Modified-Since", "Thu, 02 Jan 2020 00:00:00 GMT"}}).status()) == 304);
+    BOOST_TEST(static_cast<int>(get(handler, "/a.txt", {{"If-Modified-Since", "Wed, 01 Jan 2020 11:59:59 GMT"}}).status()) == 200);
+    BOOST_TEST(static_cast<int>(get(handler, "/a.txt", {{"If-Modified-Since", "not a date"}}).status()) == 200);
+    // If-None-Match wins over If-Modified-Since.
+    BOOST_TEST(static_cast<int>(get(handler, "/a.txt", {{"If-None-Match", "\"other\""},
+        {"If-Modified-Since", "Thu, 02 Jan 2020 00:00:00 GMT"}}).status()) == 200);
+}
+
+BOOST_AUTO_TEST_CASE(test_htdocs_if_match_and_if_unmodified_since)
+{
+    docroot root;
+    set_mtime(root.write("a.txt", "abc"), jan_2020);
+    htdocs handler {root.options()};
+    auto const etag = get(handler, "/a.txt")[http::field::etag];
+
+    BOOST_TEST(static_cast<int>(get(handler, "/a.txt", {{"If-Match", etag}}).status()) == 200);
+    BOOST_TEST(static_cast<int>(get(handler, "/a.txt", {{"If-Match", "*"}}).status()) == 200);
+    auto r = get(handler, "/a.txt", {{"If-Match", "\"other\""}});
+    BOOST_TEST(static_cast<int>(r.status()) == 412);
+    BOOST_TEST(r.body == "Precondition Failed\n");
+    // If-Match uses strong comparison.
+    BOOST_TEST(static_cast<int>(get(handler, "/a.txt", {{"If-Match", "W/" + etag}}).status()) == 412);
+
+    BOOST_TEST(static_cast<int>(get(handler, "/a.txt", {{"If-Unmodified-Since", "Wed, 01 Jan 2020 12:00:00 GMT"}}).status()) == 200);
+    BOOST_TEST(static_cast<int>(get(handler, "/a.txt", {{"If-Unmodified-Since", "Wed, 01 Jan 2020 11:00:00 GMT"}}).status()) == 412);
+    BOOST_TEST(static_cast<int>(get(handler, "/a.txt", {{"If-Unmodified-Since", "garbage"}}).status()) == 200);
+    // If-Unmodified-Since is ignored when If-Match is present.
+    BOOST_TEST(static_cast<int>(get(handler, "/a.txt", {{"If-Match", etag},
+        {"If-Unmodified-Since", "Wed, 01 Jan 2020 11:00:00 GMT"}}).status()) == 200);
+    // A failed If-Match precedes a matching If-None-Match.
+    BOOST_TEST(static_cast<int>(get(handler, "/a.txt", {{"If-Match", "\"other\""}, {"If-None-Match", etag}}).status()) == 412);
+    // A passed If-Match then lets If-None-Match answer 304.
+    BOOST_TEST(static_cast<int>(get(handler, "/a.txt", {{"If-Match", etag}, {"If-None-Match", etag}}).status()) == 304);
+}
+
+BOOST_AUTO_TEST_CASE(test_htdocs_cache_control_rules)
+{
+    docroot root;
+    for (auto const* name : {"index.html", "assets/app.3f9a1c2e.js", "assets/chunk-5ZQ3X2AB.js", "assets/app.js",
+                             "img/logo.png", "fonts/inter.woff2"})
+    {
+        root.write(name, "x");
+    }
+    htdocs_options o = root.options();
+    o.cache_rules = taar::handler::cache_rules::immutable_hashed();
+    o.cache_rules.push_back(taar::handler::cache_rule::glob("img/**", "public, max-age=3600"));
+    o.default_cache_control = "max-age=60";
+    htdocs handler {o};
+    auto cc = [&](std::string const& path) { return get(handler, path)[http::field::cache_control]; };
+    BOOST_TEST(cc("/assets/app.3f9a1c2e.js") == "public, max-age=31536000, immutable");
+    BOOST_TEST(cc("/assets/chunk-5ZQ3X2AB.js") == "public, max-age=31536000, immutable");
+    BOOST_TEST(cc("/index.html") == "no-cache");
+    BOOST_TEST(cc("/") == "no-cache");                       // the index file's own path decides
+    BOOST_TEST(cc("/img/logo.png") == "public, max-age=3600");
+    BOOST_TEST(cc("/assets/app.js") == "max-age=60");
+    BOOST_TEST(!get(htdocs {root.options()}, "/assets/app.js").has(http::field::cache_control));
+}
+
+BOOST_AUTO_TEST_CASE(test_htdocs_glob_and_hash_helpers)
+{
+    using taar::handler::cache_rules::glob_match;
+    using taar::handler::cache_rules::looks_content_hashed;
+    BOOST_TEST(glob_match("*.css", "a/b/site.css"));
+    BOOST_TEST(!glob_match("*.css", "a/b/site.js"));
+    BOOST_TEST(glob_match("assets/*.js", "assets/app.js"));
+    BOOST_TEST(!glob_match("assets/*.js", "assets/x/app.js"));
+    BOOST_TEST(glob_match("assets/**", "assets/x/y/app.js"));
+    BOOST_TEST(glob_match("assets/**/*.js", "assets/x/y/app.js"));
+    BOOST_TEST(glob_match("assets/**/*.js", "assets/app.js"));
+    BOOST_TEST(!glob_match("assets/**/*.js", "other/app.js"));
+    BOOST_TEST(glob_match("img/?.png", "img/a.png"));
+    BOOST_TEST(!glob_match("img/?.png", "img/ab.png"));
+    BOOST_TEST(glob_match("**", ""));
+    BOOST_TEST(!glob_match("a", ""));
+    // No exponential blow-up on hostile input.
+    BOOST_TEST(!glob_match("*a*a*a*a*a*a*a*a*b", std::string(5000, 'a')));
+
+    BOOST_TEST(looks_content_hashed("app.3f9a1c2e.js"));
+    BOOST_TEST(looks_content_hashed("assets/chunk-5ZQ3X2AB.js"));
+    BOOST_TEST(looks_content_hashed("3f9a1c2e4b.css"));
+    BOOST_TEST(looks_content_hashed("main.a1b2c3d4e5f6a7b8.bundle.js"));
+    BOOST_TEST(!looks_content_hashed("app.js"));
+    BOOST_TEST(!looks_content_hashed("jquery-3.7.1.min.js"));
+    BOOST_TEST(!looks_content_hashed("bootstrap.min.css"));
+    BOOST_TEST(!looks_content_hashed("report-20240101.pdf"));
+    BOOST_TEST(!looks_content_hashed("a1b2c3d4/app.js"));     // only the file name counts
+}
+
+BOOST_AUTO_TEST_CASE(test_htdocs_end_to_end_revalidation)
+{
+    docroot root;
+    root.write("page.html", "<p>cached</p>");
+    net::io_context io;
+    taar::session::http session;
+    session.register_request_handler(method == http::verb::get && target == "/{*path}", htdocs {root.options()});
+    e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
+    {
+        auto first = co_await e2e::send_all(port, {e2e::make_request(http::verb::get, "/page.html")});
+        auto const etag = std::string {first[0][http::field::etag]};
+        auto again = e2e::make_request(http::verb::get, "/page.html");
+        again.set(http::field::if_none_match, etag);
+        auto res = co_await e2e::send_all(port, {std::move(again), e2e::make_request(http::verb::get, "/page.html")});
+        BOOST_TEST(static_cast<int>(res[0].result()) == 304);
+        BOOST_TEST(res[0].body().empty());
+        BOOST_TEST(res[0][http::field::etag] == etag);
+        BOOST_TEST(res[1].body() == "<p>cached</p>");          // the connection survived the 304
+    });
 }
 
 // ---------------------------------------------------------------------------
