@@ -163,7 +163,7 @@ auto async_write(
 
     A typed message keeps the Content-Length its body would have had. A
     `message_generator` is written as produced: handlers that build one
-    (such as `htdocs`) see the HEAD method themselves.
+    see the HEAD method and must leave the body out themselves.
 */
 template <typename StreamType, typename Response>
 awaitable<void> write_response(StreamType& stream, Response&& response, bool head_only)

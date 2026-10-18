@@ -42,6 +42,7 @@ target_sources(
         test_e2e_tls.cpp
         test_entity_tag.cpp
         test_error.cpp
+        test_htdocs.cpp
         test_http_date.cpp
         test_http_session.cpp
         test_interceptors.cpp
