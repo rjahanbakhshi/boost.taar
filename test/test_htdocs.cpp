@@ -550,6 +550,211 @@ BOOST_AUTO_TEST_CASE(test_htdocs_end_to_end_revalidation)
 }
 
 // ---------------------------------------------------------------------------
+// Ranges
+
+std::string pattern_content(std::size_t n)
+{
+    std::string out(n, '\0');
+    for (std::size_t i = 0; i < n; ++i) out[i] = static_cast<char>('A' + (i * 7 + i / 26) % 26);
+    return out;
+}
+
+struct byterange_part
+{
+    std::string content_type;
+    std::string content_range;
+    std::string data;
+};
+
+/// Parse a multipart/byteranges body (RFC 9110 14.6, RFC 2046 5.1.1).
+std::vector<byterange_part> parse_byteranges(std::string const& content_type, std::string const& body)
+{
+    std::vector<byterange_part> parts;
+    auto const b = content_type.find("boundary=");
+    BOOST_TEST_REQUIRE(b != std::string::npos);
+    std::string const delimiter = "--" + content_type.substr(b + 9);
+    std::size_t pos = body.find(delimiter);
+    BOOST_TEST_REQUIRE(pos == 0u);
+    while (true)
+    {
+        pos += delimiter.size();
+        if (body.compare(pos, 2, "--") == 0)
+        {
+            BOOST_TEST(body.substr(pos) == "--\r\n");
+            break;
+        }
+        BOOST_TEST_REQUIRE(body.compare(pos, 2, "\r\n") == 0);
+        pos += 2;
+        byterange_part part;
+        while (body.compare(pos, 2, "\r\n") != 0)
+        {
+            auto const eol = body.find("\r\n", pos);
+            auto const line = body.substr(pos, eol - pos);
+            auto const colon = line.find(": ");
+            if (line.substr(0, colon) == "Content-Type") part.content_type = line.substr(colon + 2);
+            if (line.substr(0, colon) == "Content-Range") part.content_range = line.substr(colon + 2);
+            pos = eol + 2;
+        }
+        pos += 2;
+        auto const next = body.find("\r\n" + delimiter, pos);
+        BOOST_TEST_REQUIRE(next != std::string::npos);
+        part.data = body.substr(pos, next - pos);
+        parts.push_back(std::move(part));
+        pos = next + 2;
+    }
+    return parts;
+}
+
+BOOST_AUTO_TEST_CASE(test_htdocs_single_ranges)
+{
+    docroot root;
+    auto const content = pattern_content(10000);
+    root.write("data.bin", content);
+    htdocs handler {root.options()};
+
+    auto full = get(handler, "/data.bin");
+    BOOST_TEST(static_cast<int>(full.status()) == 200);
+    BOOST_TEST(full[http::field::accept_ranges] == "bytes");
+
+    auto r = get(handler, "/data.bin", {{"Range", "bytes=0-499"}});
+    BOOST_TEST(static_cast<int>(r.status()) == 206);
+    BOOST_TEST(r[http::field::content_range] == "bytes 0-499/10000");
+    BOOST_TEST(r[http::field::content_length] == "500");
+    BOOST_TEST(r[http::field::content_type] == "application/octet-stream");
+    BOOST_TEST(r.body == content.substr(0, 500));
+
+    r = get(handler, "/data.bin", {{"Range", "bytes=9500-"}});
+    BOOST_TEST(r[http::field::content_range] == "bytes 9500-9999/10000");
+    BOOST_TEST(r.body == content.substr(9500));
+
+    r = get(handler, "/data.bin", {{"Range", "bytes=-100"}});
+    BOOST_TEST(r[http::field::content_range] == "bytes 9900-9999/10000");
+    BOOST_TEST(r.body == content.substr(9900));
+
+    // Overlapping ranges coalesce into one.
+    r = get(handler, "/data.bin", {{"Range", "bytes=0-99,50-199"}});
+    BOOST_TEST(static_cast<int>(r.status()) == 206);
+    BOOST_TEST(r[http::field::content_range] == "bytes 0-199/10000");
+    BOOST_TEST(r.body == content.substr(0, 200));
+}
+
+BOOST_AUTO_TEST_CASE(test_htdocs_multipart_byteranges_round_trip)
+{
+    docroot root;
+    auto const content = pattern_content(10000);
+    root.write("data.txt", content);
+    htdocs handler {root.options()};
+    auto r = get(handler, "/data.txt", {{"Range", "bytes=9000-9009, 0-9, -5"}});
+    BOOST_TEST(static_cast<int>(r.status()) == 206);
+    auto const type = r[http::field::content_type];
+    BOOST_TEST(type.starts_with("multipart/byteranges; boundary="));
+    BOOST_TEST(r[http::field::content_length] == std::to_string(r.body.size()));
+    BOOST_TEST(!r.has(http::field::content_range));
+    auto const parts = parse_byteranges(type, r.body);
+    BOOST_TEST_REQUIRE(parts.size() == 3u);
+    BOOST_TEST(parts[0].content_range == "bytes 0-9/10000");          // sorted while coalescing
+    BOOST_TEST(parts[0].data == content.substr(0, 10));
+    BOOST_TEST(parts[1].content_range == "bytes 9000-9009/10000");
+    BOOST_TEST(parts[1].data == content.substr(9000, 10));
+    BOOST_TEST(parts[2].content_range == "bytes 9995-9999/10000");
+    BOOST_TEST(parts[2].data == content.substr(9995));
+    BOOST_TEST(parts[0].content_type == "text/plain; charset=utf-8");
+
+    // Every response picks a fresh boundary.
+    auto again = get(handler, "/data.txt", {{"Range", "bytes=0-0,5-5"}});
+    BOOST_TEST(again[http::field::content_type] != type);
+}
+
+BOOST_AUTO_TEST_CASE(test_htdocs_unsatisfiable_malformed_and_limited_ranges)
+{
+    docroot root;
+    auto const content = pattern_content(1000);
+    root.write("d.bin", content);
+    htdocs_options o = root.options();
+    o.max_ranges = 3;
+    htdocs handler {o};
+
+    auto r = get(handler, "/d.bin", {{"Range", "bytes=1000-2000"}});
+    BOOST_TEST(static_cast<int>(r.status()) == 416);
+    BOOST_TEST(r[http::field::content_range] == "bytes */1000");
+
+    for (auto const* ignored : {"bytes=5-1", "bytes=abc", "pages=1-2", "bytes=0-0,2-2,4-4,6-6"})
+    {
+        BOOST_TEST_INFO(ignored);
+        auto full = get(handler, "/d.bin", {{"Range", ignored}});
+        BOOST_TEST(static_cast<int>(full.status()) == 200);
+        BOOST_TEST(full.body == content);
+    }
+    // HEAD ignores Range.
+    auto head = call(handler, "/d.bin", {{"Range", "bytes=0-9"}}, http::verb::head);
+    BOOST_TEST(static_cast<int>(head.status()) == 200);
+    BOOST_TEST(head[http::field::content_length] == "1000");
+
+    // Disabled.
+    o.max_ranges = 0;
+    htdocs off {o};
+    auto plain = get(off, "/d.bin", {{"Range", "bytes=0-9"}});
+    BOOST_TEST(static_cast<int>(plain.status()) == 200);
+    BOOST_TEST(!plain.has(http::field::accept_ranges));
+}
+
+BOOST_AUTO_TEST_CASE(test_htdocs_if_range)
+{
+    docroot root;
+    auto const content = pattern_content(1000);
+    set_mtime(root.write("d.bin", content), jan_2020);
+    htdocs handler {root.options()};
+    auto const etag = get(handler, "/d.bin")[http::field::etag];
+    auto status = [&](std::string const& if_range)
+    {
+        return static_cast<int>(get(handler, "/d.bin", {{"Range", "bytes=0-9"}, {"If-Range", if_range}}).status());
+    };
+    BOOST_TEST(status(etag) == 206);
+    BOOST_TEST(status("\"stale\"") == 200);
+    BOOST_TEST(status("W/" + etag) == 200);                          // weak tags never match
+    BOOST_TEST(status("Wed, 01 Jan 2020 12:00:00 GMT") == 206);       // exact date
+    BOOST_TEST(status("Thu, 02 Jan 2020 12:00:00 GMT") == 200);       // later is not exact
+    BOOST_TEST(status("garbage") == 200);
+    // A precondition failure still wins over the range.
+    BOOST_TEST(static_cast<int>(get(handler, "/d.bin", {{"Range", "bytes=0-9"}, {"If-None-Match", etag}}).status()) == 304);
+}
+
+BOOST_AUTO_TEST_CASE(test_htdocs_end_to_end_range_download_of_a_large_file)
+{
+    docroot root;
+    auto const content = pattern_content(1024 * 1024);
+    root.write("big.bin", content);
+    net::io_context io;
+    taar::session::http session;
+    session.register_request_handler(method == http::verb::get && target == "/files/{*path}", htdocs {root.options()});
+    e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
+    {
+        // Download in four pieces and reassemble, then once whole.
+        std::vector<e2e::request> reqs;
+        std::uint64_t const quarter = content.size() / 4;
+        for (int i = 0; i < 4; ++i)
+        {
+            auto req = e2e::make_request(http::verb::get, "/files/big.bin");
+            req.set(http::field::range, "bytes=" + std::to_string(i * quarter) + "-" +
+                (i == 3 ? std::string {} : std::to_string((i + 1) * quarter - 1)));
+            reqs.push_back(std::move(req));
+        }
+        reqs.push_back(e2e::make_request(http::verb::get, "/files/big.bin"));
+        auto res = co_await e2e::send_all(port, std::move(reqs));
+        std::string assembled;
+        for (int i = 0; i < 4; ++i)
+        {
+            BOOST_TEST(static_cast<int>(res[i].result()) == 206);
+            assembled += res[i].body();
+        }
+        BOOST_TEST((assembled == content));
+        BOOST_TEST(res[3][http::field::content_range] == "bytes 786432-1048575/1048576");
+        BOOST_TEST(res[4].body().size() == content.size());
+        BOOST_TEST((res[4].body() == content));
+    });
+}
+
+// ---------------------------------------------------------------------------
 // Responses
 
 BOOST_AUTO_TEST_CASE(test_htdocs_head_has_the_length_but_no_body)

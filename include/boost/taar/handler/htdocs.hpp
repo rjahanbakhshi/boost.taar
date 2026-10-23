@@ -10,6 +10,7 @@
 #ifndef BOOST_TAAR_HANDLER_HTDOCS_HPP
 #define BOOST_TAAR_HANDLER_HTDOCS_HPP
 
+#include <boost/taar/core/byte_range.hpp>
 #include <boost/taar/core/entity_tag.hpp>
 #include <boost/taar/core/error.hpp>
 #include <boost/taar/core/http_date.hpp>
@@ -30,6 +31,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <random>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -251,6 +253,12 @@ struct htdocs_options
 
     /// `Cache-Control` for files no rule matches; empty (the default) sends none.
     std::string default_cache_control {};
+
+    /** Most ranges honoured in one `Range` header; more make the request
+        a plain 200. Overlapping and adjacent ranges are merged. 0 disables
+        range requests (no `Accept-Ranges`).
+    */
+    std::size_t max_ranges = 16;
 
     /** Called for every served file (200, 206, 304) with the file's
         relative path and the response header, just before the response
@@ -851,31 +859,124 @@ private:
             break;
         }
 
-        res.set(http::field::content_type, info.content_type);
         set_representation_headers(res, info, chosen, fallback);
+        bool const ranges_enabled = options.max_ranges > 0;
+        if (ranges_enabled) res.set(http::field::accept_ranges, "bytes");
 
-        std::uint64_t size = chosen.size;
-        if (request.method() == http::verb::get && size > 0)
+        if (request.method() == http::verb::head)
         {
-            boost::beast::file file;
-            boost::system::error_code ec;
-            file.open(path_utf8(chosen.path).c_str(), boost::beast::file_mode::scan, ec);
-            if (ec)
-            {
-                auto const kind = classify(ec);
-                return error_response(request,
-                    kind == outcome::not_found ? http::status::not_found :
-                    kind == outcome::forbidden ? http::status::forbidden :
-                    http::status::internal_server_error);
-            }
-            size = file.size(ec);
-            if (ec) return error_response(request, http::status::internal_server_error);
-            res.body().attach_file(std::move(file));
-            res.body().append_file_range(0, size);
+            res.set(http::field::content_type, info.content_type);
+            res.content_length(chosen.size);
+            if (options.on_response) options.on_response(info.relative, res.base());
+            return res;
         }
-        res.content_length(size);
+
+        // Range (GET only), subject to If-Range.
+        std::vector<byte_range> ranges;
+        if (auto const range = request.find(http::field::range);
+            ranges_enabled && range != request.end() && if_range_holds(request, chosen, info))
+        {
+            auto parsed = parse_range(range->value(), chosen.size, options.max_ranges);
+            if (parsed.status == range_status::unsatisfiable)
+            {
+                auto err = error_response(request, http::status::range_not_satisfiable);
+                err.set(http::field::content_range, "bytes */" + std::to_string(chosen.size));
+                return err;
+            }
+            if (parsed.status == range_status::satisfiable) ranges = coalesce_ranges(std::move(parsed.ranges));
+        }
+
+        auto& body = res.body();
+        if (chosen.size > 0)
+        {
+            if (auto const failed = open_content(body, chosen)) return error_response(request, *failed);
+        }
+        auto append = [&](std::uint64_t offset, std::uint64_t length) { body.append_file_range(offset, length); };
+
+        if (ranges.empty())
+        {
+            res.set(http::field::content_type, info.content_type);
+            if (chosen.size > 0) append(0, chosen.size);
+        }
+        else if (ranges.size() == 1)
+        {
+            auto const& r = ranges.front();
+            res.result(http::status::partial_content);
+            res.set(http::field::content_type, info.content_type);
+            res.set(http::field::content_range, content_range(r, chosen.size));
+            append(r.first, r.length());
+        }
+        else
+        {
+            // multipart/byteranges (RFC 9110 14.6): text part headers between file windows.
+            auto const boundary = make_boundary();
+            res.result(http::status::partial_content);
+            res.set(http::field::content_type, "multipart/byteranges; boundary=" + boundary);
+            bool first = true;
+            for (auto const& r : ranges)
+            {
+                std::string part = first ? "" : "\r\n";
+                first = false;
+                part += "--" + boundary + "\r\nContent-Type: " + info.content_type +
+                    "\r\nContent-Range: " + content_range(r, chosen.size) + "\r\n\r\n";
+                body.append_text(std::move(part));
+                append(r.first, r.length());
+            }
+            body.append_text("\r\n--" + boundary + "--\r\n");
+        }
+        res.content_length(body.size());
         if (options.on_response) options.on_response(info.relative, res.base());
         return res;
+    }
+
+    /// RFC 9110 13.1.5: a strong entity tag or an exact date must match the chosen representation.
+    static bool if_range_holds(request_type const& request, variant const& chosen, file_info const& info)
+    {
+        namespace http = boost::beast::http;
+        auto const it = request.find(http::field::if_range);
+        if (it == request.end()) return true;
+        std::string_view value = it->value();
+        while (!value.empty() && (value.front() == ' ' || value.front() == '\t')) value.remove_prefix(1);
+        if (value.starts_with('"') || value.starts_with("W/"))
+        {
+            std::string_view current = chosen.etag;
+            auto const sent = parse_entity_tag(value);
+            auto const ours = parse_entity_tag(current);
+            return sent && ours && strong_match(*sent, *ours);
+        }
+        auto const date = parse_http_date(value);
+        return date && *date == info.last_modified_time;
+    }
+
+    static std::string content_range(byte_range const& r, std::uint64_t size)
+    {
+        return "bytes " + std::to_string(r.first) + "-" + std::to_string(r.last) + "/" + std::to_string(size);
+    }
+
+    static std::string make_boundary()
+    {
+        thread_local std::mt19937_64 engine {std::random_device {}()};
+        return std::format("taar-{:016x}{:016x}", engine(), engine());
+    }
+
+    /// Attach the chosen representation's content to @a body; an error status on failure.
+    std::optional<boost::beast::http::status> open_content(segmented_body::value_type& body, variant const& chosen) const
+    {
+        namespace http = boost::beast::http;
+        boost::beast::file file;
+        boost::system::error_code ec;
+        file.open(path_utf8(chosen.path).c_str(), boost::beast::file_mode::scan, ec);
+        if (ec)
+        {
+            auto const kind = classify(ec);
+            return kind == outcome::not_found ? http::status::not_found :
+                kind == outcome::forbidden ? http::status::forbidden :
+                http::status::internal_server_error;
+        }
+        // The file changed since it was examined: its validators are stale.
+        if (file.size(ec) != chosen.size || ec) return http::status::internal_server_error;
+        body.attach_file(std::move(file));
+        return std::nullopt;
     }
 /// @endcond
 
