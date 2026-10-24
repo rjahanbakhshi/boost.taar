@@ -755,6 +755,120 @@ BOOST_AUTO_TEST_CASE(test_htdocs_end_to_end_range_download_of_a_large_file)
 }
 
 // ---------------------------------------------------------------------------
+// Precompressed variants
+
+struct compressed_tree
+{
+    docroot root;
+    compressed_tree()
+    {
+        set_mtime(root.write("app.js", "identity content"), jan_2020);
+        set_mtime(root.write("app.js.br", "BR"), jan_2020 + std::chrono::seconds {1});
+        set_mtime(root.write("app.js.gz", "GZIP"), jan_2020 + std::chrono::seconds {1});
+        set_mtime(root.write("old.css", "identity css"), jan_2020);
+        set_mtime(root.write("old.css.gz", "STALE"), jan_2020 - std::chrono::seconds {1});
+        set_mtime(root.write("plain.txt", "plain"), jan_2020);
+    }
+};
+
+BOOST_AUTO_TEST_CASE(test_htdocs_precompressed_selection)
+{
+    compressed_tree tree;
+    htdocs handler {tree.root.options()};
+    auto pick = [&](std::string const& accept)
+    {
+        auto r = get(handler, "/app.js", {{"Accept-Encoding", accept}});
+        return r.body;
+    };
+    BOOST_TEST(pick("gzip, deflate, br, zstd") == "BR");                 // ties: configuration order
+    BOOST_TEST(pick("gzip") == "GZIP");
+    BOOST_TEST(pick("x-gzip") == "GZIP");
+    BOOST_TEST(pick("br;q=0.5, gzip;q=0.8") == "GZIP");
+    BOOST_TEST(pick("br;q=0, gzip;q=0") == "identity content");
+    BOOST_TEST(pick("deflate") == "identity content");
+    BOOST_TEST(pick("*") == "BR");
+    BOOST_TEST(pick("*;q=0.5, br;q=0") == "GZIP");
+    BOOST_TEST(pick("identity;q=0, gzip;q=0.1") == "GZIP");              // identity refused
+    BOOST_TEST(pick("identity, br;q=0.5") == "identity content");         // identity preferred explicitly
+    BOOST_TEST(pick("") == "identity content");
+    BOOST_TEST(get(handler, "/app.js").body == "identity content");     // no Accept-Encoding
+
+    auto r = get(handler, "/app.js", {{"Accept-Encoding", "br"}});
+    BOOST_TEST(r[http::field::content_encoding] == "br");
+    BOOST_TEST(r[http::field::content_type] == "text/javascript; charset=utf-8");
+    BOOST_TEST(r[http::field::content_length] == "2");
+    BOOST_TEST(r[http::field::vary] == "Accept-Encoding");
+    auto plain = get(handler, "/app.js");
+    BOOST_TEST(!plain.has(http::field::content_encoding));
+    BOOST_TEST(plain[http::field::vary] == "Accept-Encoding");
+
+    // HEAD reports the chosen variant's length.
+    auto head = call(handler, "/app.js", {{"Accept-Encoding", "gzip"}}, http::verb::head);
+    BOOST_TEST(head[http::field::content_encoding] == "gzip");
+    BOOST_TEST(head[http::field::content_length] == "4");
+}
+
+BOOST_AUTO_TEST_CASE(test_htdocs_precompressed_validators_staleness_and_ranges)
+{
+    compressed_tree tree;
+    htdocs handler {tree.root.options()};
+    auto const id_tag = get(handler, "/app.js")[http::field::etag];
+    auto const br_tag = get(handler, "/app.js", {{"Accept-Encoding", "br"}})[http::field::etag];
+    auto const gz_tag = get(handler, "/app.js", {{"Accept-Encoding", "gzip"}})[http::field::etag];
+    BOOST_TEST(br_tag != id_tag);
+    BOOST_TEST(gz_tag != br_tag);
+    BOOST_TEST(br_tag.ends_with("-br\""));
+
+    // Revalidating the br variant: 304 keeps Vary.
+    auto nm = get(handler, "/app.js", {{"Accept-Encoding", "br"}, {"If-None-Match", br_tag}});
+    BOOST_TEST(static_cast<int>(nm.status()) == 304);
+    BOOST_TEST(nm[http::field::vary] == "Accept-Encoding");
+    BOOST_TEST(nm[http::field::etag] == br_tag);
+    // The identity tag does not validate the br variant.
+    BOOST_TEST(static_cast<int>(get(handler, "/app.js", {{"Accept-Encoding", "br"}, {"If-None-Match", id_tag}}).status()) == 200);
+
+    // A sibling older than the original is ignored, and no Vary is sent.
+    auto old = get(handler, "/old.css", {{"Accept-Encoding", "gzip"}});
+    BOOST_TEST(old.body == "identity css");
+    BOOST_TEST(!old.has(http::field::vary));
+    BOOST_TEST(!get(handler, "/plain.txt", {{"Accept-Encoding", "gzip"}}).has(http::field::vary));
+
+    // A range applies to identity.
+    auto range = get(handler, "/app.js", {{"Accept-Encoding", "br"}, {"Range", "bytes=0-7"}});
+    BOOST_TEST(static_cast<int>(range.status()) == 206);
+    BOOST_TEST(range.body == "identity");
+    BOOST_TEST(!range.has(http::field::content_encoding));
+    BOOST_TEST(range[http::field::vary] == "Accept-Encoding");
+
+    // Disabled, or another coding list.
+    htdocs_options o = tree.root.options();
+    o.precompressed = {};
+    BOOST_TEST(get(htdocs {o}, "/app.js", {{"Accept-Encoding", "br"}}).body == "identity content");
+    o.precompressed = {"gzip"};
+    BOOST_TEST(get(htdocs {o}, "/app.js", {{"Accept-Encoding", "br, gzip"}}).body == "GZIP");
+    o.precompressed = {"identity"};
+    BOOST_CHECK_THROW(htdocs {o}, taar::exception);
+}
+
+BOOST_AUTO_TEST_CASE(test_htdocs_end_to_end_compressed_variant)
+{
+    compressed_tree tree;
+    net::io_context io;
+    taar::session::http session;
+    session.register_request_handler(method == http::verb::get && target == "/{*path}", htdocs {tree.root.options()});
+    e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
+    {
+        auto req = e2e::make_request(http::verb::get, "/app.js");
+        req.set(http::field::accept_encoding, "gzip, br");
+        auto res = co_await e2e::send_all(port, {std::move(req), e2e::make_request(http::verb::get, "/app.js")});
+        BOOST_TEST(res[0][http::field::content_encoding] == "br");
+        BOOST_TEST(res[0].body() == "BR");
+        BOOST_TEST(res[0][http::field::vary] == "Accept-Encoding");
+        BOOST_TEST(res[1].body() == "identity content");
+    });
+}
+
+// ---------------------------------------------------------------------------
 // Responses
 
 BOOST_AUTO_TEST_CASE(test_htdocs_head_has_the_length_but_no_body)

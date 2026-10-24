@@ -10,6 +10,7 @@
 #ifndef BOOST_TAAR_HANDLER_HTDOCS_HPP
 #define BOOST_TAAR_HANDLER_HTDOCS_HPP
 
+#include <boost/taar/core/accept_encoding.hpp>
 #include <boost/taar/core/byte_range.hpp>
 #include <boost/taar/core/entity_tag.hpp>
 #include <boost/taar/core/error.hpp>
@@ -260,6 +261,16 @@ struct htdocs_options
     */
     std::size_t max_ranges = 16;
 
+    /** Precompressed siblings to look for, in order of preference, as
+        content codings: `br` is `file.br`, `gzip` is `file.gz`, `zstd` is
+        `file.zst`, any other coding `file.<coding>`. A sibling is served
+        with `Content-Encoding` and the original's media type when the
+        request's `Accept-Encoding` accepts the coding (q-values honoured)
+        and it is not older than the original. Files with a sibling are
+        sent with `Vary: Accept-Encoding`. No compression on the fly.
+    */
+    std::vector<std::string> precompressed {"br", "gzip"};
+
     /** Called for every served file (200, 206, 304) with the file's
         relative path and the response header, just before the response
         is returned: add `Content-Disposition`, security headers, and so
@@ -439,6 +450,21 @@ private:
                 mime[key] = type.find(';') == std::string::npos ? with_utf8_charset(type) : type;
             }
             options.mime_types = std::move(mime);
+
+            for (auto const& coding : options.precompressed)
+            {
+                bool const token = !coding.empty() && std::ranges::all_of(coding, [](char c)
+                {
+                    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+                        c == '-' || c == '_' || c == '.';
+                });
+                if (!token || coding == "identity")
+                {
+                    throw taar::exception {taar::failure {
+                        boost::system::errc::make_error_code(boost::system::errc::invalid_argument),
+                        "htdocs: \"" + coding + "\" is not a content coding for precompressed files"}};
+                }
+            }
             default_type = with_utf8_charset(options.default_mime_type);
         }
 
@@ -669,7 +695,22 @@ private:
         info->last_modified = format_http_date(modified);
         info->content_type = content_type_for(relative);
         info->cache_control = cache_control_for(relative);
-        info->variants.push_back(std::move(identity));
+        for (auto const& coding : state_->options.precompressed)
+        {
+            variant v;
+            v.path = p;
+            v.path += utf8_path(coding == "br" ? ".br" : coding == "gzip" ? ".gz" : coding == "zstd" ? ".zst" : "." + coding);
+            auto const st = std::filesystem::status(v.path, ec);
+            if (ec || !std::filesystem::is_regular_file(st) || !contained(v.path)) continue;
+            v.size = std::filesystem::file_size(v.path, ec);
+            if (ec) continue;
+            v.mtime = std::filesystem::last_write_time(v.path, ec);
+            if (ec || v.mtime < identity.mtime) continue;     // stale: older than the original
+            v.encoding = coding;
+            v.etag = make_etag(v.size, v.mtime, coding);
+            info->variants.push_back(std::move(v));
+        }
+        info->variants.insert(info->variants.begin(), std::move(identity));
         info->relative = std::move(relative);
         return {outcome::file, std::move(info)};
     }
@@ -834,14 +875,44 @@ private:
         res.set(http::field::last_modified, info.last_modified);
         if (fallback) res.set(http::field::cache_control, "no-cache");
         else if (info.cache_control) res.set(http::field::cache_control, *info.cache_control);
+        if (info.variants.size() > 1) res.set(http::field::vary, "Accept-Encoding");
         if (state_->options.nosniff) res.set("X-Content-Type-Options", "nosniff");
+    }
+
+    /** The representation to send: a precompressed sibling the client
+        accepts with the highest q (ties: configuration order), unless the
+        client prefers identity explicitly; identity for range requests.
+    */
+    static variant const& select_variant(request_type const& request, file_info const& info)
+    {
+        namespace http = boost::beast::http;
+        auto const& identity = info.variants.front();
+        if (info.variants.size() == 1) return identity;
+        if (request.method() == http::verb::get && request.find(http::field::range) != request.end()) return identity;
+        auto const field = request.find(http::field::accept_encoding);
+        if (field == request.end()) return identity;
+        variant const* best = nullptr;
+        double best_q = 0;
+        for (auto it = std::next(info.variants.begin()); it != info.variants.end(); ++it)
+        {
+            auto const q = accept_encoding_quality(field->value(), it->encoding).value_or(0);
+            if (q > best_q)
+            {
+                best = &*it;
+                best_q = q;
+            }
+        }
+        if (!best) return identity;
+        auto const identity_q = accept_encoding_quality(field->value(), "identity");
+        if (identity_q && *identity_q > best_q) return identity;
+        return *best;
     }
 
     response_type serve_file(request_type const& request, file_info const& info, bool fallback) const
     {
         namespace http = boost::beast::http;
         auto const& options = state_->options;
-        variant const& chosen = info.variants.front();
+        variant const& chosen = select_variant(request, info);
 
         response_type res {http::status::ok, request.version()};
         res.keep_alive(request.keep_alive());
@@ -860,6 +931,7 @@ private:
         }
 
         set_representation_headers(res, info, chosen, fallback);
+        if (!chosen.encoding.empty()) res.set(http::field::content_encoding, chosen.encoding);
         bool const ranges_enabled = options.max_ranges > 0;
         if (ranges_enabled) res.set(http::field::accept_ranges, "bytes");
 
