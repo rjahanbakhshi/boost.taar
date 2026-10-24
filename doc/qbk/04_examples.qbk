@@ -24,8 +24,10 @@ with the `curl` commands that exercise it.
  exception mapped to 404 by a soft error handler, and an OpenAPI 3.1
  document generated from the routes.]]
 [[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/htdocs_server.cpp htdocs_server.cpp]]
- [Serving a directory of static files with `handler::htdocs` on a
- multi-threaded `io_context`.]]
+ [A single-page application behind `handler::htdocs`: hashed assets
+ under `/static` cached as immutable with precompressed variants and
+ download headers from `on_response`, and the application shell as the
+ fallback for client-side routes, on a multi-threaded `io_context`.]]
 [[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/connection_state_server.cpp connection_state_server.cpp]]
  [Per-connection state with `basic_http<conn_state>`: handlers receive
  the connection's object by reference and use it for counting and a quota.]]

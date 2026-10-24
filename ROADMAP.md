@@ -1,8 +1,130 @@
 # Roadmap and known limitations
 
-What boost.taar does not do yet, grouped by how it affects a server that
-exposes one set of callables over REST, JSON-RPC and MCP. Items are
-tackled one at a time; the order below is a suggestion, not a promise.
+What boost.taar does not do, by choice or not yet. "Out of scope" lists
+deliberate omissions with the recommended alternative; "Known gaps" are
+worth closing, grouped by area, each with the likely approach. Items are
+tackled one at a time; the order is a suggestion, not a promise.
+
+## Out of scope
+
+Deliberate, not planned.
+
+- HTTP/2 and HTTP/3: Beast is HTTP/1.1 only. Terminate h2/h3 in a reverse
+  proxy in front of the server.
+- On-the-fly response compression (gzip, br, zstd): needs a compression
+  dependency. Serve precompressed files (`htdocs` picks `file.br` /
+  `file.gz` by `Accept-Encoding`) or compress in a proxy.
+- Directory listings (autoindex): an information disclosure risk. Build
+  one as an explicit route if needed.
+- Bandwidth throttling and rate limiting: belong in a proxy, or in an
+  interceptor with a user-supplied limiter.
+- `.htaccess`, rewrite engines, server-side includes, WebDAV: use
+  matchers, several routes, interceptors and guards instead.
+- Access control as a built-in feature: use interceptors and guards.
+- Custom error pages as a built-in feature: use the soft error handler
+  and the response filter.
+
+## Known gaps
+
+### Transport and connection handling
+
+- No read timeouts: no header read timeout, keep-alive idle timeout or
+  body read timeout. A slow or idle client holds a connection (and its
+  strand) indefinitely, and a client that stalls mid-upload holds
+  shutdown of that connection (body reads are shielded). Approach:
+  configurable header, idle and body timeouts on the session using the
+  stream's expiry, mapped to 408 or a silent close.
+- A client that disconnects from a streamed response is noticed only at
+  the next write; a stream suspended in a long wait keeps waiting.
+  Approach: a concurrent read watcher during streaming that keeps
+  pipelined bytes, or a documented keepalive pattern (MCP streams
+  already send keepalive comments).
+- Responses carry no `Date` header, which RFC 9110 6.6.1 asks an origin
+  server with a clock to send. Approach: let the session add it
+  (`format_http_date` exists) unless the handler or filter set one.
+- Generators (`chunked_response`, `async_generator`) co_spawn the awaited
+  operation on every `co_await` inside the body: one frame and spawn per
+  awaited operation. Approach: evaluate Asio `experimental::coro` or a
+  direct awaiter bridge when it stabilises.
+- Endpoint and session registration (`register_request_handler`,
+  `add_interceptor`, `tool`, `method`, ...) is not synchronised against
+  serving: configure before `run()` (documented; no runtime check).
+- `context_store` has no eviction hook: an MCP session that expires idle
+  is dropped without calling the endpoint's `end()` (harmless today
+  because a locked entry is never swept, but a hook would make cleanup
+  explicit).
+
+### Static files
+
+- File I/O is blocking and runs on the connection's strand thread; no
+  `sendfile`. HEAD, 304 and the caches limit it, but a slow disk stalls
+  the serving thread. Approach: Asio `stream_file` /
+  `random_access_file` (io_uring on Linux) behind a feature check.
+- Within `revalidate_after` a file rewritten with the same size is still
+  described by its previous validators (and, when it sits in the memory
+  cache, served with its previous bytes). Approach: file system change
+  notification (inotify, ReadDirectoryChangesW) to invalidate entries.
+- On Windows, `:` in a segment is refused but reserved device names
+  (`CON`, `NUL`, ...), trailing dots and short (8.3) names are not
+  filtered. Approach: reject them in the segment check on Windows.
+- Without `path_arg`, a route with several placeholders falls back to the
+  whole request path (only the `{*}` entry or a single argument is
+  picked). Approach: record the greedy placeholder's name in the context
+  when the target matcher captures it.
+- Range requests are always served from the uncompressed file, so a
+  client resuming a compressed download restarts it uncompressed.
+  Approach: apply ranges to the chosen variant once clients that need it
+  appear.
+
+### MCP
+
+- A POST never answers with an SSE stream; server notifications and
+  requests travel only over the GET stream (or stdout on stdio).
+- JSON-RPC `request_scope::report_progress` does nothing over plain HTTP
+  (no stream to carry it); only MCP and stdio deliver progress.
+- Resource template values are matched raw (no percent decoding); list
+  values are joined with commas.
+- The stdio transport is POSIX-only (`posix::stream_descriptor`); Windows
+  needs a `stream_handle` based variant.
+
+### Interceptors and guards
+
+- The response filter cannot see request attributes, so a value minted
+  by an interceptor (such as a request id) cannot be echoed by the filter
+  without being stored elsewhere. Approach: pass the request's
+  `matcher::context` (or its attributes) to the response filter.
+- `guard` runs its check on a copy of the request context (one copy of
+  `path_args` per guarded request); changes to `path_args` by the check
+  are discarded.
+
+### OpenAPI
+
+- Only `boost::describe`d types are hoisted into `components.schemas`;
+  parameters and responses are not shared as components.
+- Routes protected by interceptors are not documented as secured unless
+  the operation declares `security` explicitly.
+
+### REST
+
+- A streaming handler under `with_session` runs its body without the
+  entry's lock; state shared with other requests needs its own
+  synchronisation (documented).
+
+### Errors
+
+- `server::tcp` still calls the throwing `acceptor.local_endpoint()`;
+  practically never fails, but it would surface as an Asio exception
+  rather than `taar::exception`.
+
+### Documentation and tooling
+
+- Pre-existing doxygen "unable to resolve reference" warnings and
+  duplicate DocBook ids in the generated reference (validity errors)
+  remain; the docs build succeeds but the reference has dead links.
+- GCC 16 reports -Wdangling-pointer false positives in test coroutine
+  lambdas; tests are unaffected but the b2 log is noisy.
+- No CI configuration in the repository (CMake suite, examples, b2 and
+  docs builds are run by hand).
 
 ## Inherent to the surfaces
 
@@ -21,37 +143,14 @@ rather than planned.
   are separate stores. One logical user session spanning both requires the
   application to map keys itself.
 
-## Transport
-
-- HTTP/2 and response compression are out of scope for now.
-
-## MCP
-
-- A POST never answers with an SSE stream; notifications go over the GET
-  stream (or stdout on stdio).
-- Resource templates: RFC 6570 values are matched raw (no percent
-  decoding); list values are joined with commas.
-- The stdio transport is POSIX-only (`posix::stream_descriptor`).
-
-## OpenAPI
-
-- Only `boost::describe`d types are hoisted into `components.schemas`;
-  parameters and responses are not shared as components.
-
-## REST
-
-- A streaming handler under `with_session` runs its body without the
-  entry's lock; state it shares with other requests needs its own
-  synchronisation.
-- A client that disconnects during a stream is noticed at the stream's
-  next write: a stream suspended in a long wait between chunks keeps
-  waiting until that wait ends.
-- Plain handlers are shielded from shutdown, including one reading a
-  streamed request body: a client that stops sending mid-upload holds
-  shutdown of that connection until it closes (no idle timeout yet).
-
 ## Recently closed
 
+- Static files: `handler::htdocs` rework with `htdocs_options` (safe
+  resolution of the route's greedy capture, MIME table, validators and
+  RFC 9110 conditional requests, `Cache-Control` rules, single and
+  multipart ranges with `If-Range`, precompressed variants with `Vary`,
+  metadata and memory caches, `on_response`), and core helpers for
+  HTTP-dates, Range, entity tags, Accept-Encoding and `segmented_body`.
 - Cancellation coverage across shutdown, client disconnect, JSON-RPC
   cancel and MCP `notifications/cancelled`, with the `cancellation_server`
   example; aborted `a && b` waits no longer surface as hard errors.

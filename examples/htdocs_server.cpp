@@ -6,11 +6,25 @@
 //
 // Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
-// Static file server. handler::htdocs maps the greedy {*path} capture onto a
-// document root, infers content types, and serves index.html for directories.
+// Static file server for a bundled single-page application. The document
+// root is laid out as a front-end build tool emits it:
 //
-//   ./htdocs_server 8080 ./doc
-//   curl localhost:8080/main.qbk
+//   <root>/index.html                  the application shell
+//   <root>/static/app.3f9a1c2e.js      content-hashed assets
+//   <root>/static/app.3f9a1c2e.js.br   optional precompressed siblings
+//   <root>/static/app.3f9a1c2e.js.gz
+//   <root>/static/downloads/...        files offered as downloads
+//
+// /static/{*path} serves the assets: hashed names are cached for a year as
+// immutable, precompressed siblings are chosen by Accept-Encoding, ranges
+// and conditional requests work as usual. Everything else is the
+// application: existing files are served, and paths without an extension
+// (client-side routes such as /settings/profile) fall back to index.html.
+//
+//   ./htdocs_server 8080 ./dist
+//   curl -i localhost:8080/settings/profile                 # index.html, no-cache
+//   curl -i -H 'Accept-Encoding: br' localhost:8080/static/app.3f9a1c2e.js
+//   curl -i -H 'Range: bytes=0-99' localhost:8080/static/downloads/manual.pdf
 //
 
 #include <boost/taar/core/cancellation_signals.hpp>
@@ -20,10 +34,10 @@
 #include <boost/taar/matcher/target.hpp>
 #include <boost/taar/server/tcp.hpp>
 #include <boost/taar/session/http.hpp>
-#include <boost/asio/bind_cancellation_slot.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/signal_set.hpp>
+#include <filesystem>
 #include <iostream>
 #include <thread>
 #include <vector>
@@ -41,11 +55,39 @@ int main(int argc, char* argv[])
         std::cerr << "Usage: htdocs_server <port> <document-root>\n";
         return 1;
     }
+    std::filesystem::path const root {argv[2]};
+
+    // Assets: long-lived caching for hashed names, precompressed variants.
+    taar::handler::htdocs_options assets;
+    assets.root = root / "static";
+    assets.cache_rules = taar::handler::cache_rules::immutable_hashed();
+    assets.default_cache_control = "public, max-age=3600";
+    assets.precompressed = {"br", "gzip"};
+    assets.on_response = [](std::string_view path, http::response_header<>& header)
+    {
+        if (path.starts_with("downloads/"))
+        {
+            header.set(http::field::content_disposition, "attachment");
+        }
+    };
+
+    // The application: index.html for client-side routes, revalidated on every use.
+    taar::handler::htdocs_options app;
+    app.root = root;
+    app.fallback_document = "index.html";
+    app.cache_rules = taar::handler::cache_rules::immutable_hashed();
 
     taar::session::http session;
+    session.set_response_filter([](http::request_header<> const&, http::response_header<>& header)
+    {
+        header.set(http::field::server, "taar-htdocs");
+    });
+    session.register_request_handler(
+        method == http::verb::get && target == "/static/{*path}",
+        taar::handler::htdocs {std::move(assets)});
     session.register_request_handler(
         method == http::verb::get && target == "/{*path}",
-        taar::handler::htdocs {argv[2]});
+        taar::handler::htdocs {std::move(app)});
 
     net::io_context io;
     taar::cancellation_signals signals;
@@ -58,6 +100,7 @@ int main(int argc, char* argv[])
             [](net::ip::tcp::endpoint const& ep) { std::clog << "Listening on " << ep << '\n'; }),
         taar::ignore_and_rethrow);
 
+    // File I/O is blocking and runs on these threads: size the pool for the disk.
     std::vector<std::jthread> threads;
     for (int i = 0; i < 4; ++i) threads.emplace_back([&] { io.run(); });
 }

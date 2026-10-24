@@ -144,9 +144,31 @@ type and the `co_return` change.
 
 [heading Serving static files]
 
+`handler::htdocs` serves a directory: the greedy capture names the file,
+HEAD is answered from the same route, and validators, conditional
+requests, ranges and precompressed variants work without configuration.
+
     http_session.register_request_handler(
         method == http::verb::get && target == "/{*path}",
         taar::handler::htdocs {document_root});
+
+`htdocs_options` tunes it. A typical front end mounts its hashed assets
+with long-lived caching and serves the application shell for client-side
+routes:
+
+    taar::handler::htdocs_options assets;
+    assets.root = "./dist/static";
+    assets.cache_rules = taar::handler::cache_rules::immutable_hashed();
+    http_session.register_request_handler(
+        method == http::verb::get && target == "/static/{*path}",
+        taar::handler::htdocs {std::move(assets)});
+
+    taar::handler::htdocs_options app;
+    app.root = "./dist";
+    app.fallback_document = "index.html";   // /settings/profile -> index.html
+    http_session.register_request_handler(
+        method == http::verb::get && target == "/{*path}",
+        taar::handler::htdocs {std::move(app)});
 
 [heading Custom handler]
 

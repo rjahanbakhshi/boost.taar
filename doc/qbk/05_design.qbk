@@ -775,4 +775,136 @@ Where the specifications leave room, Taar makes these choices:
 
 [endsect]
 
+[section:serving_files Serving files]
+
+`handler::htdocs` is a static file handler meant to face the internet
+directly. Its rules follow the HTTP semantics of RFC 9110 rather than any
+particular server's configuration language.
+
+[heading Resolution and safety]
+
+The file is the route's greedy capture (`target == "/static/{*path}"`
+serves `root/app.css` for `/static/app.css`), selected as the `{*}`
+entry or the only path argument, or named by `htdocs_options::path_arg`
+when a route has several placeholders; without path arguments the whole
+request path is used. The query never takes part.
+
+* The path is percent-decoded by Boost.URL. An encoded `/` (`%2F`),
+  backslash (`%5C`) or NUL (`%00`) anywhere in the path, and any `.` or
+  `..` segment after decoding, answer 400. Names merely containing dots
+  (`a..b.txt`) are fine.
+* The resolved file, symbolic links followed, must lie under the
+  canonical root; a link pointing outside answers 404 unless
+  `follow_symlinks_outside_root`. Names starting with `.` answer 404
+  unless `serve_hidden`; `.well-known` is always served. Refusals are
+  404, not 403, so the tree cannot be probed.
+* Only regular files are served: a directory requested without a
+  trailing slash is redirected (301, query kept) to the slash form; with
+  the slash the `index_files` are tried in order, and none means 404.
+  There are no directory listings.
+* GET and HEAD are served, anything else is 405 with `Allow: GET, HEAD`.
+* Error responses are fixed `text/plain` reason phrases. They never echo
+  the request, so a crafted path cannot inject markup.
+* `fallback_document` turns misses into the application shell for
+  single-page applications: a missing path whose last segment has no
+  extension (or that `fallback_when` accepts) gets the document with
+  `Cache-Control: no-cache`; missing assets stay 404.
+
+Every response is a typed `http::response<segmented_body>`, so the
+session's response filter and HEAD handling apply to files and errors
+alike, and `with_session` and `guard` can wrap the handler. The
+`on_response` hook sees the header of every served file (200, 206, 304)
+for per-file additions such as `Content-Disposition`.
+
+[heading Content types]
+
+The media type comes from the last extension, case-insensitively: first
+`mime_types` (user additions and overrides), then a built-in table of
+web, image, font, audio, video, archive and office formats (`mime.hpp`),
+else `default_mime_type`. Text types get `; charset=utf-8` unless the
+configured value already has a parameter. `X-Content-Type-Options:
+nosniff` accompanies every served file unless `nosniff` is turned off.
+
+[heading Validators and conditional requests]
+
+`Last-Modified` is the modification time at second resolution (never
+later than the current time). The `ETag` is strong and derived from size
+and modification time, plus the content coding for a precompressed
+variant, so every representation has its own validator. Preconditions
+are evaluated in the order RFC 9110 13.2.2 prescribes:
+
+# `If-Match` (strong comparison, `*` and lists): 412 when nothing matches;
+# otherwise `If-Unmodified-Since`: 412 when modified since;
+# `If-None-Match` (weak comparison): 304 when a tag matches;
+# otherwise `If-Modified-Since`: 304 when not modified since.
+
+Invalid dates are ignored. A 304 carries `ETag`, `Last-Modified`,
+`Cache-Control` and `Vary` and no body or content metadata.
+
+`Cache-Control` comes from `cache_rules`, a first-match list of
+predicates or globs on the relative path, then `default_cache_control`
+(none by default). The common front-end policy is one call:
+`cache_rules::immutable_hashed()` caches names carrying a content hash
+(`app.3f9a1c2e.js`, `chunk-5ZQ3X2AB.js`) for a year as `immutable` and
+sends `no-cache` for HTML. The pattern is: emit hashed names from the
+build, reference them from HTML that is revalidated on every load, and a
+deployment is picked up by the next page load while assets never need
+revalidation.
+
+[heading Ranges]
+
+Full responses announce `Accept-Ranges: bytes`. A single range answers
+206 with `Content-Range`; several answer `multipart/byteranges` with a
+random boundary, after overlapping and adjacent ranges are merged. More
+than `max_ranges` specs (16) or a malformed header are ignored and the
+whole file is sent; a header with no satisfiable range answers 416 with
+`Content-Range: bytes */size`. `If-Range` holds with a strong tag that
+matches or a date equal to `Last-Modified`; otherwise the whole file is
+sent. Ranges are byte windows of the open file: nothing is buffered.
+
+[heading Precompressed variants]
+
+With `precompressed = {"br", "gzip"}` (the default) a file `app.js` with
+a sibling `app.js.br` or `app.js.gz` that is not older than the original
+is served with `Content-Encoding` when `Accept-Encoding` accepts the
+coding. The highest q wins, ties go to the configured order, and
+identity wins only when the client ranks it higher explicitly;
+`identity;q=0` is respected. A request without `Accept-Encoding` gets
+identity. Files with a sibling carry `Vary: Accept-Encoding`, on 304
+too. A request with `Range` is served from identity so that offsets
+always refer to the uncompressed bytes. Nothing is compressed on the
+fly.
+
+[heading Caches]
+
+A metadata cache (resolution, stat results, variants, validators, media
+type) keyed by the decoded relative path holds `metadata_cache_entries`
+(4096) entries and checks the file system again on the first use after
+`revalidate_after` (1 s). Within that window a changed file can still be
+described by its previous validators; a file whose size changed or that
+vanished is noticed when it is opened and looked up afresh, so a body
+never contradicts its `Content-Length`. Files up to
+`memory_cache_max_file_size` (64 KiB) are kept in memory, up to
+`memory_cache_max_total` (32 MiB) in all, and served from a shared
+immutable buffer. Copies of a handler share the caches behind one mutex,
+which is what lets one handler serve every connection strand.
+
+[heading Blocking file I/O]
+
+stat, open and read are synchronous calls on the connection's thread;
+HEAD and 304 never open the file and the caches absorb most stats, but a
+slow disk still stalls the thread that serves the request. Size the
+thread pool accordingly. Asynchronous file I/O (Asio `stream_file`,
+io_uring) and `sendfile` are future work.
+
+[heading Out of scope]
+
+Deliberately not provided: directory listings, on-the-fly compression,
+bandwidth throttling, `.htaccess` files and rewrite rules (use matchers
+and several routes), access control (use interceptors and guards),
+custom error pages beyond the soft error handler and the response
+filter, WebDAV, `sendfile` and asynchronous file I/O.
+
+[endsect]
+
 [endsect]

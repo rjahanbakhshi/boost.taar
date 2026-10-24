@@ -9,6 +9,39 @@
 
 [heading Unreleased]
 
+* `handler::htdocs` rework, keeping `htdocs{root, default_doc}` source
+  compatible and adding `htdocs_options`. Fixed: the served path is the
+  route's greedy capture, not the request target (a `/static/{*path}`
+  mount no longer serves `root/static/...`) and the query is ignored;
+  paths are percent-decoded and checked segment by segment (encoded
+  `/`, backslash, NUL, `.` and `..` answer 400, `a..b.txt` is served)
+  and must stay under the canonical root, symbolic links included;
+  error bodies are fixed `text/plain` texts that never echo the target;
+  directories without a trailing slash are redirected (301) instead of
+  failing with 500; I/O errors are 500 (403 for permission denied)
+  instead of 400; other methods answer 405 with `Allow: GET, HEAD`.
+* `htdocs` features: hidden files refused, `index_files`, SPA
+  `fallback_document`, a built-in MIME table with overrides and charset,
+  `nosniff`, `Last-Modified` and strong `ETag`, RFC 9110 conditional
+  requests (412, 304), `Cache-Control` rules with
+  `cache_rules::immutable_hashed()`, single and multipart ranges with
+  `If-Range`, precompressed `br`/`gzip` siblings with `Vary`, metadata
+  and small-file memory caches shared across threads, and an
+  `on_response` hook. Responses are typed
+  `http::response<segmented_body>`, so the response filter applies.
+* New core helpers: `http_date.hpp` (format and parse HTTP-dates),
+  `mime.hpp`, `byte_range.hpp` (Range parsing and coalescing),
+  `entity_tag.hpp` (entity tags and If-Match / If-None-Match lists),
+  `accept_encoding.hpp` (q-values) and `segmented_body.hpp` (a body of
+  text, shared buffers and file windows).
+* Behaviour changes for `htdocs` users: `operator()` returns
+  `http::response<segmented_body>` (it converts to `message_generator`);
+  `.php` is no longer served as `text/html` and unknown extensions are
+  `application/octet-stream` instead of `application/text`; JavaScript is
+  `text/javascript`; text types carry `charset=utf-8`; hidden files are
+  404 by default; a request for a directory without the trailing slash
+  is redirected.
+
 * Cancellation coverage: tests drive shutdown, client disconnect,
   `jsonrpc::endpoint::cancel` and MCP `notifications/cancelled` into
   nested waits, streams, awaitable operators and explicit checks, and the

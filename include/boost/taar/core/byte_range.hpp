@@ -31,7 +31,7 @@ struct byte_range
     friend constexpr bool operator==(byte_range const&, byte_range const&) = default;
 };
 
-/// Outcome of @ref parse_range.
+/// Outcome of `parse_range`.
 enum class range_status
 {
     ignored,        ///< Malformed, another unit, or too many ranges: serve the whole representation (200).
@@ -39,7 +39,7 @@ enum class range_status
     unsatisfiable,  ///< Valid syntax but no range overlaps the representation (416).
 };
 
-/// The result of @ref parse_range.
+/// The result of `parse_range`.
 struct range_set
 {
     range_status status = range_status::ignored;    ///< What to answer.

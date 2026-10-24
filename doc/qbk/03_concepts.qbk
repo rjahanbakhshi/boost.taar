@@ -126,8 +126,8 @@ overloading the `boost::taar::response_from_tag` tag (declared in
 `<boost/taar/core/response_from_tag.hpp>`). This extension point is the
 basis for the automatic JSON conversion of `boost::json::value`,
 `boost::json::object` and `boost::json::array`, the text conversion of
-strings and arithmetic types, and the file conversion used by
-`taar::handler::htdocs`.
+strings and arithmetic types. (`taar::handler::htdocs` builds its
+responses itself, as a typed `http::response<segmented_body>`.)
 
 [endsect]
 

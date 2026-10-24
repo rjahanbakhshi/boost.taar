@@ -63,8 +63,9 @@ with two adapters:
   the callable is converted into an HTTP response via the
   `tag_invoke`-based `response_from` extension point, so user-defined
   return types are supported out of the box.
-* `taar::handler::htdocs` serves static documents from a root directory,
-  with content-type inferred from the file extension.
+* `taar::handler::htdocs` serves static documents from a root directory:
+  safe path resolution, content types, validators and conditional
+  requests, ranges, precompressed variants and caching.
 
 You can also supply a hand-written callable with the signature
 `(request, context) -> http::message_generator`, or one returning a

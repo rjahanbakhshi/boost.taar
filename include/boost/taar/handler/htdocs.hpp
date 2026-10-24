@@ -44,15 +44,15 @@
 
 namespace boost::taar::handler {
 
-/** A `Cache-Control` rule of @ref htdocs_options::cache_rules.
+/** A `Cache-Control` rule of `htdocs_options::cache_rules`.
 
     Rules are tried in order on the served file's decoded path relative to
     the root (no leading slash, e.g. `assets/app.3f9a1c2e.js`); the first
-    whose @ref match returns true supplies the header value.
+    whose `match` returns true supplies the header value.
 
     @code
     options.cache_rules = {
-        taar::handler::cache_rule::glob("assets/**", "public, max-age=86400"),
+        taar::handler::cache_rule::glob("*.woff2", "public, max-age=86400"),
         {[](std::string_view p) { return p.ends_with(".html"); }, "no-cache"},
     };
     @endcode
@@ -62,10 +62,10 @@ struct cache_rule
     /// Predicate on the relative path.
     std::function<bool(std::string_view)> match;
 
-    /// The `Cache-Control` value sent when @ref match accepts the path.
+    /// The `Cache-Control` value sent when `match` accepts the path.
     std::string value;
 
-    /** A rule matching a glob pattern (see @ref cache_rules::glob_match).
+    /** A rule matching a glob pattern (see `cache_rules::glob_match`).
 
         @param pattern `*` matches within a segment, `**` across segments,
                        `?` one character. A pattern without `/` is matched
@@ -168,7 +168,7 @@ inline bool looks_content_hashed(std::string_view path) noexcept
 }
 
 /** The usual policy for bundled front ends: content-hashed file names
-    (@ref looks_content_hashed) are cached for a year as `immutable`, and
+    (`looks_content_hashed`) are cached for a year as `immutable`, and
     HTML documents are revalidated on every use (`no-cache`).
 */
 inline std::vector<cache_rule> immutable_hashed()
@@ -209,7 +209,7 @@ struct htdocs_options
     /// Files tried in order for a directory request ending in `/`.
     std::vector<std::string> index_files {"index.html"};
 
-    /** The `path_args` entry naming the file, relative to @ref root.
+    /** The `path_args` entry naming the file, relative to `root`.
 
         Empty (the default) selects the route's greedy capture: the `{*}`
         entry, or the only path argument when there is exactly one; with
@@ -221,14 +221,14 @@ struct htdocs_options
     /// Serve files and directories whose name starts with `.` (`.well-known` is always served).
     bool serve_hidden = false;
 
-    /// Serve symbolic links that resolve outside @ref root (refused with 404 by default).
+    /// Serve symbolic links that resolve outside `root` (refused with 404 by default).
     bool follow_symlinks_outside_root = false;
 
-    /** A document, relative to @ref root, served for requests that match
+    /** A document, relative to `root`, served for requests that match
         no file: the single-page application fallback.
 
         It answers a GET or HEAD whose path does not exist when
-        @ref fallback_when says so (by default: the last path segment has
+        `fallback_when` says so (by default: the last path segment has
         no extension, so `/app/settings` falls back but `/app/logo.png`
         stays 404). The fallback is sent with `Cache-Control: no-cache`.
     */
@@ -243,14 +243,14 @@ struct htdocs_options
     */
     std::unordered_map<std::string, std::string> mime_types {};
 
-    /// Media type for extensions neither @ref mime_types nor the built-in table know.
+    /// Media type for extensions neither `mime_types` nor the built-in table know.
     std::string default_mime_type = "application/octet-stream";
 
     /// Send `X-Content-Type-Options: nosniff` with every served file.
     bool nosniff = true;
 
     /** `Cache-Control` rules, first match wins (see @ref cache_rule and
-        @ref cache_rules::immutable_hashed). Empty by default.
+        `cache_rules::immutable_hashed`). Empty by default.
     */
     std::vector<cache_rule> cache_rules {};
 
@@ -265,8 +265,8 @@ struct htdocs_options
 
     /** Precompressed siblings to look for, in order of preference, as
         content codings: `br` is `file.br`, `gzip` is `file.gz`, `zstd` is
-        `file.zst`, any other coding `file.<coding>`. A sibling is served
-        with `Content-Encoding` and the original's media type when the
+        `file.zst`, and any other coding `xyz` is `file.xyz`. A sibling is
+        served with `Content-Encoding` and the original's media type when the
         request's `Accept-Encoding` accepts the coding (q-values honoured)
         and it is not older than the original. Files with a sibling are
         sent with `Vary: Accept-Encoding`. No compression on the fly.
@@ -299,7 +299,7 @@ struct htdocs_options
     std::function<void(std::string_view, boost::beast::http::response_header<>&)> on_response {};
 };
 
-/// Counters of an @ref htdocs handler's caches, from @ref htdocs::cache_stats.
+/// Counters of an @ref htdocs handler's caches, from `htdocs::cache_stats`.
 struct htdocs_cache_stats
 {
     std::size_t metadata_entries = 0;   ///< Entries in the metadata cache.
@@ -322,7 +322,7 @@ struct htdocs_cache_stats
 
     @par Resolution and safety
     The file is the route's greedy capture (see
-    @ref htdocs_options::path_arg), percent-decoded by Boost.URL; the
+    `htdocs_options::path_arg`), percent-decoded by Boost.URL; the
     query never takes part. A path with an encoded `/`, `\` or NUL, or a
     `.` or `..` segment, is answered 400. The resolved file must stay
     under the canonical root (symbolic links included) and hidden names
@@ -333,16 +333,37 @@ struct htdocs_cache_stats
     405 with `Allow: GET, HEAD`. Error responses are short fixed
     `text/plain` texts that never echo the request.
 
+    @par Validators and conditional requests
+    Files carry `Last-Modified` and a strong `ETag` (size, modification
+    time and content coding). `If-Match`, `If-Unmodified-Since`,
+    `If-None-Match` and `If-Modified-Since` are evaluated in the order of
+    RFC 9110 13.2.2 (412, 304). `Cache-Control` comes from
+    `htdocs_options::cache_rules`.
+
+    @par Ranges and variants
+    `Range` requests are answered with 206 (one range, or
+    `multipart/byteranges`), 416 when unsatisfiable, honouring `If-Range`.
+    Precompressed siblings (`file.br`, `file.gz`) are chosen by
+    `Accept-Encoding` and announced with `Vary: Accept-Encoding`; range
+    requests are served from the uncompressed file.
+
     @par Responses
     Every response, errors included, is a typed
-    `http::response<segmented_body>`, so the session's response filter
-    and HEAD handling apply. The handler is cheap to copy; copies share
-    their state and may be used from several threads at once.
+    `http::response<segmented_body>` (convertible to a
+    `message_generator`), so the session's response filter and HEAD
+    handling apply. HEAD and 304 never open the file. The handler is cheap
+    to copy; copies share their state and caches and may be used from
+    several threads at once.
+
+    @par Caches
+    Path resolution, stat results and validators are cached and checked
+    again after `htdocs_options::revalidate_after`; small files are kept
+    in memory. See the cache fields of @ref htdocs_options.
 
     @par Blocking I/O
     File system calls (stat, open, read) are synchronous and run on the
-    connection's thread. Serve from local disks, or keep large trees
-    behind a dedicated server.
+    connection's thread; asynchronous file I/O is not used. Serve from
+    local disks, and size the thread pool for the slowest disk.
 */
 class htdocs
 {
@@ -357,7 +378,8 @@ public:
 
         @throws boost::taar::exception (`errc::invalid_argument`) if an
                 index file or the fallback document is not a plain
-                relative path.
+                relative path, or a precompressed entry is not a content
+                coding token (or is `identity`).
     */
     explicit htdocs(htdocs_options options)
         : state_ {std::make_shared<state>(std::move(options))}
@@ -414,7 +436,7 @@ public:
         return out;
     }
 
-    /** The configured @ref htdocs_options::path_arg, for the session's
+    /** The configured `htdocs_options::path_arg`, for the session's
         registration-time check against the route template; empty when
         the default selection is used.
     */
@@ -851,7 +873,7 @@ private:
         return make_file(p, relative);
     }
 
-    /// @ref resolve through the metadata cache; @a fresh bypasses (and refreshes) it.
+    /// `resolve` through the metadata cache; @a fresh bypasses (and refreshes) it.
     lookup cached_resolve(std::string const& relative, bool trailing_slash, bool fresh) const
     {
         auto& st = *state_;

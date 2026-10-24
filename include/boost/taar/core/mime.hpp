@@ -140,7 +140,7 @@ inline std::string file_extension(std::string_view filename)
 /** Media type for @a filename from the built-in table, without parameters.
 
     Matching is case-insensitive on the last extension (see
-    @ref file_extension). The table covers web documents, scripts, styles,
+    `file_extension`). The table covers web documents, scripts, styles,
     images, fonts, audio, video, archives and office formats; JavaScript is
     `text/javascript` (RFC 9239).
 
@@ -186,7 +186,7 @@ inline bool is_text_mime_type(std::string_view type) noexcept
 }
 
 /** @a type with `; charset=utf-8` appended when it is a text type
-    (@ref is_text_mime_type) that carries no parameter yet; otherwise
+    (`is_text_mime_type`) that carries no parameter yet; otherwise
     @a type unchanged.
 */
 inline std::string with_utf8_charset(std::string_view type)
