@@ -30,7 +30,9 @@
 #include <filesystem>
 #include <format>
 #include <functional>
+#include <list>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <random>
 #include <string>
@@ -271,12 +273,40 @@ struct htdocs_options
     */
     std::vector<std::string> precompressed {"br", "gzip"};
 
+    /** Capacity of the metadata cache (path resolution, stat results,
+        variants, validators, media type), keyed by the decoded relative
+        path; least recently used entries are dropped. 0 disables it.
+    */
+    std::size_t metadata_cache_entries = 4096;
+
+    /** Age after which a cached entry is checked against the file system
+        again on its next use. Within this window a changed file may still
+        be described by its previous validators.
+    */
+    std::chrono::milliseconds revalidate_after {1000};
+
+    /// Files up to this size are kept in memory once read; 0 disables the content cache.
+    std::size_t memory_cache_max_file_size = 64 * 1024;
+
+    /// Total bytes the content cache may hold (least recently used files are dropped first).
+    std::size_t memory_cache_max_total = 32 * 1024 * 1024;
+
     /** Called for every served file (200, 206, 304) with the file's
         relative path and the response header, just before the response
         is returned: add `Content-Disposition`, security headers, and so
         on. It runs on the connection's thread and must be thread-safe.
     */
     std::function<void(std::string_view, boost::beast::http::response_header<>&)> on_response {};
+};
+
+/// Counters of an @ref htdocs handler's caches, from @ref htdocs::cache_stats.
+struct htdocs_cache_stats
+{
+    std::size_t metadata_entries = 0;   ///< Entries in the metadata cache.
+    std::size_t memory_entries = 0;     ///< Files held by the content cache.
+    std::size_t memory_bytes = 0;       ///< Bytes held by the content cache.
+    std::size_t memory_hits = 0;        ///< Responses served from the content cache.
+    std::size_t memory_loads = 0;       ///< Files read into the content cache.
 };
 
 /** A request handler that serves static files from a document root.
@@ -373,6 +403,17 @@ public:
         return state_->options;
     }
 
+    /// A snapshot of the cache counters (shared by all copies of this handler).
+    htdocs_cache_stats cache_stats() const
+    {
+        std::lock_guard lock {state_->mutex};
+        auto out = state_->stats;
+        out.metadata_entries = state_->metadata.size();
+        out.memory_entries = state_->content.size();
+        out.memory_bytes = state_->content_bytes;
+        return out;
+    }
+
     /** The configured @ref htdocs_options::path_arg, for the session's
         registration-time check against the route template; empty when
         the default selection is used.
@@ -411,6 +452,66 @@ private:
     {
         outcome kind = outcome::not_found;
         std::shared_ptr<file_info const> file;
+    };
+
+    /// A small least-recently-used map.
+    template <typename Value>
+    class lru
+    {
+    public:
+        std::size_t size() const noexcept { return index_.size(); }
+
+        Value* find(std::string const& key)
+        {
+            auto const it = index_.find(key);
+            if (it == index_.end()) return nullptr;
+            items_.splice(items_.begin(), items_, it->second);
+            return &it->second->second;
+        }
+
+        void put(std::string key, Value value)
+        {
+            if (auto* existing = find(key))
+            {
+                *existing = std::move(value);
+                return;
+            }
+            items_.emplace_front(key, std::move(value));
+            index_.emplace(std::move(key), items_.begin());
+        }
+
+        void erase(std::string const& key)
+        {
+            auto const it = index_.find(key);
+            if (it == index_.end()) return;
+            items_.erase(it->second);
+            index_.erase(it);
+        }
+
+        /// Remove and return the least recently used value.
+        Value pop_oldest()
+        {
+            auto value = std::move(items_.back().second);
+            index_.erase(items_.back().first);
+            items_.pop_back();
+            return value;
+        }
+
+    private:
+        std::list<std::pair<std::string, Value>> items_;
+        std::unordered_map<std::string, typename std::list<std::pair<std::string, Value>>::iterator> index_;
+    };
+
+    struct metadata_entry
+    {
+        lookup result;
+        std::chrono::steady_clock::time_point checked;
+    };
+
+    struct content_entry
+    {
+        std::shared_ptr<std::string const> data;
+        std::filesystem::file_time_type mtime;
     };
 
     struct state
@@ -499,6 +600,13 @@ private:
         htdocs_options options;
         std::filesystem::path root;         // canonical document root
         std::string default_type;
+
+        // Shared by every copy of the handler and every connection strand.
+        std::mutex mutex;
+        lru<metadata_entry> metadata;
+        lru<content_entry> content;         // keyed by the file's path
+        std::size_t content_bytes = 0;
+        htdocs_cache_stats stats;
     };
 
     static htdocs_options legacy_options(std::string root, std::string default_doc)
@@ -743,6 +851,35 @@ private:
         return make_file(p, relative);
     }
 
+    /// @ref resolve through the metadata cache; @a fresh bypasses (and refreshes) it.
+    lookup cached_resolve(std::string const& relative, bool trailing_slash, bool fresh) const
+    {
+        auto& st = *state_;
+        if (st.options.metadata_cache_entries == 0) return resolve(relative, trailing_slash);
+        std::string key = trailing_slash ? relative + "/" : relative;
+        auto const now = std::chrono::steady_clock::now();
+        if (!fresh)
+        {
+            std::lock_guard lock {st.mutex};
+            if (auto const* entry = st.metadata.find(key); entry && now - entry->checked < st.options.revalidate_after)
+            {
+                return entry->result;
+            }
+        }
+        auto result = resolve(relative, trailing_slash);
+        std::lock_guard lock {st.mutex};
+        if (result.kind == outcome::error)
+        {
+            st.metadata.erase(key);         // transient: do not remember
+        }
+        else
+        {
+            st.metadata.put(std::move(key), {result, now});
+            while (st.metadata.size() > st.options.metadata_cache_entries) st.metadata.pop_oldest();
+        }
+        return result;
+    }
+
     response_type serve(
         request_type const& request,
         boost::taar::matcher::context const& context) const
@@ -786,51 +923,57 @@ private:
             relative += seg;
         }
 
-        auto found = resolve(relative, trailing_slash);
-        bool fallback = false;
-        if (found.kind == outcome::not_found && options.fallback_document)
+        // A file that changed between the cached stat and the open is
+        // looked up once more, bypassing the cache.
+        for (bool fresh : {false, true})
         {
-            auto const last = relative.substr(relative.rfind('/') + 1);
-            bool const wanted = options.fallback_when
-                ? options.fallback_when(relative)
-                : last.find('.') == std::string::npos;
-            if (wanted)
+            auto found = cached_resolve(relative, trailing_slash, fresh);
+            bool fallback = false;
+            if (found.kind == outcome::not_found && options.fallback_document)
             {
-                auto doc = resolve(*options.fallback_document, false);
-                if (doc.kind == outcome::file)
+                auto const last = relative.substr(relative.rfind('/') + 1);
+                bool const wanted = options.fallback_when
+                    ? options.fallback_when(relative)
+                    : last.find('.') == std::string::npos;
+                if (wanted)
                 {
-                    found = std::move(doc);
-                    fallback = true;
+                    auto doc = cached_resolve(*options.fallback_document, false, fresh);
+                    if (doc.kind == outcome::file)
+                    {
+                        found = std::move(doc);
+                        fallback = true;
+                    }
                 }
             }
-        }
 
-        switch (found.kind)
-        {
-        case outcome::file:
-            break;
-        case outcome::redirect:
-        {
-            auto res = error_response(request, http::status::moved_permanently);
-            std::string location {encoded_path};
-            location += '/';
-            if (url.has_query())
+            switch (found.kind)
             {
-                location += '?';
-                location += url.encoded_query();
+            case outcome::file:
+                break;
+            case outcome::redirect:
+            {
+                auto res = error_response(request, http::status::moved_permanently);
+                std::string location {encoded_path};
+                location += '/';
+                if (url.has_query())
+                {
+                    location += '?';
+                    location += url.encoded_query();
+                }
+                res.set(http::field::location, location);
+                return res;
             }
-            res.set(http::field::location, location);
-            return res;
-        }
-        case outcome::forbidden:
-            return error_response(request, http::status::forbidden);
-        case outcome::error:
-            return error_response(request, http::status::internal_server_error);
-        case outcome::not_found:
-            return error_response(request, http::status::not_found);
-        }
+            case outcome::forbidden:
+                return error_response(request, http::status::forbidden);
+            case outcome::error:
+                return error_response(request, http::status::internal_server_error);
+            case outcome::not_found:
+                return error_response(request, http::status::not_found);
+            }
 
-        return serve_file(request, *found.file, fallback);
+            if (auto res = serve_file(request, *found.file, fallback)) return std::move(*res);
+        }
+        return error_response(request, http::status::internal_server_error);
     }
 
     enum class precondition { proceed, failed, not_modified };
@@ -908,7 +1051,8 @@ private:
         return *best;
     }
 
-    response_type serve_file(request_type const& request, file_info const& info, bool fallback) const
+    /// The response for a resolved file; empty if the file changed under the cached metadata.
+    std::optional<response_type> serve_file(request_type const& request, file_info const& info, bool fallback) const
     {
         namespace http = boost::beast::http;
         auto const& options = state_->options;
@@ -959,11 +1103,23 @@ private:
         }
 
         auto& body = res.body();
+        std::shared_ptr<std::string const> memory;
         if (chosen.size > 0)
         {
-            if (auto const failed = open_content(body, chosen)) return error_response(request, *failed);
+            switch (open_content(body, chosen, memory))
+            {
+            case content_status::ok: break;
+            case content_status::changed: return std::nullopt;
+            case content_status::not_found: return error_response(request, http::status::not_found);
+            case content_status::forbidden: return error_response(request, http::status::forbidden);
+            case content_status::error: return error_response(request, http::status::internal_server_error);
+            }
         }
-        auto append = [&](std::uint64_t offset, std::uint64_t length) { body.append_file_range(offset, length); };
+        auto append = [&](std::uint64_t offset, std::uint64_t length)
+        {
+            if (memory) body.append_buffer(memory, offset, length);
+            else body.append_file_range(offset, length);
+        };
 
         if (ranges.empty())
         {
@@ -1031,24 +1187,81 @@ private:
         return std::format("taar-{:016x}{:016x}", engine(), engine());
     }
 
-    /// Attach the chosen representation's content to @a body; an error status on failure.
-    std::optional<boost::beast::http::status> open_content(segmented_body::value_type& body, variant const& chosen) const
+    enum class content_status { ok, changed, not_found, forbidden, error };
+
+    /** Make the chosen representation's bytes available: a shared buffer
+        from (or newly put into) the content cache in @a memory, or the open
+        file attached to @a body.
+    */
+    content_status open_content(
+        segmented_body::value_type& body,
+        variant const& chosen,
+        std::shared_ptr<std::string const>& memory) const
     {
-        namespace http = boost::beast::http;
+        auto& st = *state_;
+        bool const cacheable = chosen.size <= st.options.memory_cache_max_file_size &&
+            chosen.size <= st.options.memory_cache_max_total;
+        auto const key = path_utf8(chosen.path);
+        if (cacheable)
+        {
+            std::lock_guard lock {st.mutex};
+            if (auto const* entry = st.content.find(key))
+            {
+                if (entry->data->size() == chosen.size && entry->mtime == chosen.mtime)
+                {
+                    ++st.stats.memory_hits;
+                    memory = entry->data;
+                    return content_status::ok;
+                }
+                st.content_bytes -= entry->data->size();
+                st.content.erase(key);
+            }
+        }
+
         boost::beast::file file;
         boost::system::error_code ec;
-        file.open(path_utf8(chosen.path).c_str(), boost::beast::file_mode::scan, ec);
+        file.open(key.c_str(), boost::beast::file_mode::scan, ec);
         if (ec)
         {
-            auto const kind = classify(ec);
-            return kind == outcome::not_found ? http::status::not_found :
-                kind == outcome::forbidden ? http::status::forbidden :
-                http::status::internal_server_error;
+            switch (classify(ec))
+            {
+            case outcome::not_found: return content_status::changed;    // vanished: look again
+            case outcome::forbidden: return content_status::forbidden;
+            default: return content_status::error;
+            }
         }
         // The file changed since it was examined: its validators are stale.
-        if (file.size(ec) != chosen.size || ec) return http::status::internal_server_error;
-        body.attach_file(std::move(file));
-        return std::nullopt;
+        if (file.size(ec) != chosen.size || ec) return ec ? content_status::error : content_status::changed;
+
+        if (!cacheable)
+        {
+            body.attach_file(std::move(file));
+            return content_status::ok;
+        }
+
+        auto data = std::make_shared<std::string>(static_cast<std::size_t>(chosen.size), '\0');
+        std::size_t done = 0;
+        while (done < data->size())
+        {
+            auto const n = file.read(data->data() + done, data->size() - done, ec);
+            if (ec) return content_status::error;
+            if (n == 0) return content_status::changed;
+            done += n;
+        }
+        memory = std::move(data);
+        std::lock_guard lock {st.mutex};
+        ++st.stats.memory_loads;
+        if (auto const* old = st.content.find(key))
+        {
+            st.content_bytes -= old->data->size();
+        }
+        st.content.put(key, {memory, chosen.mtime});
+        st.content_bytes += memory->size();
+        while (st.content_bytes > st.options.memory_cache_max_total)
+        {
+            st.content_bytes -= st.content.pop_oldest().data->size();
+        }
+        return content_status::ok;
     }
 /// @endcond
 

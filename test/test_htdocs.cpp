@@ -14,11 +14,13 @@
 #include <boost/taar/matcher/target.hpp>
 #include <boost/taar/session/http.hpp>
 #include <boost/test/unit_test.hpp>
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <random>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -392,7 +394,9 @@ BOOST_AUTO_TEST_CASE(test_htdocs_etag_and_last_modified)
     docroot root;
     auto const p = root.write("a.txt", std::string(300, 'a'));
     set_mtime(p, jan_2020);
-    htdocs handler {root.options()};
+    htdocs_options o = root.options();
+    o.revalidate_after = std::chrono::milliseconds {0};    // see every change at once
+    htdocs handler {o};
     auto r = get(handler, "/a.txt");
     BOOST_TEST(r[http::field::last_modified] == "Wed, 01 Jan 2020 12:00:00 GMT");
     auto const etag = r[http::field::etag];
@@ -866,6 +870,148 @@ BOOST_AUTO_TEST_CASE(test_htdocs_end_to_end_compressed_variant)
         BOOST_TEST(res[0][http::field::vary] == "Accept-Encoding");
         BOOST_TEST(res[1].body() == "identity content");
     });
+}
+
+// ---------------------------------------------------------------------------
+// Caches
+
+BOOST_AUTO_TEST_CASE(test_htdocs_metadata_cache_revalidation)
+{
+    docroot root;
+    auto const p = root.write("a.txt", "version-1");
+    set_mtime(p, jan_2020);
+    htdocs_options o = root.options();
+    o.revalidate_after = std::chrono::hours {1};
+    o.memory_cache_max_file_size = 0;
+    htdocs cached {o};
+    auto const before = get(cached, "/a.txt")[http::field::etag];
+    BOOST_TEST(cached.cache_stats().metadata_entries == 1u);
+
+    // Same size, newer time: within the window the cached validators stand
+    // (the bytes are read from disk, so they are the new ones).
+    root.write("a.txt", "version-2");
+    set_mtime(p, jan_2020 + std::chrono::seconds {10});
+    auto r = get(cached, "/a.txt");
+    BOOST_TEST(r[http::field::etag] == before);
+    BOOST_TEST(r.body == "version-2");
+
+    // A size change is noticed when the file is opened: looked up afresh.
+    root.write("a.txt", "version-three");
+    r = get(cached, "/a.txt");
+    BOOST_TEST(r.body == "version-three");
+    BOOST_TEST(r[http::field::etag] != before);
+    BOOST_TEST(r[http::field::content_length] == "13");
+
+    // A short window: the next use after it re-stats.
+    o.revalidate_after = std::chrono::milliseconds {30};
+    htdocs quick {o};
+    auto const first = get(quick, "/a.txt")[http::field::etag];
+    root.write("a.txt", "version-four!");
+    set_mtime(p, jan_2020 + std::chrono::seconds {20});
+    BOOST_TEST(get(quick, "/a.txt")[http::field::etag] == first);
+    std::this_thread::sleep_for(std::chrono::milliseconds {60});
+    BOOST_TEST(get(quick, "/a.txt")[http::field::etag] != first);
+
+    // New and deleted files are noticed after the window too.
+    BOOST_TEST(static_cast<int>(get(quick, "/new.txt").status()) == 404);
+    root.write("new.txt", "new");
+    std::this_thread::sleep_for(std::chrono::milliseconds {60});
+    BOOST_TEST(get(quick, "/new.txt").body == "new");
+    fs::remove(root.dir / "new.txt");
+    BOOST_TEST(static_cast<int>(get(quick, "/new.txt").status()) == 404);    // vanished at open: looked up again
+
+    // Bounded.
+    o.metadata_cache_entries = 2;
+    htdocs bounded {o};
+    for (auto const* name : {"/a.txt", "/b", "/c", "/d"}) get(bounded, name);
+    BOOST_TEST(bounded.cache_stats().metadata_entries == 2u);
+    o.metadata_cache_entries = 0;
+    htdocs uncached {o};
+    get(uncached, "/a.txt");
+    BOOST_TEST(uncached.cache_stats().metadata_entries == 0u);
+}
+
+BOOST_AUTO_TEST_CASE(test_htdocs_memory_cache_hits_and_eviction)
+{
+    docroot root;
+    auto const pa = root.write("a.txt", std::string(60, 'a'));
+    root.write("b.txt", std::string(60, 'b'));
+    root.write("large.bin", std::string(500, 'L'));
+    htdocs_options o = root.options();
+    o.memory_cache_max_file_size = 100;
+    o.memory_cache_max_total = 100;
+    o.revalidate_after = std::chrono::hours {1};
+    htdocs handler {o};
+    htdocs copy = handler;      // copies share the caches
+
+    BOOST_TEST(get(handler, "/a.txt").body == std::string(60, 'a'));
+    auto stats = handler.cache_stats();
+    BOOST_TEST(stats.memory_loads == 1u);
+    BOOST_TEST(stats.memory_entries == 1u);
+    BOOST_TEST(stats.memory_bytes == 60u);
+
+    // A hit is served from memory: rewrite the file with the same size and
+    // time and the old bytes are still sent.
+    auto const mtime = fs::last_write_time(pa);
+    root.write("a.txt", std::string(60, 'z'));
+    fs::last_write_time(pa, mtime);
+    BOOST_TEST(get(copy, "/a.txt").body == std::string(60, 'a'));
+    BOOST_TEST(get(copy, "/a.txt", {{"Range", "bytes=0-1,4-5"}}).body.find("aa") != std::string::npos);
+    BOOST_TEST(handler.cache_stats().memory_hits == 2u);
+
+    // HEAD and 304 do not read the file.
+    auto const etag = get(handler, "/b.txt")[http::field::etag];   // loads b, evicts a
+    stats = handler.cache_stats();
+    BOOST_TEST(stats.memory_loads == 2u);
+    BOOST_TEST(stats.memory_entries == 1u);
+    BOOST_TEST(stats.memory_bytes == 60u);
+    call(handler, "/a.txt", {}, http::verb::head);
+    BOOST_TEST(static_cast<int>(get(handler, "/b.txt", {{"If-None-Match", etag}}).status()) == 304);
+    BOOST_TEST(handler.cache_stats().memory_loads == 2u);
+    BOOST_TEST(handler.cache_stats().memory_hits == 2u);
+
+    // a was evicted: it is read again (now with the new bytes).
+    BOOST_TEST(get(handler, "/a.txt").body == std::string(60, 'z'));
+    BOOST_TEST(handler.cache_stats().memory_loads == 3u);
+
+    // Too large for the cache: streamed from disk, not kept.
+    BOOST_TEST(get(handler, "/large.bin").body.size() == 500u);
+    BOOST_TEST(handler.cache_stats().memory_loads == 3u);
+}
+
+BOOST_AUTO_TEST_CASE(test_htdocs_shared_handler_on_many_threads)
+{
+    docroot root;
+    std::vector<std::string> contents;
+    for (int i = 0; i < 8; ++i)
+    {
+        contents.push_back(pattern_content(1000 + i * 30000));
+        root.write("f" + std::to_string(i) + ".bin", contents.back());
+    }
+    htdocs_options o = root.options();
+    o.metadata_cache_entries = 4;
+    o.memory_cache_max_total = 64 * 1024;
+    o.revalidate_after = std::chrono::milliseconds {1};
+    htdocs handler {o};
+    std::atomic<int> failures {0};
+    {
+        std::vector<std::jthread> threads;
+        for (int t = 0; t < 6; ++t)
+        {
+            threads.emplace_back([&, t]
+            {
+                for (int n = 0; n < 200; ++n)
+                {
+                    int const i = (t + n) % 8;
+                    auto r = get(handler, "/f" + std::to_string(i) + ".bin");
+                    if (r.body != contents[i]) ++failures;
+                }
+            });
+        }
+    }
+    BOOST_TEST(failures.load() == 0);
+    BOOST_TEST(handler.cache_stats().metadata_entries <= 4u);
+    BOOST_TEST(handler.cache_stats().memory_bytes <= 64u * 1024u);
 }
 
 // ---------------------------------------------------------------------------
