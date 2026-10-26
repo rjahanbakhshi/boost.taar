@@ -75,8 +75,8 @@ picture.
 
 [heading At a glance]
 
-A complete HTTP server that responds with a JSON sum for path
-parameters fits in a handful of lines:
+Each block below is a complete registration; the last one runs them.
+They share these declarations:
 
     namespace taar = boost::taar;
     namespace http = boost::beast::http;
@@ -84,17 +84,53 @@ parameters fits in a handful of lines:
     using taar::matcher::target;
 
     taar::session::http http_session;
+
+[*REST.] Path placeholders are parsed into the callable's parameter
+types and the result becomes the response; here a JSON object
+([link boost_taar.quickstart.tour Tour]):
+
     http_session.register_request_handler(
         method == http::verb::get && target == "/api/sum/{a}/{b}",
         taar::handler::rest(
-            [](int a, int b)
-            {
-                return boost::json::value {
-                    {"a", a}, {"b", b}, {"result", a + b}
-                };
-            },
+            [](int a, int b) { return boost::json::value {{"result", a + b}}; },
             taar::handler::path_arg("a"),
             taar::handler::path_arg("b")));
+
+[*JSON-RPC 2.0.] An endpoint owns its methods; batches, notifications and
+error codes are handled for you:
+
+    taar::jsonrpc::endpoint<> rpc;
+    rpc.method("sum", [](int a, int b) { return a + b; },
+        taar::jsonrpc::rpc_arg("a"), taar::jsonrpc::rpc_arg("b"));
+
+    http_session.register_request_handler(
+        method == http::verb::post && target == "/rpc", rpc.handler());
+
+[*MCP.] Tools get an input schema derived from their parameters, and a
+stateful endpoint hands each client session its own state:
+
+    struct notes { std::vector<std::string> items; };
+    taar::mcp::endpoint<notes> mcp {{.name = "notes", .version = "1.0.0"}};
+    mcp.tool("notes/add", "Append a note",
+        [](notes& n, std::string text) { n.items.push_back(text); return n.items.size(); },
+        taar::mcp::mcp_arg("text", "The note"));
+
+    http_session.register_request_handler(
+        method == http::verb::get && target == "/mcp", mcp.stream_handler());
+    http_session.register_request_handler(target == "/mcp", mcp.handler());
+
+[*Static files.] A directory served with validators, ranges,
+precompressed variants and a single-page-app fallback:
+
+    taar::handler::htdocs_options site;
+    site.root = "./public";
+    site.fallback_document = "index.html";
+    http_session.register_request_handler(
+        method == http::verb::get && target == "/{*path}",
+        taar::handler::htdocs {std::move(site)});
+
+[*Running it.] One coroutine accepts connections for every route above;
+`signals.emit()` shuts it down gracefully:
 
     boost::asio::io_context io;
     taar::cancellation_signals signals;
@@ -104,11 +140,11 @@ parameters fits in a handful of lines:
         boost::asio::detached);
     io.run();
 
-The path-template `{a}` and `{b}` placeholders are extracted, parsed to
-`int`, and forwarded to the lambda. The returned `boost::json::value` is
-serialised as `application/json` automatically. See the
-[link boost_taar.quickstart Quick Start] for a fuller walk-through and
-the [link boost_taar.examples Examples chapter] for complete programs.
+The same callables can also be documented with the OpenAPI generator,
+served over TLS, or streamed as chunked responses. See the
+[link boost_taar.quickstart Quick Start] for a walk-through, the
+[link boost_taar.examples Examples] for complete programs, and the
+[link boost_taar.quickref Quick Reference] for every public name.
 
 [include qbk/01_intro.qbk]
 [include qbk/02_quickstart.qbk]
@@ -116,6 +152,8 @@ the [link boost_taar.examples Examples chapter] for complete programs.
 [include qbk/04_examples.qbk]
 [include qbk/05_design.qbk]
 [include qbk/06_roadmap.qbk]
+
+[xinclude quickref.xml]
 
 [xinclude reference.xml]
 

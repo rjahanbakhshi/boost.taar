@@ -1,0 +1,294 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE library PUBLIC "-//Boost//DTD BoostBook XML V1.0//EN"
+  "http://www.boost.org/tools/boostbook/dtd/boostbook.dtd">
+
+<!--
+  Copyright (c) 2022-2024 Reza Jahanbakhshi (reza dot jahanbakhshi at gmail dot com)
+
+  Distributed under the Boost Software License, Version 1.0. (See accompanying
+  file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
+
+  Official repository: https://github.com/rjahanbakhshi/boost-taar
+-->
+
+<section id="boost_taar.quickref">
+  <title>Quick Reference</title>
+
+  <para>
+    Every public name grouped by what it is for; each entry links to its
+    page in the reference that follows. Names are in namespace
+    <code>boost::taar</code> unless qualified.
+  </para>
+
+  <informaltable frame="all">
+    <tgroup cols="4">
+      <colspec colname="a"/>
+      <colspec colname="b"/>
+      <colspec colname="c"/>
+      <colspec colname="d"/>
+      <thead>
+        <row>
+          <entry valign="center" namest="a" nameend="a"><bridgehead renderas="sect2">Servers and sessions</bridgehead></entry>
+          <entry valign="center" namest="b" nameend="b"><bridgehead renderas="sect2">Matchers</bridgehead></entry>
+          <entry valign="center" namest="c" nameend="c"><bridgehead renderas="sect2">Handlers</bridgehead></entry>
+          <entry valign="center" namest="d" nameend="d"><bridgehead renderas="sect2">Argument providers</bridgehead></entry>
+        </row>
+      </thead>
+      <tbody>
+        <row>
+          <entry valign="top">
+            <bridgehead renderas="sect3">Functions</bridgehead>
+            <simplelist type="vert" columns="1">
+              <member><functionname alt="boost::taar::server::tcp">server::tcp</functionname></member>
+              <member><functionname alt="boost::taar::server::tls">server::tls</functionname></member>
+              <member><functionname alt="boost::taar::proceed">proceed</functionname></member>
+              <member><functionname alt="boost::taar::reject">reject</functionname></member>
+            </simplelist>
+            <bridgehead renderas="sect3">Classes</bridgehead>
+            <simplelist type="vert" columns="1">
+              <member><classname alt="boost::taar::session::basic_http">session::basic_http</classname></member>
+              <member><classname alt="boost::taar::session::no_context">session::no_context</classname></member>
+              <member><classname alt="boost::taar::cancellation_signals">cancellation_signals</classname></member>
+              <member><classname alt="boost::taar::request_attributes">request_attributes</classname></member>
+              <member><classname alt="boost::taar::context_store">context_store</classname></member>
+              <member><classname alt="boost::taar::cors">cors</classname></member>
+            </simplelist>
+            <bridgehead renderas="sect3">Types</bridgehead>
+            <simplelist type="vert" columns="1">
+              <member><code>session::http</code></member>
+              <member><code>session::https</code></member>
+              <member><code>session::tls_stream</code></member>
+              <member><code>interceptor_result</code></member>
+            </simplelist>
+          </entry>
+          <entry valign="top">
+            <bridgehead renderas="sect3">Objects</bridgehead>
+            <simplelist type="vert" columns="1">
+              <member><globalname alt="boost::taar::matcher::method">matcher::method</globalname></member>
+              <member><globalname alt="boost::taar::matcher::target">matcher::target</globalname></member>
+              <member><globalname alt="boost::taar::matcher::header">matcher::header</globalname></member>
+              <member><globalname alt="boost::taar::matcher::cookie">matcher::cookie</globalname></member>
+              <member><globalname alt="boost::taar::matcher::version">matcher::version</globalname></member>
+            </simplelist>
+            <bridgehead renderas="sect3">Classes</bridgehead>
+            <simplelist type="vert" columns="1">
+              <member><classname alt="boost::taar::matcher::context">matcher::context</classname></member>
+              <member><classname alt="boost::taar::matcher::operand">matcher::operand</classname></member>
+              <member><classname alt="boost::taar::matcher::route_summary">matcher::route_summary</classname></member>
+            </simplelist>
+            <bridgehead renderas="sect3">Functions</bridgehead>
+            <simplelist type="vert" columns="1">
+              <member><functionname alt="boost::taar::matcher::parse_template">matcher::parse_template</functionname></member>
+              <member><functionname alt="boost::taar::matcher::summarize_route">matcher::summarize_route</functionname></member>
+            </simplelist>
+            <bridgehead renderas="sect3">Operators</bridgehead>
+            <simplelist type="vert" columns="1">
+              <member><code>==</code>, <code>!=</code> (constraints)</member>
+              <member><code>&amp;&amp;</code>, <code>||</code>, <code>!</code> (composition)</member>
+              <member><code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code>, <code>&gt;=</code> (version)</member>
+            </simplelist>
+          </entry>
+          <entry valign="top">
+            <bridgehead renderas="sect3">Functions</bridgehead>
+            <simplelist type="vert" columns="1">
+              <member><functionname alt="boost::taar::handler::rest">handler::rest</functionname></member>
+              <member><functionname alt="boost::taar::handler::with_session">handler::with_session</functionname></member>
+              <member><functionname alt="boost::taar::handler::guard">handler::guard</functionname></member>
+            </simplelist>
+            <bridgehead renderas="sect3">Classes</bridgehead>
+            <simplelist type="vert" columns="1">
+              <member><classname alt="boost::taar::handler::htdocs">handler::htdocs</classname></member>
+              <member><classname alt="boost::taar::handler::htdocs_options">handler::htdocs_options</classname></member>
+              <member><classname alt="boost::taar::handler::cache_rule">handler::cache_rule</classname></member>
+              <member><classname alt="boost::taar::handler::session_key::cookie">handler::session_key::cookie</classname></member>
+              <member><classname alt="boost::taar::handler::session_key::header">handler::session_key::header</classname></member>
+            </simplelist>
+            <bridgehead renderas="sect3">Static file helpers</bridgehead>
+            <simplelist type="vert" columns="1">
+              <member><functionname alt="boost::taar::handler::cache_rules::immutable_hashed">handler::cache_rules::immutable_hashed</functionname></member>
+              <member><functionname alt="boost::taar::handler::cache_rules::glob_match">handler::cache_rules::glob_match</functionname></member>
+            </simplelist>
+            <bridgehead renderas="sect3">Enums</bridgehead>
+            <simplelist type="vert" columns="1">
+              <member><enumname alt="boost::taar::handler::session_policy">handler::session_policy</enumname></member>
+            </simplelist>
+          </entry>
+          <entry valign="top">
+            <bridgehead renderas="sect3">Request</bridgehead>
+            <simplelist type="vert" columns="1">
+              <member><classname alt="boost::taar::handler::path_arg">handler::path_arg</classname></member>
+              <member><classname alt="boost::taar::handler::query_arg">handler::query_arg</classname></member>
+              <member><classname alt="boost::taar::handler::query_list_arg">handler::query_list_arg</classname></member>
+              <member><classname alt="boost::taar::handler::header_arg">handler::header_arg</classname></member>
+              <member><classname alt="boost::taar::handler::cookie_arg">handler::cookie_arg</classname></member>
+              <member><classname alt="boost::taar::handler::target_arg">handler::target_arg</classname></member>
+              <member><classname alt="boost::taar::handler::attribute_arg">handler::attribute_arg</classname></member>
+            </simplelist>
+            <bridgehead renderas="sect3">Body</bridgehead>
+            <simplelist type="vert" columns="1">
+              <member><classname alt="boost::taar::handler::string_body_arg">handler::string_body_arg</classname></member>
+              <member><classname alt="boost::taar::handler::json_body_arg">handler::json_body_arg</classname></member>
+              <member><classname alt="boost::taar::handler::url_encoded_form_data_arg">handler::url_encoded_form_data_arg</classname></member>
+              <member><classname alt="boost::taar::handler::multipart_form_arg">handler::multipart_form_arg</classname></member>
+              <member><classname alt="boost::taar::handler::multipart_stream_arg">handler::multipart_stream_arg</classname></member>
+              <member><classname alt="boost::taar::handler::stream_body_arg">handler::stream_body_arg</classname></member>
+              <member><classname alt="boost::taar::handler::body_size_arg">handler::body_size_arg</classname></member>
+              <member><classname alt="boost::taar::handler::description">handler::description</classname></member>
+            </simplelist>
+            <bridgehead renderas="sect3">Wrappers</bridgehead>
+            <simplelist type="vert" columns="1">
+              <member><classname alt="boost::taar::handler::with_default">handler::with_default</classname></member>
+              <member><classname alt="boost::taar::handler::constrained">handler::constrained</classname></member>
+              <member><classname alt="boost::taar::handler::constraints">handler::constraints</classname></member>
+            </simplelist>
+          </entry>
+        </row>
+      </tbody>
+    </tgroup>
+  </informaltable>
+
+  <informaltable frame="all">
+    <tgroup cols="4">
+      <colspec colname="a"/>
+      <colspec colname="b"/>
+      <colspec colname="c"/>
+      <colspec colname="d"/>
+      <thead>
+        <row>
+          <entry valign="center" namest="a" nameend="a"><bridgehead renderas="sect2">Responses and streaming</bridgehead></entry>
+          <entry valign="center" namest="b" nameend="b"><bridgehead renderas="sect2">Errors and async</bridgehead></entry>
+          <entry valign="center" namest="c" nameend="c"><bridgehead renderas="sect2">JSON-RPC and OpenAPI</bridgehead></entry>
+          <entry valign="center" namest="d" nameend="d"><bridgehead renderas="sect2">MCP</bridgehead></entry>
+        </row>
+      </thead>
+      <tbody>
+        <row>
+          <entry valign="top">
+            <bridgehead renderas="sect3">Classes</bridgehead>
+            <simplelist type="vert" columns="1">
+              <member><classname alt="boost::taar::chunked_response">chunked_response</classname></member>
+              <member><classname alt="boost::taar::async_generator">async_generator</classname></member>
+              <member><classname alt="boost::taar::response_builder">response_builder</classname></member>
+              <member><classname alt="boost::taar::segmented_body">segmented_body</classname></member>
+              <member><classname alt="boost::taar::body_reader">body_reader</classname></member>
+              <member><classname alt="boost::taar::streaming_request">streaming_request</classname></member>
+              <member><classname alt="boost::taar::multipart_form">multipart_form</classname></member>
+              <member><classname alt="boost::taar::multipart_reader">multipart_reader</classname></member>
+              <member><classname alt="boost::taar::cookies">cookies</classname></member>
+            </simplelist>
+            <bridgehead renderas="sect3">Functions</bridgehead>
+            <simplelist type="vert" columns="1">
+              <member><functionname alt="boost::taar::response_from">response_from</functionname></member>
+              <member><functionname alt="boost::taar::set_header">set_header</functionname></member>
+              <member><functionname alt="boost::taar::set_status">set_status</functionname></member>
+              <member><functionname alt="boost::taar::parse_multipart">parse_multipart</functionname></member>
+            </simplelist>
+            <bridgehead renderas="sect3">HTTP helpers</bridgehead>
+            <simplelist type="vert" columns="1">
+              <member><functionname alt="boost::taar::mime_type_for">mime_type_for</functionname></member>
+              <member><functionname alt="boost::taar::format_http_date">format_http_date</functionname></member>
+              <member><functionname alt="boost::taar::parse_http_date">parse_http_date</functionname></member>
+              <member><functionname alt="boost::taar::parse_range">parse_range</functionname></member>
+              <member><functionname alt="boost::taar::parse_entity_tag">parse_entity_tag</functionname></member>
+              <member><functionname alt="boost::taar::accept_encoding_quality">accept_encoding_quality</functionname></member>
+              <member><functionname alt="boost::taar::base64_encode">base64_encode</functionname></member>
+            </simplelist>
+            <bridgehead renderas="sect3">Customisation points</bridgehead>
+            <simplelist type="vert" columns="1">
+              <member><classname alt="boost::taar::response_from_tag">response_from_tag</classname></member>
+              <member><classname alt="boost::taar::handler::rest_arg_cast_tag">handler::rest_arg_cast_tag</classname></member>
+            </simplelist>
+          </entry>
+          <entry valign="top">
+            <bridgehead renderas="sect3">Classes</bridgehead>
+            <simplelist type="vert" columns="1">
+              <member><classname alt="boost::taar::failure">failure</classname></member>
+              <member><classname alt="boost::taar::exception">exception</classname></member>
+              <member><classname alt="boost::taar::async_channel">async_channel</classname></member>
+            </simplelist>
+            <bridgehead renderas="sect3">Types</bridgehead>
+            <simplelist type="vert" columns="1">
+              <member><code>result</code></member>
+              <member><code>awaitable</code></member>
+              <member><code>rebind_executor</code></member>
+            </simplelist>
+            <bridgehead renderas="sect3">Functions</bridgehead>
+            <simplelist type="vert" columns="1">
+              <member><functionname alt="boost::taar::http_status_for">http_status_for</functionname></member>
+              <member><functionname alt="boost::taar::error_category">error_category</functionname></member>
+            </simplelist>
+            <bridgehead renderas="sect3">Enums</bridgehead>
+            <simplelist type="vert" columns="1">
+              <member><enumname alt="boost::taar::error">error</enumname></member>
+            </simplelist>
+            <bridgehead renderas="sect3">Constants</bridgehead>
+            <simplelist type="vert" columns="1">
+              <member><globalname alt="boost::taar::use_awaitable">use_awaitable</globalname></member>
+              <member><globalname alt="boost::taar::use_awaitable_tuple">use_awaitable_tuple</globalname></member>
+              <member><globalname alt="boost::taar::ignore_and_rethrow">ignore_and_rethrow</globalname></member>
+            </simplelist>
+          </entry>
+          <entry valign="top">
+            <bridgehead renderas="sect3">JSON-RPC</bridgehead>
+            <simplelist type="vert" columns="1">
+              <member><classname alt="boost::taar::jsonrpc::endpoint">jsonrpc::endpoint</classname></member>
+              <member><classname alt="boost::taar::jsonrpc::rpc_arg">jsonrpc::rpc_arg</classname></member>
+              <member><classname alt="boost::taar::jsonrpc::request_scope">jsonrpc::request_scope</classname></member>
+              <member><classname alt="boost::taar::jsonrpc::error_info">jsonrpc::error_info</classname></member>
+              <member><classname alt="boost::taar::jsonrpc::method_info">jsonrpc::method_info</classname></member>
+              <member><functionname alt="boost::taar::jsonrpc::default_error_mapper">jsonrpc::default_error_mapper</functionname></member>
+              <member><enumname alt="boost::taar::jsonrpc::error">jsonrpc::error</enumname></member>
+            </simplelist>
+            <bridgehead renderas="sect3">OpenAPI</bridgehead>
+            <simplelist type="vert" columns="1">
+              <member><classname alt="boost::taar::openapi::generator">openapi::generator</classname></member>
+              <member><classname alt="boost::taar::openapi::info">openapi::info</classname></member>
+              <member><classname alt="boost::taar::openapi::server">openapi::server</classname></member>
+              <member><classname alt="boost::taar::openapi::operation">openapi::operation</classname></member>
+              <member><classname alt="boost::taar::openapi::security_scheme">openapi::security_scheme</classname></member>
+            </simplelist>
+            <bridgehead renderas="sect3">Schemas</bridgehead>
+            <simplelist type="vert" columns="1">
+              <member><functionname alt="boost::taar::json_schema_for">json_schema_for</functionname></member>
+              <member><classname alt="boost::taar::param_info">param_info</classname></member>
+            </simplelist>
+          </entry>
+          <entry valign="top">
+            <bridgehead renderas="sect3">Endpoint</bridgehead>
+            <simplelist type="vert" columns="1">
+              <member><classname alt="boost::taar::mcp::endpoint">mcp::endpoint</classname></member>
+              <member><classname alt="boost::taar::mcp::server_info">mcp::server_info</classname></member>
+              <member><classname alt="boost::taar::mcp::stateless">mcp::stateless</classname></member>
+              <member><classname alt="boost::taar::mcp::session_info">mcp::session_info</classname></member>
+              <member><classname alt="boost::taar::mcp::client_capabilities">mcp::client_capabilities</classname></member>
+            </simplelist>
+            <bridgehead renderas="sect3">Registration</bridgehead>
+            <simplelist type="vert" columns="1">
+              <member><classname alt="boost::taar::mcp::mcp_arg">mcp::mcp_arg</classname></member>
+              <member><classname alt="boost::taar::mcp::uri_arg">mcp::uri_arg</classname></member>
+              <member><classname alt="boost::taar::mcp::tool_spec">mcp::tool_spec</classname></member>
+              <member><classname alt="boost::taar::mcp::tool_annotations">mcp::tool_annotations</classname></member>
+              <member><classname alt="boost::taar::mcp::completion_request">mcp::completion_request</classname></member>
+              <member><classname alt="boost::taar::mcp::completion_result">mcp::completion_result</classname></member>
+            </simplelist>
+            <bridgehead renderas="sect3">Content</bridgehead>
+            <simplelist type="vert" columns="1">
+              <member><classname alt="boost::taar::mcp::tool_result">mcp::tool_result</classname></member>
+              <member><classname alt="boost::taar::mcp::text">mcp::text</classname></member>
+              <member><classname alt="boost::taar::mcp::image">mcp::image</classname></member>
+              <member><classname alt="boost::taar::mcp::audio">mcp::audio</classname></member>
+              <member><classname alt="boost::taar::mcp::blob">mcp::blob</classname></member>
+              <member><classname alt="boost::taar::mcp::embedded_resource">mcp::embedded_resource</classname></member>
+            </simplelist>
+            <bridgehead renderas="sect3">Errors and logging</bridgehead>
+            <simplelist type="vert" columns="1">
+              <member><enumname alt="boost::taar::mcp::error">mcp::error</enumname></member>
+              <member><enumname alt="boost::taar::mcp::log_level">mcp::log_level</enumname></member>
+              <member><functionname alt="boost::taar::mcp::default_tool_error_handler">mcp::default_tool_error_handler</functionname></member>
+            </simplelist>
+          </entry>
+        </row>
+      </tbody>
+    </tgroup>
+  </informaltable>
+</section>
