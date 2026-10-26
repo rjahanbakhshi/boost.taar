@@ -5,9 +5,6 @@
 [![Docs](https://github.com/rjahanbakhshi/boost.taar/actions/workflows/docs.yml/badge.svg?branch=master)](https://github.com/rjahanbakhshi/boost.taar/actions/workflows/docs.yml)
 [![License: BSL-1.0](https://img.shields.io/badge/License-BSL--1.0-blue.svg)](https://www.boost.org/LICENSE_1_0.txt)
 
-***⚠️ Warning: This library is not production ready and is a work in progress. Use
-with care.***
-
 A header-only library created to facilitate web server development
 built on top of other boost libraries like boost.beast, boost.asio, boost.url,
 boost.json, etc.

@@ -9,7 +9,7 @@ set(ENABLE_UNITY_BUILD OFF CACHE BOOL "Enable unity build.")
 
 project(
     boost-taar
-    VERSION 1.0
+    VERSION 1.0.0
     DESCRIPTION "A collection of tools to facilitate web server and client development."
 )
 

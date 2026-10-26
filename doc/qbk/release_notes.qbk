@@ -7,7 +7,7 @@
 
 [section:release_notes Release Notes]
 
-[heading Unreleased]
+[heading 1.0.0]
 
 * `handler::htdocs` rework, keeping `htdocs{root, default_doc}` source
   compatible and adding `htdocs_options`. Fixed: the served path is the
