@@ -785,8 +785,10 @@ private:
     /// Strong validator from size, modification time and coding.
     static std::string make_etag(std::uint64_t size, std::filesystem::file_time_type mtime, std::string_view encoding)
     {
-        auto const ns = std::chrono::duration_cast<std::chrono::nanoseconds>(mtime.time_since_epoch()).count();
-        auto tag = std::format("\"{:x}-{:x}", size, static_cast<std::uint64_t>(ns));
+        // Raw clock ticks: nanoseconds on POSIX; MSVC counts 100 ns ticks
+        // since 1601, which overflows int64 when converted to nanoseconds.
+        auto const ticks = static_cast<std::uint64_t>(mtime.time_since_epoch().count());
+        auto tag = std::format("\"{:x}-{:x}", size, ticks);
         if (!encoding.empty())
         {
             tag += '-';
