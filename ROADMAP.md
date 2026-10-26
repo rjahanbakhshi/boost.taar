@@ -123,8 +123,28 @@ Deliberate, not planned.
   remain; the docs build succeeds but the reference has dead links.
 - GCC 16 reports -Wdangling-pointer false positives in test coroutine
   lambdas; tests are unaffected but the b2 log is noisy.
-- No CI configuration in the repository (CMake suite, examples, b2 and
-  docs builds are run by hand).
+
+## Planned directions
+
+- C++26 static reflection (P2996, with annotations from P3394) as the
+  replacement for most of the hand-written introspection, behind a
+  feature check so C++23 builds keep the current machinery:
+  - callable signature detection (`type_traits/callable.hpp`,
+    `has_call_operator`) and the concepts built on it (`string_like`,
+    `container_like`, `numeric_type`, `specialization_of`), which today
+    also rule out generic lambdas as handlers;
+  - context injection and argument binding by parameter type and
+    position;
+  - parameter names taken from the callable itself, so `rest(&add)`,
+    `rpc.method("add", &add)` and `mcp.tool("add", ..., &add)` need no
+    providers that repeat `"a"` and `"b"`;
+  - JSON Schema, JSON conversion and OpenAPI/MCP schemas for plain
+    aggregates and enums without `BOOST_DESCRIBE_STRUCT` /
+    `BOOST_DESCRIBE_ENUM`;
+  - descriptions, defaults and constraints as annotations on parameters
+    and members (for example a description or `minimum` attached to a
+    field), replacing `description {...}`, `with_default` and
+    `constrained` in the common cases.
 
 ## Inherent to the surfaces
 
