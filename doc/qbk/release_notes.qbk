@@ -21,6 +21,10 @@
   stalled upload delays a graceful shutdown by at most the body timeout.
   Expired timeouts are not reported to the hard error handler.
   `http_status_for` maps `beast::error::timeout` to `408`.
+* The session adds a `Date` header (RFC 9110 6.6.1) to every response
+  that does not carry one, error, `304`, HEAD, chunked and protocol-error
+  answers included; the value is cached per second per thread.
+  `set_date_header(false)` disables it.
 * Behaviour change: an idle keep-alive connection now closes after 60
   seconds, and a request whose header takes more than 30 seconds is
   answered `408`; raise or disable the timeouts for clients that need

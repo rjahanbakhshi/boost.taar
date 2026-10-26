@@ -214,6 +214,36 @@ inline std::optional<std::chrono::sys_seconds> parse_http_date(std::string_view 
     return std::nullopt;
 }
 
+/// @cond
+namespace detail {
+
+/** The current time as an IMF-fixdate, formatted at most once per second
+    per thread.
+
+    The cache is thread-local, so connections served by several threads
+    neither share nor lock it. The view stays valid until the next call
+    on the same thread; copy it (as `fields::set` does) before then.
+*/
+inline std::string_view cached_http_date()
+{
+    struct cache
+    {
+        std::chrono::sys_seconds second {};
+        std::string text;
+    };
+    thread_local cache c;
+    auto const now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+    if (c.text.empty() || now != c.second)
+    {
+        c.second = now;
+        c.text = format_http_date(now);
+    }
+    return c.text;
+}
+
+} // namespace detail
+/// @endcond
+
 } // namespace boost::taar
 
 #endif // BOOST_TAAR_CORE_HTTP_DATE_HPP

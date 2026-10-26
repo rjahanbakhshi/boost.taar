@@ -33,9 +33,6 @@ Deliberate, not planned.
   Approach: a concurrent read watcher during streaming that keeps
   pipelined bytes, or a documented keepalive pattern (MCP streams
   already send keepalive comments).
-- Responses carry no `Date` header, which RFC 9110 6.6.1 asks an origin
-  server with a clock to send. Approach: let the session add it
-  (`format_http_date` exists) unless the handler or filter set one.
 - Generators (`chunked_response`, `async_generator`) co_spawn the awaited
   operation on every `co_await` inside the body: one frame and spawn per
   awaited operation. Approach: evaluate Asio `experimental::coro` or a
@@ -165,6 +162,8 @@ rather than planned.
   60 seconds. Handler time and the gaps of a streaming generator do not
   count; the body timeout also bounds shielded body reads during
   shutdown.
+- The session adds `Date` (RFC 9110 6.6.1) to every response that does
+  not carry one, cached per second; `set_date_header(false)` disables it.
 - Static files: `handler::htdocs` rework with `htdocs_options` (safe
   resolution of the route's greedy capture, MIME table, validators and
   RFC 9110 conditional requests, `Cache-Control` rules, single and

@@ -38,6 +38,7 @@
 #include <boost/taar/core/is_awaitable.hpp>
 #include <boost/taar/core/error.hpp>
 #include <boost/taar/core/interceptor.hpp>
+#include <boost/taar/core/http_date.hpp>
 #include <boost/taar/core/detail/io_deadline.hpp>
 #include <boost/taar/type_traits/callable.hpp>
 #include <boost/beast/http/error.hpp>
@@ -303,8 +304,8 @@ using response_filter_type = std::function<void(
     boost::beast::http::request_header<> const&,
     boost::beast::http::response_header<>&)>;
 
-/** What every response written by a session shares: the response filter
-    and the send timeout.
+/** What every response written by a session shares: the response filter,
+    the `Date` header switch and the send timeout.
 
     Held through a `shared_ptr` so the error-handler wrappers, which
     outlive moves of the session, read the current values.
@@ -313,10 +314,21 @@ struct response_settings
 {
     response_filter_type filter;
     ::boost::taar::detail::timeout_duration send_timeout = std::chrono::seconds {60};
+    bool date = true;
 };
 
+/// Add `Date` (RFC 9110 6.6.1) unless disabled or already present.
+inline void add_date(response_settings const& settings, boost::beast::http::response_header<>& header)
+{
+    if (settings.date && header.find(boost::beast::http::field::date) == header.end())
+    {
+        header.set(boost::beast::http::field::date, ::boost::taar::detail::cached_http_date());
+    }
+}
+
 /** Finish @a response's header before it is written: run the response
-    filter. A `message_generator` is opaque and left as it is.
+    filter, then add `Date` if neither the handler nor the filter set one.
+    A `message_generator` is opaque and left as it is.
 */
 template <typename Response>
 void finish_header(
@@ -327,6 +339,7 @@ void finish_header(
     if constexpr (requires { response.base(); })
     {
         if (settings.filter) settings.filter(request, response.base());
+        add_date(settings, response.base());
     }
 }
 
@@ -453,6 +466,7 @@ awaitable<bool> write_chunked_response(
     header_response.keep_alive(keep_alive);
     apply_chunked_metadata(generator, header_response);
     if (settings && settings->filter && request) settings->filter(*request, header_response.base());
+    if (settings) add_date(*settings, header_response.base());
     header_response.set(http::field::transfer_encoding, "chunked");
 
     // Only the writes count towards the send timeout: the time the
@@ -560,7 +574,8 @@ awaitable<bool> write_chunked_response(
     Slow or idle clients are bounded by four timeouts: @ref set_idle_timeout
     (between requests), @ref set_header_timeout (a request header),
     @ref set_body_timeout (a request body) and @ref set_send_timeout (a
-    blocked write).
+    blocked write). Every response carries a `Date` header unless
+    @ref set_date_header disables it.
 
     `http` is move-constructible but not copyable; share one instance among
     spawned sessions by reference.
@@ -700,6 +715,22 @@ public:
     void set_response_filter(detail::response_filter_type filter)
     {
         settings_->filter = std::move(filter);
+    }
+
+    /** Add a `Date` header (RFC 9110 6.6.1) to every response that does
+        not carry one. Enabled by default.
+
+        Applies wherever the response filter does (handler responses,
+        interceptor rejections, soft-error and protocol-error answers,
+        `404`/`405`, `408`, `304` and HEAD responses, the header of
+        chunked responses) and runs after the filter, so a `Date` set by
+        the handler or the filter is kept. A `message_generator` is opaque
+        and written as produced. The value is formatted at most once per
+        second per thread.
+    */
+    void set_date_header(bool enabled)
+    {
+        settings_->date = enabled;
     }
 
     /** Close a connection that stays idle this long waiting for the first

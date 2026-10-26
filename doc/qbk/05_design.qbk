@@ -336,6 +336,16 @@ sequence (`close_notify`, lingering close) keeps its timers.
 An expired timeout is the client's doing, not a server failure: it is
 not reported to the hard error handler.
 
+[heading The `Date` header]
+
+Every response the session writes carries `Date` (RFC 9110 6.6.1) unless
+the handler or the response filter already set one, including error
+answers, `304`, HEAD responses, the header of chunked responses and the
+`400`/`408` protocol answers. The value is formatted at most once per
+second per thread, so it costs neither a lock nor a formatting per
+response. `set_date_header(false)` turns it off. A raw handler returning
+a `message_generator` writes what it produces.
+
 [heading Unmatched requests and HEAD]
 
 A request that matches no route is answered `405 Method Not Allowed`
