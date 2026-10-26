@@ -385,7 +385,12 @@ BOOST_AUTO_TEST_CASE(test_htdocs_content_types_charset_and_overrides)
 /// Set the modification time of @a p to @a when (whole seconds).
 void set_mtime(fs::path const& p, std::chrono::sys_seconds when)
 {
+#if defined(_MSC_VER)
+    // MSVC has no file_clock::from_sys; it has clock_cast (which libc++ lacks).
+    fs::last_write_time(p, std::chrono::clock_cast<std::chrono::file_clock>(when));
+#else
     fs::last_write_time(p, std::chrono::file_clock::from_sys(when));
+#endif
 }
 
 std::chrono::sys_seconds const jan_2020 = std::chrono::sys_days {std::chrono::year {2020} / 1 / 1} + std::chrono::hours {12};
@@ -903,20 +908,21 @@ BOOST_AUTO_TEST_CASE(test_htdocs_metadata_cache_revalidation)
     BOOST_TEST(r[http::field::etag] != before);
     BOOST_TEST(r[http::field::content_length] == "13");
 
-    // A short window: the next use after it re-stats.
-    o.revalidate_after = std::chrono::milliseconds {30};
+    // A short window: the next use after it re-stats. Wide enough that the
+    // write below fits in it even on a slow (virus-scanned) CI file system.
+    o.revalidate_after = std::chrono::milliseconds {500};
     htdocs quick {o};
     auto const first = get(quick, "/a.txt")[http::field::etag];
     root.write("a.txt", "version-four!");
     set_mtime(p, jan_2020 + std::chrono::seconds {20});
     BOOST_TEST(get(quick, "/a.txt")[http::field::etag] == first);
-    std::this_thread::sleep_for(std::chrono::milliseconds {60});
+    std::this_thread::sleep_for(std::chrono::milliseconds {600});
     BOOST_TEST(get(quick, "/a.txt")[http::field::etag] != first);
 
     // New and deleted files are noticed after the window too.
     BOOST_TEST(static_cast<int>(get(quick, "/new.txt").status()) == 404);
     root.write("new.txt", "new");
-    std::this_thread::sleep_for(std::chrono::milliseconds {60});
+    std::this_thread::sleep_for(std::chrono::milliseconds {600});
     BOOST_TEST(get(quick, "/new.txt").body == "new");
     fs::remove(root.dir / "new.txt");
     BOOST_TEST(static_cast<int>(get(quick, "/new.txt").status()) == 404);    // vanished at open: looked up again
