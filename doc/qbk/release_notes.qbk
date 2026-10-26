@@ -7,7 +7,7 @@
 
 [section:release_notes Release Notes]
 
-[heading Unreleased]
+[heading 1.0.1]
 
 * Connection timeouts, modelled on nginx: `basic_http::set_idle_timeout`
   (waiting for a request's first byte; silent close; default 60 s),
