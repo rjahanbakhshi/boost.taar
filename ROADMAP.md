@@ -162,7 +162,7 @@ rather than planned.
 - The session adds `Date` (RFC 9110 6.6.1) to every response that does
   not carry one, cached per second; `set_date_header(false)` disables it.
 - Reference documentation: the namespaces are documented (Doxygen
-  resolves no `@ref` to a namespace member otherwise), deduction guides
+  resolves no reference to a namespace member otherwise), deduction guides
   are hidden (BoostBook emitted their ids twice), and the remaining
   references are qualified or rephrased. The docs build reports no
   unresolved references and no duplicate ids.
