@@ -621,7 +621,7 @@ struct header_arg
             else if constexpr (std::is_same_v<T, boost::beast::http::field>)
                 result = to_string(arg);
             else
-                static_assert(false, "Not supported type!");
+                static_assert(type_traits::always_false<T>, "Not supported type!");
         }, header_);
 
         return result;

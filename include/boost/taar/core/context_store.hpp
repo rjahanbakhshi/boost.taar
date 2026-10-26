@@ -25,12 +25,27 @@
 #include <mutex>
 #include <random>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
 namespace boost::taar {
 namespace detail {
+
+/** `std::make_shared<T>(args...)`, brace-initialising an aggregate.
+
+    Parenthesised aggregate initialisation (P0960) is missing from Apple
+    clang 15, so an aggregate context built from arguments is braced.
+*/
+template <typename T, typename... Args>
+std::shared_ptr<T> make_shared_context(Args&&... args)
+{
+    if constexpr (sizeof...(Args) == 0 || std::is_constructible_v<T, Args&&...>)
+        return std::make_shared<T>(std::forward<Args>(args)...);
+    else
+        return std::make_shared<T>(T {std::forward<Args>(args)...});
+}
 
 /** A coroutine-friendly mutual exclusion primitive.
 
@@ -344,7 +359,7 @@ public:
 
         auto e = std::make_shared<entry>(
             key,
-            std::make_shared<Context>(std::forward<Args>(args)...),
+            detail::make_shared_context<Context>(std::forward<Args>(args)...),
             now);
         entries_.insert_or_assign(std::move(key), e);
         return e;
@@ -367,7 +382,7 @@ public:
             }
             auto e = std::make_shared<entry>(
                 key,
-                std::make_shared<Context>(std::forward<Args>(args)...),
+                detail::make_shared_context<Context>(std::forward<Args>(args)...),
                 now);
             entries_.insert_or_assign(key, e);
             return {std::move(key), std::move(e)};

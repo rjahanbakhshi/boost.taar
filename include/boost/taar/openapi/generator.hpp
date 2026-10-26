@@ -345,9 +345,15 @@ public:
         return describer {this, std::move(op)};
     }
 
-    describer describe(std::string summary)
+    /// Describe the next registered route by its summary alone.
+    // A template so that a braced `{.summary = ...}` argument never
+    // considers std::string's constructors: clang 16 with libc++ (and the
+    // Apple clang 15 of Xcode 15) fails hard while doing so.
+    template <typename Summary>
+        requires std::convertible_to<Summary, std::string>
+    describer describe(Summary&& summary)
     {
-        return describer {this, operation {.summary = std::move(summary)}};
+        return describer {this, operation {.summary = std::string(std::forward<Summary>(summary))}};
     }
 
     std::size_t operation_count() const noexcept { return operations_.size(); }

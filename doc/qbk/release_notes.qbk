@@ -22,6 +22,15 @@
   Migration: `if (auto const* e = f.as<E>())` becomes
   `if (auto const e = f.as<E>())`; `e->what()` and `if (f.as<E>())` read
   as before; comparisons with `nullptr` become `.has_value()`.
+* Apple clang 15 (Xcode 15): the library builds again. Elements that
+  are aggregates are brace-initialised (Apple clang 15 lacks
+  parenthesised aggregate initialisation, so `emplace_back(a, b)` into
+  an aggregate fails), `context_store` braces an aggregate context built
+  from arguments, a `static_assert(false)` in a generic lambda is now
+  dependent (pre-P2593 compilers fire it at definition), and
+  `openapi::generator::describe(summary)` is a template so a braced
+  `describe({.summary = ...})` no longer trips a clang 16 / libc++
+  overload-resolution failure through `std::string`'s constructors.
 
 [heading 1.0.0]
 

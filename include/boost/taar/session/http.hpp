@@ -1034,7 +1034,8 @@ public:
         needs_parsed_cookies_ |= decltype(operand)::with_parsed_cookies;
         record_route_methods(operand);
 
-        matcher_handlers_.emplace_back(
+        // Braced: Apple clang 15 has no parenthesised aggregate init.
+        matcher_handlers_.push_back(matcher_handler_type {
             [operand = std::move(operand)](
                 http::request_header<> const& request,
                 matcher::context& context,
@@ -1104,7 +1105,7 @@ public:
                 }
                 else
                 {
-                using body_type = request_type::body_type;
+                using body_type = typename request_type::body_type;
 
                 // Reject an oversized Content-Length before reading, as the
                 // header-time limit used to; chunked bodies are limited
@@ -1221,7 +1222,7 @@ public:
                 co_return ka && !shutting_down;
                 }
             }
-        );
+        });
     }
 
     /** Register a handler and notify registration observers.
@@ -1336,7 +1337,8 @@ public:
         needs_parsed_cookies_ |= decltype(operand)::with_parsed_cookies;
         record_route_methods(operand);
 
-        matcher_handlers_.emplace_back(
+        // Braced: Apple clang 15 has no parenthesised aggregate init.
+        matcher_handlers_.push_back(matcher_handler_type {
             [operand = std::move(operand)](
                 http::request_header<> const& request,
                 matcher::context& context,
@@ -1372,7 +1374,7 @@ public:
                 // Always close the session: the handler now owns the socket,
                 // and the session's loop must not read or write again.
                 co_return false;
-            });
+            }});
     }
 
     /** Run @a interceptor on every request, before routing.

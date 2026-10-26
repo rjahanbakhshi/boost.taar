@@ -200,11 +200,13 @@ inline /*constexpr*/ result<parsed_template_ref> parse_template(
             {
                 value_end = iter;
 
-                result.emplace_back(
+                // Braced: Apple clang 15 lacks parenthesised aggregate
+                // initialisation, so emplace_back(a, b) cannot build it.
+                result.push_back(template_segment_ref {
                     is_greedy_param ?
                         template_segment_type::greedy_param :
                         template_segment_type::param,
-                    std::string_view(value_begin, value_end));
+                    std::string_view(value_begin, value_end)});
 
 
                 state = states::end_param;
@@ -229,9 +231,9 @@ inline /*constexpr*/ result<parsed_template_ref> parse_template(
         case states::in_literal:
             if (*iter == '/')
             {
-                result.emplace_back(
+                result.push_back(template_segment_ref {
                     template_segment_type::literal,
-                    std::string_view(value_begin, iter));
+                    std::string_view(value_begin, iter)});
 
                 state = states::start_segment;
                 break;
@@ -250,9 +252,9 @@ inline /*constexpr*/ result<parsed_template_ref> parse_template(
     }
     else if (state == states::in_literal)
     {
-        result.emplace_back(
+        result.push_back(template_segment_ref {
             template_segment_type::literal,
-            std::string_view(value_begin, path.end()));
+            std::string_view(value_begin, path.end())});
     }
     else if (state != states::start_segment && state != states::end_param)
     {

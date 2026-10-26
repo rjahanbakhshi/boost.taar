@@ -77,6 +77,17 @@ BOOST_AUTO_TEST_CASE(test_context_store_create_forwards_constructor_args)
     BOOST_TEST(e->context()->v == 7);
 }
 
+BOOST_AUTO_TEST_CASE(test_context_store_create_initialises_aggregates)
+{
+    // An aggregate context built from arguments (braced where the
+    // compiler lacks parenthesised aggregate initialisation).
+    store_type store {10min};
+    auto e = store.emplace("k", 5);
+    BOOST_TEST(e->context()->value == 5);
+    auto [key, minted] = store.create(9);
+    BOOST_TEST(minted->context()->value == 9);
+}
+
 BOOST_AUTO_TEST_CASE(test_context_store_minted_keys_are_unique_hex)
 {
     store_type store {10min};

@@ -108,7 +108,16 @@ mcp::blob notes_archive(notes_session const& s)
 
 std::string now()
 {
-    return std::format("{:%FT%TZ}", std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()));
+    // Spelled out rather than "{:%FT%TZ}": the libc++ of Xcode 15 has no
+    // chrono formatters.
+    using namespace std::chrono;
+    auto const secs = floor<seconds>(system_clock::now());
+    auto const days = floor<std::chrono::days>(secs);
+    year_month_day const ymd {days};
+    hh_mm_ss<seconds> const hms {secs - days};
+    return std::format("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        static_cast<int>(ymd.year()), static_cast<unsigned>(ymd.month()), static_cast<unsigned>(ymd.day()),
+        hms.hours().count(), hms.minutes().count(), hms.seconds().count());
 }
 
 } // namespace
