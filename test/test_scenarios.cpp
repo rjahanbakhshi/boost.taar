@@ -301,14 +301,16 @@ BOOST_AUTO_TEST_CASE(test_scenario_taskboard_all_surfaces_multithreaded)
                 list.set(http::field::cookie, cookie.substr(0, cookie.find(';')));
                 auto listed = co_await exchange(socket, buffer, list);
                 bool found = false;
-                for (auto const& t : body_of(listed).as_array()) found = found || t.at("id").as_int64() == id;
+                auto const listed_body = body_of(listed);   // keep alive: see test_dual_surface
+                for (auto const& t : listed_body.as_array()) found = found || t.at("id").as_int64() == id;
                 if (!found) throw std::runtime_error {"own task not listed"};
 
                 // JSON-RPC sees the same board.
                 auto rpc = co_await exchange(socket, buffer, e2e::make_request(http::verb::post, "/rpc",
                     R"({"jsonrpc":"2.0","id":1,"method":"tasks.list","params":{"tags":[")" + tag + R"("]}})"));
                 found = false;
-                for (auto const& t : body_of(rpc).at("result").as_array()) found = found || t.at("id").as_int64() == id;
+                auto const rpc_body = body_of(rpc);
+                for (auto const& t : rpc_body.at("result").as_array()) found = found || t.at("id").as_int64() == id;
                 if (!found) throw std::runtime_error {"rpc did not list own task"};
 
                 // MCP: its own session, a counting tool and a templated resource.

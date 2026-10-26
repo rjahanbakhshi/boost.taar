@@ -249,7 +249,10 @@ BOOST_AUTO_TEST_CASE(test_dual_surface_schema_consistency)
         auto init = co_await e2e::send_all(port, mcp_call(R"({"jsonrpc":"2.0","id":1,"method":"initialize"})", ""));
         std::string sid {init[0]["Mcp-Session-Id"]};
         auto tools = co_await e2e::send_all(port, mcp_call(R"({"jsonrpc":"2.0","id":2,"method":"tools/list"})", sid));
-        for (auto const& t : body_of(tools[0]).at("result").at("tools").as_array())
+        // Keep the parsed body alive: before C++23 P2718 (clang < 19, GCC < 15) a
+        // temporary in a range-for initializer dies before the loop body runs.
+        auto const listed = body_of(tools[0]);
+        for (auto const& t : listed.at("result").at("tools").as_array())
         {
             if (t.at("name").as_string() != "add") continue;
             auto const& props = t.at("inputSchema").at("properties").as_object();
