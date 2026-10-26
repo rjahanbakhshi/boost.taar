@@ -47,7 +47,7 @@ BOOST_AUTO_TEST_CASE(test_e2e_mcp_stateful_session_across_connections)
     {
         auto init = e2e::make_request(http::verb::post, "/mcp",
             R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"t","version":"1"}}})");
-        auto a = co_await e2e::send_all(port, {init});
+        auto a = co_await e2e::send_all(port, init);
         BOOST_TEST(a[0].result() == http::status::ok);
         std::string sid {a[0]["Mcp-Session-Id"]};
         BOOST_TEST(sid.size() == 32u);
@@ -59,7 +59,7 @@ BOOST_AUTO_TEST_CASE(test_e2e_mcp_stateful_session_across_connections)
             R"({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"add","arguments":{"a":20,"b":22}}})");
         call.set("Mcp-Session-Id", sid);
         call.set("MCP-Protocol-Version", "2025-11-25");
-        auto b = co_await e2e::send_all(port, {initialized, call});
+        auto b = co_await e2e::send_all(port, initialized, call);
         BOOST_TEST(b[0].result() == http::status::accepted);
         BOOST_TEST(json::parse(b[1].body()).at("result").at("structuredContent").at("result").as_int64() == 42);
 
@@ -67,7 +67,7 @@ BOOST_AUTO_TEST_CASE(test_e2e_mcp_stateful_session_across_connections)
         auto read = e2e::make_request(http::verb::post, "/mcp",
             R"({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"last"}})");
         read.set("Mcp-Session-Id", sid);
-        auto c = co_await e2e::send_all(port, {read});
+        auto c = co_await e2e::send_all(port, read);
         BOOST_TEST(json::parse(c[0].body()).at("result").at("structuredContent").at("result").as_int64() == 42);
 
         // No session header -> 400; DELETE -> 200 then 404.
@@ -76,7 +76,7 @@ BOOST_AUTO_TEST_CASE(test_e2e_mcp_stateful_session_across_connections)
         del.set("Mcp-Session-Id", sid);
         auto after = e2e::make_request(http::verb::post, "/mcp", R"({"jsonrpc":"2.0","id":5,"method":"ping"})");
         after.set("Mcp-Session-Id", sid);
-        auto d = co_await e2e::send_all(port, {bare, del, after});
+        auto d = co_await e2e::send_all(port, bare, del, after);
         BOOST_TEST(d[0].result() == http::status::bad_request);
         BOOST_TEST(d[1].result() == http::status::ok);
         BOOST_TEST(d[2].result() == http::status::not_found);
@@ -117,7 +117,7 @@ BOOST_AUTO_TEST_CASE(test_e2e_mcp_event_stream)
     {
         auto init = e2e::make_request(http::verb::post, "/mcp",
             R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}})");
-        auto a = co_await e2e::send_all(port, {init});
+        auto a = co_await e2e::send_all(port, init);
         std::string sid {a[0]["Mcp-Session-Id"]};
 
         // Open the stream on its own connection.
@@ -142,7 +142,7 @@ BOOST_AUTO_TEST_CASE(test_e2e_mcp_event_stream)
         auto fire = e2e::make_request(http::verb::post, "/mcp",
             R"({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"fire"}})");
         fire.set("Mcp-Session-Id", sid);
-        auto b = co_await e2e::send_all(port, {fire});
+        auto b = co_await e2e::send_all(port, fire);
         BOOST_TEST(b[0].result() == http::status::ok);
         co_await read_until(socket, buffer, parser, "event: message\ndata: ");
         BOOST_TEST(parser.get().body().find("notifications/resources/updated") != std::string::npos);
@@ -150,7 +150,7 @@ BOOST_AUTO_TEST_CASE(test_e2e_mcp_event_stream)
         // Deleting the session ends the stream cleanly (final chunk, parser done).
         auto del = e2e::make_request(http::verb::delete_, "/mcp");
         del.set("Mcp-Session-Id", sid);
-        auto c = co_await e2e::send_all(port, {del});
+        auto c = co_await e2e::send_all(port, del);
         BOOST_TEST(c[0].result() == http::status::ok);
         while (!parser.is_done())
         {

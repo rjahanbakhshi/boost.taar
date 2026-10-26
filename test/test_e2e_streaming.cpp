@@ -184,7 +184,7 @@ BOOST_AUTO_TEST_CASE(test_e2e_streaming_client_disconnect_stops_infinite_generat
         }
         BOOST_TEST(frame_probe::alive == 0);
 
-        auto other = co_await e2e::send_all(port, {e2e::make_request(http::verb::get, "/ping")});
+        auto other = co_await e2e::send_all(port, e2e::make_request(http::verb::get, "/ping"));
         BOOST_TEST(other[0].body() == "pong");
     });
 }
@@ -227,7 +227,7 @@ BOOST_AUTO_TEST_CASE(test_e2e_streaming_generator_throwing_mid_stream_truncates_
         BOOST_TEST(!parser.is_done());
         BOOST_TEST(parser.get().body() == "ab");
 
-        auto other = co_await e2e::send_all(port, {e2e::make_request(http::verb::get, "/ping")});
+        auto other = co_await e2e::send_all(port, e2e::make_request(http::verb::get, "/ping"));
         BOOST_TEST(other[0].body() == "pong");
     });
     // Once headers are on the wire no error response is possible; the
@@ -288,7 +288,7 @@ BOOST_AUTO_TEST_CASE(test_e2e_streaming_mid_stream_throw_bypasses_custom_soft_er
         BOOST_TEST(soft_calls == 0);
 
         // Before the first chunk nothing is on the wire: the soft handler applies.
-        auto early = co_await e2e::send_all(port, {e2e::make_request(http::verb::get, "/early")});
+        auto early = co_await e2e::send_all(port, e2e::make_request(http::verb::get, "/early"));
         BOOST_TEST(early[0].result() == http::status::internal_server_error);
         BOOST_TEST(early[0].body() == "{\"error\":\"late\"}");
         BOOST_TEST(soft_calls == 1);

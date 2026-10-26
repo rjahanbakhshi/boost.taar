@@ -122,7 +122,7 @@ BOOST_AUTO_TEST_CASE(test_e2e_streaming_body_large_upload_beyond_body_limit)
     {
         auto req = e2e::make_request(http::verb::post, "/upload?name=big", payload, "application/octet-stream");
         auto ping = e2e::make_request(http::verb::get, "/ping");
-        auto res = co_await e2e::send_all(port, {req, ping});
+        auto res = co_await e2e::send_all(port, req, ping);
         BOOST_TEST(res[0].result() == http::status::ok);
         auto body = json::parse(res[0].body());
         BOOST_TEST(body.at("name").as_string() == "big");
@@ -193,15 +193,15 @@ BOOST_AUTO_TEST_CASE(test_e2e_streaming_body_limit_in_handler_is_a_soft_error)
 
     e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
     {
-        auto ok = co_await e2e::send_all(port, {
+        auto ok = co_await e2e::send_all(port,
             e2e::make_request(http::verb::post, "/limited", pattern(50), "text/plain"),
-            e2e::make_request(http::verb::get, "/ping")});
+            e2e::make_request(http::verb::get, "/ping"));
         BOOST_TEST(ok[0].body() == pattern(50));
         BOOST_TEST(ok[1].body() == "pong");                // fully consumed: connection reusable
 
         // The handler's own limit trips mid-body: soft error, then the connection closes.
-        auto res = co_await e2e::send_all(port, {
-            e2e::make_request(http::verb::post, "/limited", pattern(500), "text/plain")});
+        auto res = co_await e2e::send_all(port,
+            e2e::make_request(http::verb::post, "/limited", pattern(500), "text/plain"));
         BOOST_TEST(res[0].result() == http::status::payload_too_large);
         BOOST_TEST(res[0].body().find("request body exceeds the read limit of 100 bytes") != std::string::npos);
         BOOST_TEST(!res[0].keep_alive());

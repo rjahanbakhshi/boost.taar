@@ -667,10 +667,10 @@ BOOST_AUTO_TEST_CASE(test_http_session_is_movable_after_registration)
     net::io_context io;
     e2e::run(io, moved, [&](unsigned short port) -> taar::awaitable<void>
     {
-        auto res = co_await e2e::send_all(port, {
+        auto res = co_await e2e::send_all(port,
             e2e::make_request(http::verb::get, "/hello"),
             e2e::make_request(http::verb::get, "/boom"),
-            e2e::make_request(http::verb::post, "/hello", std::string(100, 'x'), "text/plain")});
+            e2e::make_request(http::verb::post, "/hello", std::string(100, 'x'), "text/plain"));
         BOOST_TEST(res[0].body() == "hello");
         BOOST_TEST(res[1].body() == "soft");                           // installed before the move
         BOOST_TEST(res[2].result() == http::status::payload_too_large); // limit set before the move

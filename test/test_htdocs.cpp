@@ -541,11 +541,11 @@ BOOST_AUTO_TEST_CASE(test_htdocs_end_to_end_revalidation)
     session.register_request_handler(method == http::verb::get && target == "/{*path}", htdocs {root.options()});
     e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
     {
-        auto first = co_await e2e::send_all(port, {e2e::make_request(http::verb::get, "/page.html")});
+        auto first = co_await e2e::send_all(port, e2e::make_request(http::verb::get, "/page.html"));
         auto const etag = std::string {first[0][http::field::etag]};
         auto again = e2e::make_request(http::verb::get, "/page.html");
         again.set(http::field::if_none_match, etag);
-        auto res = co_await e2e::send_all(port, {std::move(again), e2e::make_request(http::verb::get, "/page.html")});
+        auto res = co_await e2e::send_all(port, std::move(again), e2e::make_request(http::verb::get, "/page.html"));
         BOOST_TEST(static_cast<int>(res[0].result()) == 304);
         BOOST_TEST(res[0].body().empty());
         BOOST_TEST(res[0][http::field::etag] == etag);
@@ -864,7 +864,7 @@ BOOST_AUTO_TEST_CASE(test_htdocs_end_to_end_compressed_variant)
     {
         auto req = e2e::make_request(http::verb::get, "/app.js");
         req.set(http::field::accept_encoding, "gzip, br");
-        auto res = co_await e2e::send_all(port, {std::move(req), e2e::make_request(http::verb::get, "/app.js")});
+        auto res = co_await e2e::send_all(port, std::move(req), e2e::make_request(http::verb::get, "/app.js"));
         BOOST_TEST(res[0][http::field::content_encoding] == "br");
         BOOST_TEST(res[0].body() == "BR");
         BOOST_TEST(res[0][http::field::vary] == "Accept-Encoding");
@@ -1065,13 +1065,13 @@ BOOST_AUTO_TEST_CASE(test_htdocs_end_to_end_mount_query_and_head)
         htdocs {root.options()});
     e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
     {
-        auto res = co_await e2e::send_all(port, {
+        auto res = co_await e2e::send_all(port,
             e2e::make_request(http::verb::get, "/static/app.css?v=3"),
             e2e::make_request(http::verb::get, "/static/docs"),
             e2e::make_request(http::verb::get, "/static/docs/"),
             e2e::make_request(http::verb::get, "/static/nope"),
             e2e::make_request(http::verb::put, "/static/app.css"),
-            e2e::make_request(http::verb::get, "/static/%2e%2e/x")});
+            e2e::make_request(http::verb::get, "/static/%2e%2e/x"));
         BOOST_TEST(res[0].body() == "body{}");
         BOOST_TEST(res[0][http::field::server] == "taar-test");        // the filter applies to files
         BOOST_TEST(static_cast<int>(res[1].result()) == 301);

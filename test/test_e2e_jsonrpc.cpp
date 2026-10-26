@@ -70,7 +70,7 @@ BOOST_AUTO_TEST_CASE(test_e2e_jsonrpc_dual_surface_with_sessions)
     e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
     {
         // Create the session over REST.
-        auto r = co_await e2e::send_all(port, {e2e::make_request(http::verb::post, "/api/add/2/3")});
+        auto r = co_await e2e::send_all(port, e2e::make_request(http::verb::post, "/api/add/2/3"));
         BOOST_TEST(r[0].body() == "5");
         std::string key {r[0]["X-Session"]};
         BOOST_TEST(key.size() == 32u);
@@ -83,7 +83,7 @@ BOOST_AUTO_TEST_CASE(test_e2e_jsonrpc_dual_surface_with_sessions)
             {"jsonrpc":"2.0","id":3,"method":"last"}
         ])");
         batch.set("X-Session", key);
-        auto b = co_await e2e::send_all(port, {batch});
+        auto b = co_await e2e::send_all(port, batch);
         BOOST_TEST(b[0].result() == http::status::ok);
         auto arr = json::parse(b[0].body()).as_array();
         BOOST_REQUIRE(arr.size() == 3u);
@@ -96,7 +96,7 @@ BOOST_AUTO_TEST_CASE(test_e2e_jsonrpc_dual_surface_with_sessions)
         auto n = e2e::make_request(http::verb::post, "/rpc", R"({"jsonrpc":"2.0","method":"add","params":{"a":1,"b":1}})");
         n.set("X-Session", key);
         auto g = e2e::make_request(http::verb::get, "/rpc");
-        auto c = co_await e2e::send_all(port, {n, g});
+        auto c = co_await e2e::send_all(port, n, g);
         BOOST_TEST(c[0].result() == http::status::accepted);
         BOOST_TEST(c[1].result() == http::status::method_not_allowed);
         BOOST_TEST(c[1][http::field::allow] == "POST");

@@ -102,7 +102,7 @@ BOOST_AUTO_TEST_CASE(test_routing_single_segment_param_does_not_cross_slash)
     auto session = make_session();
     e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
     {
-        auto r = co_await e2e::send_all(port, {get("/users/42"), get("/users/42/posts"), get("/users")});
+        auto r = co_await e2e::send_all(port, get("/users/42"), get("/users/42/posts"), get("/users"));
         BOOST_TEST(r[0].result() == http::status::ok);
         BOOST_TEST(r[0].body() == "42");
         BOOST_TEST(r[1].result() == http::status::not_found);
@@ -116,7 +116,7 @@ BOOST_AUTO_TEST_CASE(test_routing_greedy_param_captures_remainder_and_matches_em
     auto session = make_session();
     e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
     {
-        auto r = co_await e2e::send_all(port, {get("/files/a/b/c.txt"), get("/files/"), get("/files")});
+        auto r = co_await e2e::send_all(port, get("/files/a/b/c.txt"), get("/files/"), get("/files"));
         BOOST_TEST(r[0].body() == "[a/b/c.txt]");
         // Both spellings of an empty remainder match and capture "".
         BOOST_TEST(r[1].result() == http::status::ok);
@@ -132,7 +132,7 @@ BOOST_AUTO_TEST_CASE(test_routing_multiple_params_keep_their_positions)
     auto session = make_session();
     e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
     {
-        auto r = co_await e2e::send_all(port, {get("/u/1/p/2")});
+        auto r = co_await e2e::send_all(port, get("/u/1/p/2"));
         BOOST_TEST(r[0].body() == "1-2");
     });
 }
@@ -143,7 +143,7 @@ BOOST_AUTO_TEST_CASE(test_routing_percent_encoded_segment_is_decoded_and_encoded
     auto session = make_session();
     e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
     {
-        auto r = co_await e2e::send_all(port, {get("/names/a%20b"), get("/names/a%2Fb")});
+        auto r = co_await e2e::send_all(port, get("/names/a%20b"), get("/names/a%2Fb"));
         BOOST_TEST(r[0].result() == http::status::ok);
         BOOST_TEST(r[0].body() == "[a b]");
         BOOST_TEST(r[1].result() == http::status::ok);
@@ -157,7 +157,7 @@ BOOST_AUTO_TEST_CASE(test_routing_trailing_slash_does_not_match_and_query_is_ign
     auto session = make_session();
     e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
     {
-        auto r = co_await e2e::send_all(port, {get("/a"), get("/a/"), get("/a?x=1")});
+        auto r = co_await e2e::send_all(port, get("/a"), get("/a/"), get("/a?x=1"));
         BOOST_TEST(r[0].body() == "a");
         BOOST_TEST(r[1].result() == http::status::not_found);
         BOOST_TEST(r[2].result() == http::status::ok);
@@ -170,11 +170,11 @@ BOOST_AUTO_TEST_CASE(test_routing_or_and_not_composition)
     auto session = make_session();
     e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
     {
-        auto r = co_await e2e::send_all(port, {
+        auto r = co_await e2e::send_all(port,
             get("/x"), get("/y"),
             e2e::make_request(http::verb::post, "/x"),
             e2e::make_request(http::verb::delete_, "/x"),
-            get("/z")});
+            get("/z"));
         BOOST_TEST(r[0].body() == "xy");
         BOOST_TEST(r[1].body() == "xy");
         BOOST_TEST(r[2].body() == "xy");
@@ -193,7 +193,7 @@ BOOST_AUTO_TEST_CASE(test_routing_header_matcher_name_is_case_insensitive)
         lower.set("x-token", "t");
         auto wrong = get("/hdr");
         wrong.set("X-Token", "u");
-        auto r = co_await e2e::send_all(port, {lower, wrong, get("/hdr")});
+        auto r = co_await e2e::send_all(port, lower, wrong, get("/hdr"));
         BOOST_TEST(r[0].body() == "ok");
         BOOST_TEST(r[1].result() == http::status::not_found);
         BOOST_TEST(r[2].result() == http::status::not_found);
@@ -232,7 +232,7 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_integer_overflow_is_bad_request)
     auto session = make_session();
     e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
     {
-        auto r = co_await e2e::send_all(port, {get("/users/99999999999999999999"), get("/users/-1")});
+        auto r = co_await e2e::send_all(port, get("/users/99999999999999999999"), get("/users/-1"));
         BOOST_TEST(r[0].result() == http::status::bad_request);
         BOOST_TEST(r[1].body() == "-1");
     });
@@ -244,7 +244,7 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_with_default_does_not_mask_invalid_value)
     auto session = make_session();
     e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
     {
-        auto r = co_await e2e::send_all(port, {get("/page"), get("/page?page=5"), get("/page?page=abc")});
+        auto r = co_await e2e::send_all(port, get("/page"), get("/page?page=5"), get("/page?page=abc"));
         BOOST_TEST(r[0].body() == "1");
         BOOST_TEST(r[1].body() == "5");
         BOOST_TEST(r[2].result() == http::status::bad_request);
@@ -257,7 +257,7 @@ BOOST_AUTO_TEST_CASE(test_rest_arg_repeated_query_parameter_is_ambiguous)
     auto session = make_session();
     e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
     {
-        auto r = co_await e2e::send_all(port, {get("/tags?tag=a"), get("/tags?tag=a&tag=b")});
+        auto r = co_await e2e::send_all(port, get("/tags?tag=a"), get("/tags?tag=a&tag=b"));
         BOOST_TEST(r[0].body() == "a");
         BOOST_TEST(r[1].result() == http::status::bad_request);
     });
@@ -307,9 +307,9 @@ BOOST_AUTO_TEST_CASE(test_routing_path_arg_from_any_target_alternative)
     net::io_context io;
     e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
     {
-        auto res = co_await e2e::send_all(port, {
+        auto res = co_await e2e::send_all(port,
             e2e::make_request(http::verb::get, "/items"),
-            e2e::make_request(http::verb::get, "/items/7")});
+            e2e::make_request(http::verb::get, "/items/7"));
         BOOST_TEST(res[0].body() == "all");
         BOOST_TEST(res[1].body() == "7");
     });

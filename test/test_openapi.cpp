@@ -335,10 +335,10 @@ BOOST_AUTO_TEST_CASE(test_e2e_openapi_document_served)
 
     e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
     {
-        auto res = co_await e2e::send_all(port, {
+        auto res = co_await e2e::send_all(port,
             e2e::make_request(http::verb::get, "/openapi.json"),
-            e2e::make_request(http::verb::get, "/users/7?verbose=true"),
-        });
+            e2e::make_request(http::verb::get, "/users/7?verbose=true")
+        );
         BOOST_TEST(res[0].result() == http::status::ok);
         BOOST_TEST(res[0][http::field::content_type] == "application/json");
         BOOST_TEST(json::parse(res[0].body()) == json::value {gen.document()});

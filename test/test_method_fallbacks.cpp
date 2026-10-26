@@ -87,13 +87,13 @@ BOOST_AUTO_TEST_CASE(test_method_not_allowed_lists_the_known_methods)
     auto session = make_session();
     e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
     {
-        auto res = co_await e2e::send_all(port, {
+        auto res = co_await e2e::send_all(port,
             e2e::make_request(http::verb::put, "/items/7", "{}", "application/json"),   // body is drained
             e2e::make_request(http::verb::delete_, "/both"),
             e2e::make_request(http::verb::post, "/explicit"),
             e2e::make_request(http::verb::put, "/opaque"),
             e2e::make_request(http::verb::post, "/nowhere"),
-            e2e::make_request(http::verb::get, "/items/7")});
+            e2e::make_request(http::verb::get, "/items/7"));
         BOOST_TEST(res[0].result() == http::status::method_not_allowed);
         BOOST_TEST(res[0][http::field::allow] == "GET, DELETE, HEAD");
         BOOST_TEST(res[0].body().empty());
@@ -172,7 +172,7 @@ BOOST_AUTO_TEST_CASE(test_head_on_htdocs_get_route_is_answered_by_the_handler)
         BOOST_TEST(file.starts_with("HTTP/1.1 200 OK\r\n"));
         BOOST_TEST(file.find("<h1>") == std::string::npos);
         BOOST_TEST(file.find("Content-Length: 14\r\n") != std::string::npos);
-        auto put = co_await e2e::send_all(port, {e2e::make_request(http::verb::put, "/index.html")});
+        auto put = co_await e2e::send_all(port, e2e::make_request(http::verb::put, "/index.html"));
         BOOST_TEST(put[0].result() == http::status::method_not_allowed);
         BOOST_TEST(put[0][http::field::allow] == "GET, HEAD");
     });
@@ -202,9 +202,9 @@ BOOST_AUTO_TEST_CASE(test_method_fallbacks_can_be_disabled)
     session.set_head_from_get(false);
     e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
     {
-        auto res = co_await e2e::send_all(port, {
+        auto res = co_await e2e::send_all(port,
             e2e::make_request(http::verb::put, "/items/7"),
-            e2e::make_request(http::verb::head, "/items/7")});
+            e2e::make_request(http::verb::head, "/items/7"));
         BOOST_TEST(res[0].result() == http::status::not_found);
         BOOST_TEST((res[0].find(http::field::allow) == res[0].end()));
         BOOST_TEST(res[1].result() == http::status::not_found);

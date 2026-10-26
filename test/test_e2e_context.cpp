@@ -47,15 +47,15 @@ BOOST_AUTO_TEST_CASE(test_e2e_connection_context_survives_keep_alive)
 
     e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
     {
-        auto a = co_await e2e::send_all(port, {
+        auto a = co_await e2e::send_all(port,
             e2e::make_request(http::verb::get, "/count"),
             e2e::make_request(http::verb::get, "/count"),
-            e2e::make_request(http::verb::get, "/count")});
+            e2e::make_request(http::verb::get, "/count"));
         BOOST_TEST(a[0].body() == "1");
         BOOST_TEST(a[1].body() == "2");
         BOOST_TEST(a[2].body() == "3");
 
-        auto b = co_await e2e::send_all(port, {e2e::make_request(http::verb::get, "/count")});
+        auto b = co_await e2e::send_all(port, e2e::make_request(http::verb::get, "/count"));
         BOOST_TEST(b[0].body() == "1");
     });
 }
@@ -79,7 +79,7 @@ BOOST_AUTO_TEST_CASE(test_e2e_cookie_session_shared_across_connections)
     e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
     {
         // Connection A creates the session.
-        auto a = co_await e2e::send_all(port, {e2e::make_request(http::verb::post, "/cart/2")});
+        auto a = co_await e2e::send_all(port, e2e::make_request(http::verb::post, "/cart/2"));
         BOOST_TEST(a[0].result() == http::status::ok);
         BOOST_TEST(a[0].body() == "2");
         std::string set_cookie {a[0][http::field::set_cookie]};
@@ -91,19 +91,19 @@ BOOST_AUTO_TEST_CASE(test_e2e_cookie_session_shared_across_connections)
         b_get.set(http::field::cookie, "sid=" + key);
         auto b_post = e2e::make_request(http::verb::post, "/cart/3");
         b_post.set(http::field::cookie, "sid=" + key);
-        auto b = co_await e2e::send_all(port, {b_get, b_post});
+        auto b = co_await e2e::send_all(port, b_get, b_post);
         BOOST_TEST(b[0].body() == "2");
         BOOST_TEST((b[0].find(http::field::set_cookie) == b[0].end()));
         BOOST_TEST(b[1].body() == "5");
 
         // No cookie on a require route -> 401.
-        auto c = co_await e2e::send_all(port, {e2e::make_request(http::verb::get, "/cart")});
+        auto c = co_await e2e::send_all(port, e2e::make_request(http::verb::get, "/cart"));
         BOOST_TEST(c[0].result() == http::status::unauthorized);
 
         // Forged cookie on a require route -> 401 as well.
         auto d_req = e2e::make_request(http::verb::get, "/cart");
         d_req.set(http::field::cookie, "sid=forged");
-        auto d = co_await e2e::send_all(port, {d_req});
+        auto d = co_await e2e::send_all(port, d_req);
         BOOST_TEST(d[0].result() == http::status::unauthorized);
         BOOST_TEST(carts.size() == 1u);
     });

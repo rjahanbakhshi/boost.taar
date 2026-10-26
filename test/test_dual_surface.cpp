@@ -149,30 +149,30 @@ BOOST_AUTO_TEST_CASE(test_dual_surface_same_result_and_shared_state)
 
     e2e::run(io, f.session, [&](unsigned short port) -> taar::awaitable<void>
     {
-        auto r = co_await e2e::send_all(port, {e2e::make_request(http::verb::post, "/api/add?a=2&b=3")});
+        auto r = co_await e2e::send_all(port, e2e::make_request(http::verb::post, "/api/add?a=2&b=3"));
         BOOST_TEST(r[0].result() == http::status::ok);
         BOOST_TEST(r[0][http::field::content_type] == "text/plain");
         BOOST_TEST(r[0].body() == "5");
         std::string key {r[0]["X-Session"]};
         BOOST_TEST(key.size() == 32u);
 
-        auto j = co_await e2e::send_all(port, {
+        auto j = co_await e2e::send_all(port,
             rpc_call(R"({"jsonrpc":"2.0","id":1,"method":"last"})", key),
-            rpc_call(R"({"jsonrpc":"2.0","id":2,"method":"add","params":{"a":10,"b":20}})", key)});
+            rpc_call(R"({"jsonrpc":"2.0","id":2,"method":"add","params":{"a":10,"b":20}})", key));
         BOOST_TEST(body_of(j[0]).at("result").as_int64() == 5);        // REST state visible to RPC
         BOOST_TEST(body_of(j[1]).at("result").as_int64() == 30);
 
         auto back = e2e::make_request(http::verb::get, "/api/last");
         back.set("X-Session", key);
-        auto k = co_await e2e::send_all(port, {back});
+        auto k = co_await e2e::send_all(port, back);
         BOOST_TEST(k[0].body() == "30");                                // RPC state visible to REST
 
-        auto init = co_await e2e::send_all(port, {mcp_call(R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}})", "")});
+        auto init = co_await e2e::send_all(port, mcp_call(R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}})", ""));
         std::string sid {init[0]["Mcp-Session-Id"]};
-        auto m = co_await e2e::send_all(port, {
+        auto m = co_await e2e::send_all(port,
             mcp_call(R"({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"last"}})", sid),
             mcp_call(R"({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"add","arguments":{"a":2,"b":3}}})", sid),
-            mcp_call(R"({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"last"}})", sid)});
+            mcp_call(R"({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"last"}})", sid));
         BOOST_TEST(body_of(m[0]).at("result").at("structuredContent").at("result").as_int64() == 0);  // MCP session is its own
         BOOST_TEST(body_of(m[1]).at("result").at("structuredContent").at("result").as_int64() == 5);
         BOOST_TEST(body_of(m[2]).at("result").at("structuredContent").at("result").as_int64() == 5);
@@ -187,22 +187,22 @@ BOOST_AUTO_TEST_CASE(test_dual_surface_domain_error_surfaces_natively)
 
     e2e::run(io, f.session, [&](unsigned short port) -> taar::awaitable<void>
     {
-        auto r = co_await e2e::send_all(port, {
+        auto r = co_await e2e::send_all(port,
             e2e::make_request(http::verb::get, "/api/divide/1/0"),
-            e2e::make_request(http::verb::get, "/api/divide/6/3")});
+            e2e::make_request(http::verb::get, "/api/divide/6/3"));
         BOOST_TEST(r[0].result() == http::status::unprocessable_entity);
         BOOST_TEST(r[0][http::field::content_type] == "application/json");
         BOOST_TEST(body_of(r[0]).at("error").as_string() == "division by zero");
         BOOST_TEST(r[1].body() == "2");                                 // connection survived the soft error
 
-        auto j = co_await e2e::send_all(port, {rpc_call(R"({"jsonrpc":"2.0","id":1,"method":"divide","params":{"a":1,"b":0}})", "")});
+        auto j = co_await e2e::send_all(port, rpc_call(R"({"jsonrpc":"2.0","id":1,"method":"divide","params":{"a":1,"b":0}})", ""));
         BOOST_TEST(j[0].result() == http::status::ok);
         BOOST_TEST(body_of(j[0]).at("error").at("code").as_int64() == -32001);
         BOOST_TEST(body_of(j[0]).at("error").at("message").as_string() == "division by zero");
 
-        auto init = co_await e2e::send_all(port, {mcp_call(R"({"jsonrpc":"2.0","id":1,"method":"initialize"})", "")});
+        auto init = co_await e2e::send_all(port, mcp_call(R"({"jsonrpc":"2.0","id":1,"method":"initialize"})", ""));
         std::string sid {init[0]["Mcp-Session-Id"]};
-        auto m = co_await e2e::send_all(port, {mcp_call(R"({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"divide","arguments":{"a":1,"b":0}}})", sid)});
+        auto m = co_await e2e::send_all(port, mcp_call(R"({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"divide","arguments":{"a":1,"b":0}}})", sid));
         auto const result = body_of(m[0]).at("result");
         BOOST_TEST(result.at("isError").as_bool());
         BOOST_TEST(result.at("content").as_array()[0].at("text").as_string() == "division by zero");
@@ -216,15 +216,15 @@ BOOST_AUTO_TEST_CASE(test_dual_surface_missing_argument_validation)
 
     e2e::run(io, f.session, [&](unsigned short port) -> taar::awaitable<void>
     {
-        auto r = co_await e2e::send_all(port, {e2e::make_request(http::verb::post, "/api/add?a=1")});
+        auto r = co_await e2e::send_all(port, e2e::make_request(http::verb::post, "/api/add?a=1"));
         BOOST_TEST(r[0].result() == http::status::bad_request);
 
-        auto j = co_await e2e::send_all(port, {rpc_call(R"({"jsonrpc":"2.0","id":1,"method":"add","params":{"a":1}})", "")});
+        auto j = co_await e2e::send_all(port, rpc_call(R"({"jsonrpc":"2.0","id":1,"method":"add","params":{"a":1}})", ""));
         BOOST_TEST(body_of(j[0]).at("error").at("code").as_int64() == -32602);
 
-        auto init = co_await e2e::send_all(port, {mcp_call(R"({"jsonrpc":"2.0","id":1,"method":"initialize"})", "")});
+        auto init = co_await e2e::send_all(port, mcp_call(R"({"jsonrpc":"2.0","id":1,"method":"initialize"})", ""));
         std::string sid {init[0]["Mcp-Session-Id"]};
-        auto m = co_await e2e::send_all(port, {mcp_call(R"({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"add","arguments":{"a":1}}})", sid)});
+        auto m = co_await e2e::send_all(port, mcp_call(R"({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"add","arguments":{"a":1}}})", sid));
         BOOST_TEST(body_of(m[0]).at("error").at("code").as_int64() == -32602);
     });
 }
@@ -246,9 +246,9 @@ BOOST_AUTO_TEST_CASE(test_dual_surface_schema_consistency)
 
     e2e::run(io, f.session, [&](unsigned short port) -> taar::awaitable<void>
     {
-        auto init = co_await e2e::send_all(port, {mcp_call(R"({"jsonrpc":"2.0","id":1,"method":"initialize"})", "")});
+        auto init = co_await e2e::send_all(port, mcp_call(R"({"jsonrpc":"2.0","id":1,"method":"initialize"})", ""));
         std::string sid {init[0]["Mcp-Session-Id"]};
-        auto tools = co_await e2e::send_all(port, {mcp_call(R"({"jsonrpc":"2.0","id":2,"method":"tools/list"})", sid)});
+        auto tools = co_await e2e::send_all(port, mcp_call(R"({"jsonrpc":"2.0","id":2,"method":"tools/list"})", sid));
         for (auto const& t : body_of(tools[0]).at("result").at("tools").as_array())
         {
             if (t.at("name").as_string() != "add") continue;

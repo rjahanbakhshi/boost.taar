@@ -124,13 +124,13 @@ BOOST_AUTO_TEST_CASE(test_e2e_cors_headers_on_every_response_kind)
             if (v == http::verb::options) r.set(http::field::access_control_request_method, "GET");
             return r;
         };
-        auto res = co_await e2e::send_all(port, {
+        auto res = co_await e2e::send_all(port,
             with_origin(http::verb::options, "/hello"),
             with_origin(http::verb::get, "/hello"),
             with_origin(http::verb::get, "/boom"),
             with_origin(http::verb::get, "/stream"),
             with_origin(http::verb::get, "/missing"),
-            e2e::make_request(http::verb::get, "/hello")});
+            e2e::make_request(http::verb::get, "/hello"));
         BOOST_TEST(res[0].result() == http::status::no_content);
         BOOST_TEST(res[0][http::field::access_control_allow_methods] != "");
         for (int i = 0; i < 5; ++i)

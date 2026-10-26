@@ -257,9 +257,9 @@ BOOST_AUTO_TEST_CASE(test_e2e_custom_soft_error_handler_keeps_connection)
 
     e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
     {
-        auto r = co_await e2e::send_all(port, {
+        auto r = co_await e2e::send_all(port,
             e2e::make_request(http::verb::get, "/divide/0"),
-            e2e::make_request(http::verb::get, "/divide/5")});
+            e2e::make_request(http::verb::get, "/divide/5"));
         BOOST_TEST(r[0].result() == http::status::unprocessable_entity);
         BOOST_TEST(json::parse(r[0].body()).at("error").as_string() == "division by zero");
         BOOST_TEST(r[1].body() == "2");
@@ -285,7 +285,7 @@ BOOST_AUTO_TEST_CASE(test_e2e_unknown_exception_escalates_to_hard_error_and_serv
         BOOST_TEST(raw.empty());                 // nothing written; connection dropped
         BOOST_TEST(runtime_errors == 1);
 
-        auto r = co_await e2e::send_all(port, {e2e::make_request(http::verb::get, "/echo/alive")});
+        auto r = co_await e2e::send_all(port, e2e::make_request(http::verb::get, "/echo/alive"));
         BOOST_TEST(r[0].body() == "alive");
     });
 }
@@ -313,7 +313,7 @@ BOOST_AUTO_TEST_CASE(test_e2e_soft_error_handler_that_throws_becomes_hard_error)
         BOOST_TEST(raw.empty());
         BOOST_TEST(logic_errors == 1);
 
-        auto r = co_await e2e::send_all(port, {e2e::make_request(http::verb::get, "/echo/alive")});
+        auto r = co_await e2e::send_all(port, e2e::make_request(http::verb::get, "/echo/alive"));
         BOOST_TEST(r[0].body() == "alive");
     });
 }
@@ -750,7 +750,7 @@ BOOST_AUTO_TEST_CASE(test_e2e_slot_bound_by_the_spawner_still_stops_the_acceptor
         while (port == 0) { timer.expires_after(1ms); co_await timer.async_wait(taar::use_awaitable); }
         auto req = e2e::make_request(http::verb::get, "/ping");
         req.set(http::field::connection, "close");
-        auto res = co_await e2e::send_all(port, {req});
+        auto res = co_await e2e::send_all(port, req);
         BOOST_TEST(res[0].body() == "pong");
         own.emit(net::cancellation_type::all);  // the spawner's own slot, not the pool
         failsafe.cancel();

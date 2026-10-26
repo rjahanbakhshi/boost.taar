@@ -322,11 +322,11 @@ BOOST_AUTO_TEST_CASE(test_e2e_multipart_form_arg_buffered)
     e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
     {
         auto body = field("title", "Quarterly report") + file("doc", "q3.pdf", "application/pdf", pattern(5000)) + closing();
-        auto res = co_await e2e::send_all(port, {
+        auto res = co_await e2e::send_all(port,
             multipart_request("/form?tag=x", body),
             e2e::make_request(http::verb::post, "/form", "{}", "application/json"),
             multipart_request("/form", "--" + boundary + " garbage"),
-            e2e::make_request(http::verb::get, "/ping")});
+            e2e::make_request(http::verb::get, "/ping"));
         BOOST_TEST(res[0].result() == http::status::ok);
         auto v = json::parse(res[0].body());
         BOOST_TEST(v.at("title").as_string() == "Quarterly report");
@@ -355,7 +355,7 @@ BOOST_AUTO_TEST_CASE(test_e2e_multipart_stream_arg_large_file_beyond_body_limit)
     {
         auto body = field("title", "big") + field("skipped", pattern(10000)) +
             file("upload", "big.bin", "application/octet-stream", payload) + field("after", "last") + closing();
-        auto res = co_await e2e::send_all(port, {multipart_request("/files", body), e2e::make_request(http::verb::get, "/ping")});
+        auto res = co_await e2e::send_all(port, multipart_request("/files", body), e2e::make_request(http::verb::get, "/ping"));
         BOOST_TEST(res[0].result() == http::status::ok);
         auto v = json::parse(res[0].body());
         BOOST_TEST(v.at("title").as_string() == "big");
@@ -376,7 +376,7 @@ BOOST_AUTO_TEST_CASE(test_e2e_multipart_stream_arg_rejects_non_multipart)
     auto session = make_session();
     e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
     {
-        auto res = co_await e2e::send_all(port, {e2e::make_request(http::verb::post, "/files", "plain", "text/plain")});
+        auto res = co_await e2e::send_all(port, e2e::make_request(http::verb::post, "/files", "plain", "text/plain"));
         BOOST_TEST(res[0].result() == http::status::bad_request);
         BOOST_TEST(!res[0].keep_alive());                              // body left unread
     });

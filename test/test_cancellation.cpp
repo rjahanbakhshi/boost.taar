@@ -587,7 +587,7 @@ BOOST_AUTO_TEST_CASE(test_cancellation_client_disconnect_stops_nested_stream_wor
             }
         }
         // Other connections are served as before.
-        auto other = co_await e2e::send_all(port, {e2e::make_request(http::verb::get, "/ping")});
+        auto other = co_await e2e::send_all(port, e2e::make_request(http::verb::get, "/ping"));
         BOOST_TEST(other[0].body() == "pong");
     });
     BOOST_TEST(hard_errors.load() == 0, "hard error: " << hard_error_text);
@@ -612,8 +612,8 @@ taar::awaitable<rpc_outcome> call_then_cancel(
     auto const started = clock_type::now();
     BOOST_TEST(co_await eventually(std::move(ready)));
 
-    auto cancelled = co_await e2e::send_all(port, {e2e::make_request(http::verb::post, "/rpc",
-        R"({"jsonrpc":"2.0","id":100,"method":"cancel","params":{"id":)" + std::to_string(id) + "}}")});
+    auto cancelled = co_await e2e::send_all(port, e2e::make_request(http::verb::post, "/rpc",
+        R"({"jsonrpc":"2.0","id":100,"method":"cancel","params":{"id":)" + std::to_string(id) + "}}"));
     BOOST_TEST(json::parse(cancelled[0].body()).at("result").as_int64() == 1);
 
     auto const ec = co_await slow.read_to_end();
@@ -673,8 +673,8 @@ BOOST_AUTO_TEST_CASE(test_cancellation_jsonrpc_cancel_interrupts_nested_and_conc
             }
             ++id;
         }
-        auto pong = co_await e2e::send_all(port, {e2e::make_request(http::verb::post, "/rpc",
-            R"({"jsonrpc":"2.0","id":50,"method":"ping"})")});
+        auto pong = co_await e2e::send_all(port, e2e::make_request(http::verb::post, "/rpc",
+            R"({"jsonrpc":"2.0","id":50,"method":"ping"})"));
         BOOST_TEST(json::parse(pong[0].body()).at("result").as_string() == "pong");
     });
 }
@@ -767,8 +767,8 @@ BOOST_AUTO_TEST_CASE(test_cancellation_mcp_notification_over_http)
     e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
     {
         auto ex = co_await net::this_coro::executor;
-        auto init = co_await e2e::send_all(port, {e2e::make_request(http::verb::post, "/mcp",
-            R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}})")});
+        auto init = co_await e2e::send_all(port, e2e::make_request(http::verb::post, "/mcp",
+            R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}})"));
         std::string const sid {init[0]["Mcp-Session-Id"]};
         BOOST_TEST(!sid.empty());
 
@@ -785,7 +785,7 @@ BOOST_AUTO_TEST_CASE(test_cancellation_mcp_notification_over_http)
         auto cancel = e2e::make_request(http::verb::post, "/mcp",
             R"({"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":9,"reason":"user"}})");
         cancel.set("Mcp-Session-Id", sid);
-        auto ack = co_await e2e::send_all(port, {cancel});
+        auto ack = co_await e2e::send_all(port, cancel);
         BOOST_TEST(ack[0].result() == http::status::accepted);
 
         BOOST_TEST(!co_await slow.read_to_end());
@@ -799,7 +799,7 @@ BOOST_AUTO_TEST_CASE(test_cancellation_mcp_notification_over_http)
         auto next = e2e::make_request(http::verb::post, "/mcp",
             R"({"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"calls"}})");
         next.set("Mcp-Session-Id", sid);
-        auto r = co_await e2e::send_all(port, {next});
+        auto r = co_await e2e::send_all(port, next);
         BOOST_TEST(json::parse(r[0].body()).at("result").at("structuredContent").at("result").as_int64() == 1);
     });
 }

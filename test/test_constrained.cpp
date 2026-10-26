@@ -240,10 +240,10 @@ BOOST_AUTO_TEST_CASE(test_e2e_constraint_violation_is_400_with_message)
 
     e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
     {
-        auto res = co_await e2e::send_all(port, {
+        auto res = co_await e2e::send_all(port,
             e2e::make_request(http::verb::get, "/items/0"),
-            e2e::make_request(http::verb::get, "/items/3"),
-        });
+            e2e::make_request(http::verb::get, "/items/3")
+        );
         BOOST_TEST(res[0].result() == http::status::bad_request);
         BOOST_TEST(res[0].body().find("id must be >= 1") != std::string::npos);
         BOOST_TEST(res[1].result() == http::status::ok);

@@ -169,12 +169,12 @@ BOOST_AUTO_TEST_CASE(test_attribute_arg_optional_when_absent)
         auto list = e2e::make_request(http::verb::post, "/mcp", R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})");
         auto call = e2e::make_request(http::verb::post, "/mcp",
             R"({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"whoami","arguments":{"greeting":"hi"}}})");
-        auto r = co_await e2e::send_all(port, {
+        auto r = co_await e2e::send_all(port,
             e2e::make_request(http::verb::get, "/me"),
             e2e::make_request(http::verb::get, "/required"),
             e2e::make_request(http::verb::post, "/rpc", R"({"jsonrpc":"2.0","id":1,"method":"whoami"})"),
             list,
-            call});
+            call);
         BOOST_TEST(r[0].body() == "anonymous");
         // A required attribute that nobody set is an argument failure.
         BOOST_TEST(r[1].result() == http::status::bad_request);
@@ -212,13 +212,13 @@ BOOST_AUTO_TEST_CASE(test_interceptor_reject_and_principal_on_every_surface)
     {
         auto anonymous = e2e::make_request(http::verb::get, "/me");
         anonymous.set(http::field::origin, "http://app.example");
-        auto r = co_await e2e::send_all(port, {
+        auto r = co_await e2e::send_all(port,
             anonymous,
             with_bearer(e2e::make_request(http::verb::get, "/me"), "alice"),
             with_bearer(e2e::make_request(http::verb::post, "/rpc", R"({"jsonrpc":"2.0","id":1,"method":"whoami"})"), "bob"),
             with_bearer(e2e::make_request(http::verb::post, "/mcp",
                 R"({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"whoami"}})"), "carol"),
-            e2e::make_request(http::verb::post, "/rpc", R"({"jsonrpc":"2.0","id":3,"method":"whoami"})")});
+            e2e::make_request(http::verb::post, "/rpc", R"({"jsonrpc":"2.0","id":3,"method":"whoami"})"));
 
         BOOST_TEST(r[0].result() == http::status::unauthorized);
         BOOST_TEST(r[0].body() == "Unauthorized");
@@ -263,11 +263,11 @@ BOOST_AUTO_TEST_CASE(test_interceptor_matcher_scope)
         auto preflight = e2e::make_request(http::verb::options, "/items/1");
         preflight.set(http::field::origin, "http://app.example");
         preflight.set(http::field::access_control_request_method, "GET");
-        auto r = co_await e2e::send_all(port, {
+        auto r = co_await e2e::send_all(port,
             e2e::make_request(http::verb::get, "/health"),
             preflight,
             e2e::make_request(http::verb::get, "/items/1"),
-            with_bearer(e2e::make_request(http::verb::get, "/items/7"), "alice")});
+            with_bearer(e2e::make_request(http::verb::get, "/items/7"), "alice"));
         BOOST_TEST(r[0].body() == "ok");
         BOOST_TEST(r[1].result() == http::status::no_content);
         BOOST_TEST(r[2].result() == http::status::unauthorized);
@@ -305,9 +305,9 @@ BOOST_AUTO_TEST_CASE(test_interceptor_order_and_short_circuit)
 
     e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
     {
-        auto r = co_await e2e::send_all(port, {
+        auto r = co_await e2e::send_all(port,
             e2e::make_request(http::verb::get, "/ok"),
-            e2e::make_request(http::verb::get, "/deny")});
+            e2e::make_request(http::verb::get, "/deny"));
         BOOST_TEST(r[0].body() == "42");
         BOOST_TEST(r[1].result() == http::status::forbidden);
         BOOST_TEST(r[1].body() == "denied by first");
@@ -394,11 +394,11 @@ BOOST_AUTO_TEST_CASE(test_interceptor_async_and_throwing)
 
     e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
     {
-        auto r = co_await e2e::send_all(port, {
+        auto r = co_await e2e::send_all(port,
             e2e::make_request(http::verb::get, "/ok"),
             e2e::make_request(http::verb::get, "/slow-deny"),
             e2e::make_request(http::verb::get, "/banned"),
-            e2e::make_request(http::verb::get, "/ok")});
+            e2e::make_request(http::verb::get, "/ok"));
         BOOST_TEST(r[0].body() == "5");
         BOOST_TEST(r[1].result() == http::status::too_many_requests);
         BOOST_TEST(r[2].result() == http::status::forbidden);
@@ -438,10 +438,10 @@ BOOST_AUTO_TEST_CASE(test_interceptor_runs_before_405_head_and_raw_handlers)
 
     e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
     {
-        auto r = co_await e2e::send_all(port, {
+        auto r = co_await e2e::send_all(port,
             denied(http::verb::put, "/thing"),
             denied(http::verb::get, "/raw"),
-            e2e::make_request(http::verb::put, "/thing")});
+            e2e::make_request(http::verb::put, "/thing"));
         BOOST_TEST(r[0].result() == http::status::unauthorized);
         BOOST_TEST(r[1].result() == http::status::unauthorized);
         BOOST_TEST(r[2].result() == http::status::method_not_allowed);
@@ -482,13 +482,13 @@ BOOST_AUTO_TEST_CASE(test_interceptor_connection_context_injection)
 
     e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
     {
-        auto a = co_await e2e::send_all(port, {
+        auto a = co_await e2e::send_all(port,
             e2e::make_request(http::verb::get, "/other"),
-            e2e::make_request(http::verb::get, "/count")});
+            e2e::make_request(http::verb::get, "/count"));
         BOOST_TEST(a[0].body() == "1");
         BOOST_TEST(a[1].body() == "3");
         // A new connection has a fresh context.
-        auto b = co_await e2e::send_all(port, {e2e::make_request(http::verb::get, "/other")});
+        auto b = co_await e2e::send_all(port, e2e::make_request(http::verb::get, "/other"));
         BOOST_TEST(b[0].body() == "1");
     });
 }
@@ -547,13 +547,13 @@ BOOST_AUTO_TEST_CASE(test_guard_typed_and_streaming_inner)
     {
         auto denied = e2e::make_request(http::verb::get, "/secret/3");
         denied.set(http::field::origin, "http://app.example");
-        auto r = co_await e2e::send_all(port, {
+        auto r = co_await e2e::send_all(port,
             denied,
             as_admin(e2e::make_request(http::verb::get, "/secret/3")),
             e2e::make_request(http::verb::get, "/stream"),
             as_admin(e2e::make_request(http::verb::get, "/stream")),
             e2e::make_request(http::verb::get, "/gen"),
-            as_admin(e2e::make_request(http::verb::get, "/gen"))});
+            as_admin(e2e::make_request(http::verb::get, "/gen")));
 
         BOOST_TEST(r[0].result() == http::status::forbidden);
         BOOST_TEST(r[0].body() == "admins only");
@@ -627,7 +627,7 @@ BOOST_AUTO_TEST_CASE(test_guard_composes_with_with_session)
 
     e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
     {
-        auto first = co_await e2e::send_all(port, {e2e::make_request(http::verb::post, "/add")});
+        auto first = co_await e2e::send_all(port, e2e::make_request(http::verb::post, "/add"));
         BOOST_TEST(first[0].body() == "1");
         std::string const key {first[0]["X-Session"]};
         BOOST_TEST(!key.empty());
@@ -637,11 +637,11 @@ BOOST_AUTO_TEST_CASE(test_guard_composes_with_with_session)
             req.set("X-Session", key);
             return req;
         };
-        auto r = co_await e2e::send_all(port, {
+        auto r = co_await e2e::send_all(port,
             keyed(e2e::make_request(http::verb::post, "/add")),
             keyed(e2e::make_request(http::verb::post, "/add")),
             keyed(e2e::make_request(http::verb::get, "/cart")),
-            as_admin(keyed(e2e::make_request(http::verb::get, "/cart")))});
+            as_admin(keyed(e2e::make_request(http::verb::get, "/cart"))));
         BOOST_TEST(r[0].body() == "2");
         BOOST_TEST(r[1].result() == http::status::conflict);
         BOOST_TEST(r[1].body() == "cart full");

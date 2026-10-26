@@ -29,8 +29,10 @@
 #include <boost/beast/http/string_body.hpp>
 #include <boost/beast/http/write.hpp>
 #include <chrono>
+#include <concepts>
 #include <exception>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace e2e {
@@ -161,6 +163,22 @@ inline taar::awaitable<std::vector<response>> send_all(
         out.push_back(co_await conn.send(std::move(r)));
     }
     co_return out;
+}
+
+/** Sends the requests @a reqs sequentially on one connection.
+
+    Takes the requests as separate arguments rather than a braced list:
+    GCC 13 ICEs (build_special_member_call) on a braced initializer list
+    of class temporaries inside a `co_await` expression.
+*/
+template <typename... Requests>
+    requires (sizeof...(Requests) > 0 && (std::convertible_to<Requests, request> && ...))
+taar::awaitable<std::vector<response>> send_all(unsigned short port, Requests&&... reqs)
+{
+    std::vector<request> v;
+    v.reserve(sizeof...(Requests));
+    (v.emplace_back(std::forward<Requests>(reqs)), ...);
+    return send_all(port, std::move(v));
 }
 
 } // namespace e2e
