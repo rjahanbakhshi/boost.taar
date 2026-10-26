@@ -14,6 +14,7 @@
 #include <boost/system/error_code.hpp>
 #include <boost/system/result.hpp>
 #include <boost/system/system_error.hpp>
+#include <boost/beast/core/error.hpp>
 #include <boost/beast/http/error.hpp>
 #include <boost/beast/http/status.hpp>
 #include <boost/json/value.hpp>
@@ -533,6 +534,8 @@ inline failure failure::from_exception(std::exception_ptr eptr)
     @li `boost::beast::http::error::body_limit`: `413 Payload Too Large`.
     @li `boost::beast::http::error::header_limit`:
         `431 Request Header Fields Too Large`.
+    @li `boost::beast::error::timeout` (a request header or body that did
+        not arrive in time): `408 Request Timeout`.
     @li Anything else: `500 Internal Server Error`.
 
     Only the outermost code is consulted.
@@ -562,6 +565,7 @@ inline failure failure::from_exception(std::exception_ptr eptr)
     }
     if (code == http::error::body_limit) return http::status::payload_too_large;
     if (code == http::error::header_limit) return http::status::request_header_fields_too_large;
+    if (code == boost::beast::error::timeout) return http::status::request_timeout;
     return http::status::internal_server_error;
 }
 

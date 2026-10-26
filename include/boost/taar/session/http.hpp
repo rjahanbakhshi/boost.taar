@@ -38,6 +38,7 @@
 #include <boost/taar/core/is_awaitable.hpp>
 #include <boost/taar/core/error.hpp>
 #include <boost/taar/core/interceptor.hpp>
+#include <boost/taar/core/detail/io_deadline.hpp>
 #include <boost/taar/type_traits/callable.hpp>
 #include <boost/beast/http/error.hpp>
 #include <boost/beast/http/read.hpp>
@@ -52,6 +53,7 @@
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/verb.hpp>
 #include <boost/beast/http/status.hpp>
+#include <boost/beast/core/error.hpp>
 #include <boost/beast/core/stream_traits.hpp>
 #include <boost/beast/core/tcp_stream.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
@@ -167,16 +169,24 @@ auto async_write(
     see the HEAD method and must leave the body out themselves.
 */
 template <typename StreamType, typename Response>
-awaitable<void> write_response(StreamType& stream, Response&& response, bool head_only)
+awaitable<void> write_response(
+    StreamType& stream,
+    Response&& response,
+    bool head_only,
+    ::boost::taar::detail::timeout_duration send_timeout = {})
 {
     namespace http = ::boost::beast::http;
     using R = std::remove_cvref_t<Response>;
+    // The send timeout bounds the write alone: a peer that stops reading
+    // has the connection closed (the stream's expiry closes the socket).
+    ::boost::taar::detail::expire_after(stream, send_timeout);
     if constexpr (requires { typename R::body_type; typename R::fields_type; })
     {
         if (head_only)
         {
             http::response_serializer<typename R::body_type, typename R::fields_type> serializer {response};
             co_await http::async_write_header(stream, serializer, use_awaitable_tuple);
+            ::boost::taar::detail::expire_never(stream);
             co_return;
         }
     }
@@ -185,6 +195,7 @@ awaitable<void> write_response(StreamType& stream, Response&& response, bool hea
         stream, std::forward<Response>(response), use_awaitable_tuple);
     (void)ec;
     (void)n;
+    ::boost::taar::detail::expire_never(stream);
 }
 
 /// The peer closed (or the operation was cancelled) between requests: not an error.
@@ -292,16 +303,30 @@ using response_filter_type = std::function<void(
     boost::beast::http::request_header<> const&,
     boost::beast::http::response_header<>&)>;
 
-/// Run @a filter on @a response if it is a typed message (message_generator is opaque).
+/** What every response written by a session shares: the response filter
+    and the send timeout.
+
+    Held through a `shared_ptr` so the error-handler wrappers, which
+    outlive moves of the session, read the current values.
+*/
+struct response_settings
+{
+    response_filter_type filter;
+    ::boost::taar::detail::timeout_duration send_timeout = std::chrono::seconds {60};
+};
+
+/** Finish @a response's header before it is written: run the response
+    filter. A `message_generator` is opaque and left as it is.
+*/
 template <typename Response>
-void apply_response_filter(
-    response_filter_type const& filter,
+void finish_header(
+    response_settings const& settings,
     boost::beast::http::request_header<> const& request,
     Response& response)
 {
     if constexpr (requires { response.base(); })
     {
-        if (filter) filter(request, response.base());
+        if (settings.filter) settings.filter(request, response.base());
     }
 }
 
@@ -380,6 +405,20 @@ constexpr auto chunked_value_type_helper()
 template <typename GeneratorType>
 using generator_value_t = typename decltype(chunked_value_type_helper<GeneratorType>())::type;
 
+/// Write @a buffers, failing the write (and closing the connection) if it blocks longer than @a send_timeout.
+template <typename StreamType, typename Buffers>
+awaitable<boost::system::error_code> write_bounded(
+    StreamType& stream,
+    Buffers const& buffers,
+    ::boost::taar::detail::timeout_duration send_timeout)
+{
+    ::boost::taar::detail::expire_after(stream, send_timeout);
+    auto [ec, n] = co_await ::boost::asio::async_write(stream, buffers, use_awaitable_tuple);
+    (void)n;
+    ::boost::taar::detail::expire_never(stream);
+    co_return ec;
+}
+
 template <typename GeneratorType, typename StreamType>
 awaitable<bool> write_chunked_response(
     GeneratorType& generator,
@@ -388,7 +427,7 @@ awaitable<bool> write_chunked_response(
     bool keep_alive,
     ::boost::asio::cancellation_slot cancellation_slot = {},
     std::exception_ptr* mid_stream_error = nullptr,
-    response_filter_type const& filter = {},
+    response_settings const* settings = nullptr,
     ::boost::beast::http::request_header<> const* request = nullptr,
     bool head_only = false)
 {
@@ -413,12 +452,18 @@ awaitable<bool> write_chunked_response(
     header_response.set(http::field::content_type, default_chunk_content_type<T>());
     header_response.keep_alive(keep_alive);
     apply_chunked_metadata(generator, header_response);
-    if (filter && request) filter(*request, header_response.base());
+    if (settings && settings->filter && request) settings->filter(*request, header_response.base());
     header_response.set(http::field::transfer_encoding, "chunked");
 
+    // Only the writes count towards the send timeout: the time the
+    // generator spends producing the next chunk does not.
+    auto const send_timeout = settings ? settings->send_timeout : ::boost::taar::detail::timeout_duration {};
+
     http::response_serializer<http::empty_body> serializer {header_response};
+    ::boost::taar::detail::expire_after(stream, send_timeout);
     auto [header_ec, header_sz] = co_await http::async_write_header(
         stream, serializer, use_awaitable_tuple);
+    ::boost::taar::detail::expire_never(stream);
     if (header_ec)
         co_return false;
 
@@ -429,11 +474,7 @@ awaitable<bool> write_chunked_response(
     if (first_value)
     {
         auto body = chunk_body_from(std::move(*first_value));
-        auto [write_ec, write_sz] = co_await net::async_write(
-            stream,
-            http::make_chunk(net::buffer(body)),
-            use_awaitable_tuple);
-        if (write_ec)
+        if (co_await write_bounded(stream, http::make_chunk(net::buffer(body)), send_timeout))
             co_return false;
 
         // Send remaining chunks
@@ -445,11 +486,7 @@ awaitable<bool> write_chunked_response(
                 break;
 
             auto chunk_body = chunk_body_from(std::move(*value));
-            auto [chunk_ec, chunk_sz] = co_await net::async_write(
-                stream,
-                http::make_chunk(net::buffer(chunk_body)),
-                use_awaitable_tuple);
-            if (chunk_ec)
+            if (co_await write_bounded(stream, http::make_chunk(net::buffer(chunk_body)), send_timeout))
                 co_return false;
         }
     }
@@ -471,10 +508,7 @@ awaitable<bool> write_chunked_response(
     }
 
     // Send last chunk (best effort, ignore errors)
-    co_await net::async_write(
-        stream,
-        http::make_chunk_last(),
-        use_awaitable_tuple);
+    (void)co_await write_bounded(stream, http::make_chunk_last(), send_timeout);
 
     co_return keep_alive;
 }
@@ -522,6 +556,11 @@ awaitable<bool> write_chunked_response(
         @ref boost::taar::failure when the connection itself fails or a
         failure is escalated. The default discards it silently; a real
         server should at least log.
+
+    Slow or idle clients are bounded by four timeouts: @ref set_idle_timeout
+    (between requests), @ref set_header_timeout (a request header),
+    @ref set_body_timeout (a request body) and @ref set_send_timeout (a
+    blocked write).
 
     `http` is move-constructible but not copyable; share one instance among
     spawned sessions by reference.
@@ -598,7 +637,7 @@ public:
         // The wrapper outlives moves of this object, so it captures the
         // shared filter rather than `this`.
         wrapped_soft_error_handler_ =
-            [filter = response_filter_](
+            [settings = settings_](
                 failure const& f,
                 Stream& stream,
                 boost::beast::http::request_header<>& req,
@@ -615,9 +654,10 @@ public:
                 auto response = response_from(f.text());
                 response.result(status);
                 detail::finish_response(response, req.version(), detail::header_keep_alive(req), false);
-                detail::apply_response_filter(*filter, req, response);
+                detail::finish_header(*settings, req, response);
                 bool keep_alive = response.keep_alive();
-                co_await detail::write_response(stream, std::move(response), req.method() == boost::beast::http::verb::head);
+                co_await detail::write_response(
+                    stream, std::move(response), req.method() == boost::beast::http::verb::head, settings->send_timeout);
                 co_return keep_alive;
             };
     }
@@ -659,7 +699,54 @@ public:
     */
     void set_response_filter(detail::response_filter_type filter)
     {
-        *response_filter_ = std::move(filter);
+        settings_->filter = std::move(filter);
+    }
+
+    /** Close a connection that stays idle this long waiting for the first
+        byte of a request: the first one, or the next on a keep-alive
+        connection (nginx `keepalive_timeout`). Expiry closes the
+        connection silently. Default 60 seconds; zero disables it.
+    */
+    void set_idle_timeout(std::chrono::steady_clock::duration timeout)
+    {
+        idle_timeout_ = timeout;
+    }
+
+    /** Bound the time from a request's first byte until its header is
+        complete (nginx `client_header_timeout`). Expiry answers
+        `408 Request Timeout` with `Connection: close` (through the
+        response filter) and closes. Default 30 seconds; zero disables it.
+    */
+    void set_header_timeout(std::chrono::steady_clock::duration timeout)
+    {
+        header_timeout_ = timeout;
+    }
+
+    /** Bound the inactivity while a request body is read: each read,
+        buffered by the session or made through `body_reader` /
+        `multipart_reader` by a streaming handler, waits at most this long
+        for data (nginx `client_body_timeout`). Expiry answers
+        `408 Request Timeout` and closes; a streaming handler sees an
+        exception carrying `beast::error::timeout`, which the default soft
+        error handler answers with `408`. Body reads are shielded from
+        shutdown, so this also bounds how long an upload stalled by its
+        client can hold up a graceful shutdown. Default 60 seconds; zero
+        disables it.
+    */
+    void set_body_timeout(std::chrono::steady_clock::duration timeout)
+    {
+        body_timeout_ = timeout;
+    }
+
+    /** Bound how long a single write may stay blocked, for example on a
+        client that stopped reading (nginx `send_timeout`). Expiry closes
+        the connection. Only time spent in a write counts: neither the
+        handler's execution nor the time a streaming generator takes
+        between chunks does. Default 60 seconds; zero disables it.
+    */
+    void set_send_timeout(std::chrono::steady_clock::duration timeout)
+    {
+        settings_->send_timeout = timeout;
     }
 
     /// Cap the bytes consumed by a request header. Default 8 KiB.
@@ -733,6 +820,35 @@ public:
                 cs.cancelled() == net::cancellation_type::none;
                 cs = co_await this_coro::cancellation_state)
             {
+                // A write that hit the send timeout closed the socket.
+                if (!boost::beast::get_lowest_layer(stream).socket().is_open())
+                {
+                    break;
+                }
+
+                // Idle phase: wait for the first byte of the next request,
+                // unless pipelined bytes are already buffered. The stream's
+                // expiry closes an idle connection silently.
+                if (buffer.size() == 0)
+                {
+                    ::boost::taar::detail::expire_after(stream, idle_timeout_);
+                    auto [idle_ec, idle_sz] = co_await stream.async_read_some(
+                        buffer.prepare(first_read_size), use_awaitable_tuple);
+                    buffer.commit(idle_sz);
+                    ::boost::taar::detail::expire_never(stream);
+                    if (idle_ec)
+                    {
+                        if (idle_ec == boost::beast::error::timeout ||
+                            detail::is_clean_close(idle_ec) ||
+                            !boost::beast::get_lowest_layer(stream).socket().is_open())
+                        {
+                            // Idle timeout, peer closed, or shutdown.
+                            break;
+                        }
+                        throw taar::exception {failure {idle_ec}};
+                    }
+                }
+
                 // Read and parse the header and use the target to find the handler.
                 http::request_parser<http::buffer_body> header_parser;
                 header_parser.header_limit(request_header_limit_);
@@ -742,11 +858,26 @@ public:
                 // Content-Length beyond the limit.
                 header_parser.body_limit(boost::none);
 
-                auto [header_ec, header_sz] = co_await http::async_read_header(
-                    stream,
-                    buffer,
-                    header_parser,
-                    use_awaitable_tuple);
+                // Header phase: from the first byte to the end of the header.
+                boost::system::error_code header_ec;
+                {
+                    ::boost::taar::detail::read_deadline<Stream> deadline {stream, header_timeout_};
+                    auto [read_ec, header_sz] = co_await http::async_read_header(
+                        stream,
+                        buffer,
+                        header_parser,
+                        use_awaitable_tuple);
+                    (void)header_sz;
+                    header_ec = read_ec;
+                    if (header_ec && deadline.expired()) header_ec = boost::beast::error::timeout;
+                }
+
+                if (header_ec == boost::beast::error::timeout)
+                {
+                    // Not an error of the server: answer 408 and close.
+                    co_await write_protocol_error(stream, failure {header_ec}, header_parser.get());
+                    break;
+                }
 
                 if (header_ec)
                 {
@@ -881,12 +1012,9 @@ public:
                     body_parser.body_limit(request_body_limit_);
                     if (!req_ec)
                     {
-                        std::tie(req_ec, req_sz) = co_await http::async_read(
-                            stream,
-                            buffer,
-                            body_parser,
-                            use_awaitable_tuple);
+                        req_ec = co_await read_body(stream, buffer, body_parser);
                     }
+                    (void)req_sz;
 
                     if (req_ec)
                     {
@@ -894,6 +1022,11 @@ public:
                         if (!detail::is_transport_error(req_ec))
                         {
                             co_await write_protocol_error(stream, f, body_parser.get().base());
+                        }
+                        if (req_ec == boost::beast::error::timeout)
+                        {
+                            // Answered 408: the connection simply ends.
+                            break;
                         }
                         // Invoke the hard error handler for server-side visibility.
                         throw taar::exception {f};
@@ -910,12 +1043,20 @@ public:
                     response.set(http::field::allow, allow);
                 }
                 response.keep_alive(keep_alive);
-                detail::apply_response_filter(*response_filter_, req_header, response);
+                detail::finish_header(*settings_, req_header, response);
                 response.prepare_payload();
+                ::boost::taar::detail::expire_after(stream, settings_->send_timeout);
                 auto [resp_ec, resp_sz] = co_await http::async_write(
                     stream,
                     response,
                     use_awaitable_tuple);
+                ::boost::taar::detail::expire_never(stream);
+
+                if (resp_ec == boost::beast::error::timeout)
+                {
+                    // The send timeout closed the connection: not an error.
+                    break;
+                }
 
                 if (resp_ec)
                 {
@@ -1072,7 +1213,7 @@ public:
                     header_parser.body_limit(boost::none);
                     auto version = header_parser.get().version();
                     auto keep_alive = header_parser.get().keep_alive();
-                    auto reader = ::boost::taar::detail::make_body_reader(stream, buffer, header_parser);
+                    auto reader = ::boost::taar::detail::make_body_reader(stream, buffer, header_parser, self.body_timeout_);
                     streaming_request request {header_parser.get().base(), reader};
 
                     bool shutting_down = false;
@@ -1084,9 +1225,11 @@ public:
                             std::move(request_handler), conn_ctx, request, context);
                         shutting_down = co_await detail::observe_shutdown();
                         detail::finish_response(response, version, keep_alive && header_parser.is_done(), shutting_down);
-                        detail::apply_response_filter(*self.response_filter_, header_parser.get(), response);
+                        detail::finish_header(*self.settings_, header_parser.get(), response);
                         bool const ka = response.keep_alive() && !shutting_down;
-                        co_await detail::write_response(stream, std::move(response), header_parser.get().method() == http::verb::head);
+                        co_await detail::write_response(
+                            stream, std::move(response), header_parser.get().method() == http::verb::head,
+                            self.settings_->send_timeout);
                         co_return ka;
                     }
                     catch (...)
@@ -1120,8 +1263,9 @@ public:
                 body_parser.body_limit(self.request_body_limit_);
                 if (!req_ec)
                 {
-                    std::tie(req_ec, req_sz) = co_await http::async_read(stream, buffer, body_parser, use_awaitable_tuple);
+                    req_ec = co_await self.read_body(stream, buffer, body_parser);
                 }
+                (void)req_sz;
 
                 auto version = body_parser.get().version();
                 auto keep_alive = body_parser.get().keep_alive();
@@ -1132,6 +1276,11 @@ public:
                     if (!detail::is_transport_error(req_ec))
                     {
                         co_await self.write_protocol_error(stream, f, body_parser.get().base());
+                    }
+                    if (req_ec == boost::beast::error::timeout)
+                    {
+                        // Answered 408: the connection simply ends.
+                        co_return false;
                     }
                     // Invoke the hard error handler for server-side visibility.
                     throw taar::exception {f};
@@ -1161,7 +1310,7 @@ public:
                             context);
                         bool const ka = co_await detail::write_chunked_response(
                             generator, stream, version, keep_alive, cancellation_slot, &stream_error,
-                            *self.response_filter_, &body_parser.get(),
+                            self.settings_.get(), &body_parser.get(),
                             body_parser.get().method() == http::verb::head);
                         if (stream_error) std::rethrow_exception(stream_error);
                         co_return ka;
@@ -1178,9 +1327,11 @@ public:
                         shutting_down = co_await detail::observe_shutdown();
 
                         detail::finish_response(response, version, keep_alive, shutting_down);
-                        detail::apply_response_filter(*self.response_filter_, body_parser.get(), response);
+                        detail::finish_header(*self.settings_, body_parser.get(), response);
                         bool const ka = response.keep_alive() && !shutting_down;
-                        co_await detail::write_response(stream, std::move(response), body_parser.get().method() == http::verb::head);
+                        co_await detail::write_response(
+                            stream, std::move(response), body_parser.get().method() == http::verb::head,
+                            self.settings_->send_timeout);
                         co_return ka;
                     }
                 }
@@ -1511,7 +1662,7 @@ public:
     void set_soft_error_handler(HandlerType handler)
     {
         wrapped_soft_error_handler_ =
-            [filter = response_filter_, handler = std::move(handler)](
+            [settings = settings_, handler = std::move(handler)](
                 failure const& f,
                 Stream& stream,
                 boost::beast::http::request_header<>& request_header,
@@ -1520,9 +1671,11 @@ public:
             {
                 auto response = co_await response_from_invoke(handler, f);
                 detail::finish_response(response, request_header.version(), detail::header_keep_alive(request_header), false);
-                detail::apply_response_filter(*filter, request_header, response);
+                detail::finish_header(*settings, request_header, response);
                 bool keep_alive = response.keep_alive();
-                co_await detail::write_response(stream, std::move(response), request_header.method() == boost::beast::http::verb::head);
+                co_await detail::write_response(
+                    stream, std::move(response), request_header.method() == boost::beast::http::verb::head,
+                    settings->send_timeout);
                 co_return keep_alive;
             };
     }
@@ -1557,7 +1710,13 @@ private:
     soft_error_handler_wrapper_type wrapped_soft_error_handler_;
     hard_error_handler_type hard_error_handler_ = [](failure const&){};
     /// Shared with the error-handler wrappers so they stay valid across moves of this object.
-    std::shared_ptr<detail::response_filter_type> response_filter_ = std::make_shared<detail::response_filter_type>();
+    std::shared_ptr<detail::response_settings> settings_ = std::make_shared<detail::response_settings>();
+    /// Bytes requested by the read that waits for a request's first byte
+    /// (what Beast's own header read asks for on an empty buffer).
+    static constexpr std::size_t first_read_size = 512;
+    std::chrono::steady_clock::duration idle_timeout_ = std::chrono::seconds {60};
+    std::chrono::steady_clock::duration header_timeout_ = std::chrono::seconds {30};
+    std::chrono::steady_clock::duration body_timeout_ = std::chrono::seconds {60};
     std::vector<interceptor_type> interceptors_;
 
     /** Run the interceptors on a parsed header.
@@ -1621,9 +1780,10 @@ private:
 
         auto response = std::move(*rejection);
         detail::finish_response(response, req_header.version(), req_header.keep_alive(), shutting_down);
-        detail::apply_response_filter(*response_filter_, req_header, response);
+        detail::finish_header(*settings_, req_header, response);
         bool const ka = response.keep_alive();
-        co_await detail::write_response(stream, std::move(response), req_header.method() == http::verb::head);
+        co_await detail::write_response(
+            stream, std::move(response), req_header.method() == http::verb::head, settings_->send_timeout);
         co_return ka;
     }
 
@@ -1638,10 +1798,37 @@ private:
         http::response<http::empty_body> err_response {detail::protocol_error_status(f), version};
         err_response.keep_alive(false);
         err_response.prepare_payload();
-        detail::apply_response_filter(*response_filter_, header, err_response);
+        detail::finish_header(*settings_, header, err_response);
+        ::boost::taar::detail::expire_after(stream, settings_->send_timeout);
         auto [wec, wsz] = co_await http::async_write(stream, err_response, use_awaitable_tuple);
+        ::boost::taar::detail::expire_never(stream);
         (void)wec;
         (void)wsz;
+    }
+
+    /** Read the rest of a request body into @a parser, waiting at most the
+        body timeout for each piece.
+
+        @returns The read's error; `beast::error::timeout` when the body
+                 timeout expired (the connection is still open, so the
+                 caller can answer `408`).
+    */
+    template <typename Parser>
+    awaitable<boost::system::error_code> read_body(
+        Stream& stream,
+        boost::beast::flat_buffer& buffer,
+        Parser& parser)
+    {
+        namespace http = boost::beast::http;
+        while (!parser.is_done())
+        {
+            ::boost::taar::detail::read_deadline<Stream> deadline {stream, body_timeout_};
+            auto [ec, n] = co_await http::async_read_some(stream, buffer, parser, use_awaitable_tuple);
+            (void)n;
+            if (ec && deadline.expired()) co_return boost::beast::error::timeout;
+            if (ec) co_return ec;
+        }
+        co_return boost::system::error_code {};
     }
 
     /// Methods a route accepts, with a matcher for its path alone (for 405 and HEAD).

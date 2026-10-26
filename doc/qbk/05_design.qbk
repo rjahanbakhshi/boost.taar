@@ -266,8 +266,10 @@ one and `examples/cancellation_server.cpp` shows them side by side:
   or `a || b`, or a loop polling `this_coro::cancellation_state`. Plain
   handlers, including one reading a streamed request body, are shielded:
   they finish, and their answer carries `Connection: close`. A shielded
-  body read waits for the client, so a client that stops sending
-  mid-upload holds that connection open until it closes.
+  body read waits for the client, at most the body timeout (see
+  [link taar.design.async.timeouts Timeouts]), so a client that stops
+  sending mid-upload holds that connection for that long and is then
+  answered `408`.
 * /client disconnect/ during a stream is noticed at the stream's next
   write; the generator is then destroyed with its nested frames. A stream
   suspended in a long wait between chunks keeps waiting until that wait
@@ -286,6 +288,55 @@ the session never sees a half-established connection. On exit a TLS
 session sends `close_notify` (bounded by a five second timer) before the
 TCP half-close. Nothing in the handler layer depends on the stream type,
 so every route, context and protocol layer works unchanged over TLS.
+
+[heading:timeouts Timeouts]
+
+A connection is bounded by four timeouts, modelled on nginx and set on the
+session (`set_idle_timeout`, `set_header_timeout`, `set_body_timeout`,
+`set_send_timeout`; zero disables one):
+
+[table
+[[Timeout][Runs][On expiry][Default]]
+[[idle (`keepalive_timeout`)]
+ [while waiting for the first byte of a request, the first one or the
+  next on a keep-alive connection]
+ [the connection is closed silently][60 s]]
+[[header (`client_header_timeout`)]
+ [from the first byte of a request until its header is complete]
+ [`408 Request Timeout` with `Connection: close`, through the response
+  filter, then close][30 s]]
+[[body (`client_body_timeout`)]
+ [for each read of a request body, buffered by the session or made
+  through `body_reader` / `multipart_reader`: the longest the client may
+  stay silent]
+ [`408` (a streaming handler sees a failure carrying
+  `beast::error::timeout`, which the default soft error handler answers
+  with `408`), then close][60 s]]
+[[send (`send_timeout`)]
+ [for each write: the longest a write may stay blocked, for example on a
+  client that stopped reading]
+ [the connection is closed][60 s]]
+]
+
+Only time spent in the guarded operation counts. A handler's execution
+never does, and neither does the time a streaming generator spends
+between chunks, so a server-sent-events stream with long gaps needs no
+special configuration. The idle and send timeouts use the stream's own
+expiry (`expires_after` on the lowest layer, also under TLS), set before
+the operation and cleared (`expires_never`) after it; Beast closes the
+socket when it fires. The header and body timeouts must leave the
+connection open for the `408`, so they use a timer that cancels the
+pending read on the socket instead of closing it. That cancellation does
+not travel through the coroutine's cancellation slot, so it also bounds
+the body reads that are shielded from shutdown: a client that stalls
+mid-upload delays a graceful shutdown by at most the body timeout. The
+TLS handshake keeps its own timeout (`server::tls`), and the close
+sequence (`close_notify`, lingering close) keeps its timers.
+
+An expired timeout is the client's doing, not a server failure: it is
+not reported to the hard error handler.
+
+[heading Unmatched requests and HEAD]
 
 A request that matches no route is answered `405 Method Not Allowed`
 with an `Allow` header when some route accepts the same path under another
@@ -542,7 +593,8 @@ exception types.
  [`http_status_for(f)` decides: Taar's request codes (argument not found
   or ambiguous, invalid argument, request, URL, content type, cookie,
   boolean or number format, constraint violated) -> `400`; Beast
-  `body_limit` -> `413`; `header_limit` -> `431`. A failure mapped to a
+  `body_limit` -> `413`; `header_limit` -> `431`; `beast::error::timeout`
+  (a request body read that timed out) -> `408`. A failure mapped to a
   `4xx` status is answered with that status and `f.text()` as a
   `text/plain` body. Everything else maps to `500` and is escalated to
   the hard error handler instead of being answered.]

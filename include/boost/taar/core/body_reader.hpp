@@ -12,7 +12,9 @@
 
 #include <boost/taar/core/awaitable.hpp>
 #include <boost/taar/core/error.hpp>
+#include <boost/taar/core/detail/io_deadline.hpp>
 #include <boost/asio/buffer.hpp>
+#include <boost/beast/core/error.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/beast/http/buffer_body.hpp>
 #include <boost/beast/http/error.hpp>
@@ -133,25 +135,42 @@ struct streaming_request : boost::beast::http::request_header<>
 
 namespace detail {
 
-/// Build a @ref body_reader over a `buffer_body` parser continuing on @a stream.
+/** Build a @ref body_reader over a `buffer_body` parser continuing on @a stream.
+
+    Each read waits at most @a timeout for data (zero disables the
+    limit); a read that times out throws a failure carrying
+    `boost::beast::error::timeout`, which maps to `408 Request Timeout`.
+*/
 template <typename Stream>
 body_reader make_body_reader(
     Stream& stream,
     boost::beast::flat_buffer& buffer,
-    boost::beast::http::request_parser<boost::beast::http::buffer_body>& parser)
+    boost::beast::http::request_parser<boost::beast::http::buffer_body>& parser,
+    timeout_duration timeout = {})
 {
     namespace http = boost::beast::http;
     std::optional<std::uint64_t> length;
     if (auto cl = parser.content_length()) length = *cl;
 
     return body_reader {
-        [&stream, &buffer, &parser](boost::asio::mutable_buffer out) -> awaitable<std::size_t>
+        [&stream, &buffer, &parser, timeout](boost::asio::mutable_buffer out) -> awaitable<std::size_t>
         {
             if (parser.is_done() || out.size() == 0) co_return 0;
             parser.get().body().data = out.data();
             parser.get().body().size = out.size();
             parser.get().body().more = true;
-            auto [ec, n] = co_await http::async_read_some(stream, buffer, parser, use_awaitable_tuple);
+            boost::system::error_code ec;
+            {
+                read_deadline<Stream> deadline {stream, timeout};
+                auto [read_ec, n] = co_await http::async_read_some(stream, buffer, parser, use_awaitable_tuple);
+                (void)n;
+                ec = read_ec;
+                if (ec && deadline.expired()) ec = boost::beast::error::timeout;
+            }
+            if (ec == boost::beast::error::timeout)
+            {
+                throw taar::exception {failure {ec, "the request body timed out"}};
+            }
             if (ec && ec != http::error::need_buffer)
             {
                 // The outer level says what failed, the cause why; both

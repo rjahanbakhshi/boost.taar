@@ -83,6 +83,7 @@ run
     test_routing_edges.cpp
     test_scenarios.cpp
     test_segmented_body.cpp
+    test_session_timeouts.cpp
     test_tcp_server.cpp
     test_template_parser.cpp
     test_windows_macros.cpp

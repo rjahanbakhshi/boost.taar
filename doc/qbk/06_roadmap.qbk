@@ -42,12 +42,6 @@ Deliberate, not planned.
 
 [heading Transport and connection handling]
 
-* No read timeouts: no header read timeout, keep-alive idle timeout or
-  body read timeout. A slow or idle client holds a connection (and its
-  strand) indefinitely, and a client that stalls mid-upload holds
-  shutdown of that connection (body reads are shielded). Approach:
-  configurable header, idle and body timeouts on the session using the
-  stream's expiry, mapped to 408 or a silent close.
 * A client that disconnects from a streamed response is noticed only at
   the next write; a stream suspended in a long wait keeps waiting.
   Approach: a concurrent read watcher during streaming that keeps
@@ -160,6 +154,19 @@ Deliberate, not planned.
   * descriptions, defaults and constraints as annotations on parameters
     and members, replacing `description`, `with_default` and
     `constrained` in the common cases.
+
+[endsect]
+
+[section:recently_closed Recently closed]
+
+* Connection timeouts on the session, modelled on nginx: idle (silent
+  close), header and body (`408 Request Timeout`, then close) and send
+  (close), with setters on `basic_http` and defaults of 60, 30, 60 and
+  60 seconds. Handler time and the gaps of a streaming generator do not
+  count; the body timeout also bounds shielded body reads during
+  shutdown. See [link taar.design.async.timeouts Timeouts].
+
+Earlier changes are listed in the [link taar.release_notes release notes].
 
 [endsect]
 

@@ -21,6 +21,7 @@ set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 23)
 target_sources(
     ${PROJECT_NAME}
     PUBLIC FILE_SET HEADERS BASE_DIRS include FILES
+        include/boost/taar/core/detail/io_deadline.hpp
         include/boost/taar/core/detail/move_only_function.hpp
         include/boost/taar/core/accept_encoding.hpp
         include/boost/taar/core/async_channel.hpp

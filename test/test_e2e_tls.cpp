@@ -22,7 +22,9 @@
 #include <boost/asio/ssl.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/strand.hpp>
+#include <boost/asio/write.hpp>
 #include <boost/test/unit_test.hpp>
+#include <atomic>
 #include <chrono>
 #include <exception>
 #include <string>
@@ -372,6 +374,44 @@ BOOST_AUTO_TEST_CASE(test_e2e_tls_raw_handler_may_take_the_stream)
         auto [sec] = co_await stream.async_shutdown(net::as_tuple(taar::use_awaitable));
         BOOST_TEST((!sec || sec == net::ssl::error::stream_truncated || sec == net::error::eof));
     });
+}
+
+BOOST_AUTO_TEST_CASE(test_e2e_tls_partial_header_is_408_and_idle_connection_closes)
+{
+    // The timeouts work through the TLS layer: the header timeout cancels
+    // the pending TLS read without closing, so the 408 can still be
+    // written; the idle timeout closes through the TCP layer's expiry.
+    net::io_context io;
+    auto tls = server_tls();
+    auto session = make_session();
+    std::atomic<int> hard_errors {0};
+    session.set_hard_error_handler([&](taar::failure const&) { ++hard_errors; });
+    session.set_header_timeout(150ms);
+    session.set_idle_timeout(400ms);
+    run_tls(io, tls, session, [&](unsigned short port) -> taar::awaitable<void>
+    {
+        net::ssl::context client_ctx {net::ssl::context::tls_client};
+        client_ctx.set_verify_mode(net::ssl::verify_none);
+
+        auto partial = co_await connect_tls(client_ctx, port);
+        std::string const head = "GET /hello HTTP/1.1\r\nHost: localhost\r\n";
+        co_await net::async_write(partial, net::buffer(head), taar::use_awaitable);
+        beast::flat_buffer buffer;
+        e2e::response res;
+        co_await http::async_read(partial, buffer, res);
+        BOOST_TEST(res.result() == http::status::request_timeout);
+        BOOST_TEST(!res.keep_alive());
+
+        auto idle = co_await connect_tls(client_ctx, port);
+        beast::flat_buffer idle_buffer;
+        auto ok = co_await send(idle, idle_buffer, e2e::make_request(http::verb::get, "/hello"));
+        BOOST_TEST(ok.body() == "hello over TLS");
+        char sink[64];
+        auto [ec, n] = co_await idle.async_read_some(net::buffer(sink), net::as_tuple(taar::use_awaitable));
+        BOOST_TEST(n == 0u);
+        BOOST_TEST(!!ec);       // eof, stream_truncated or reset: the server closed it
+    });
+    BOOST_TEST(hard_errors.load() == 0);
 }
 
 } // namespace

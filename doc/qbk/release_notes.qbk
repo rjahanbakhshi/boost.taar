@@ -9,6 +9,22 @@
 
 [heading Unreleased]
 
+* Connection timeouts, modelled on nginx: `basic_http::set_idle_timeout`
+  (waiting for a request's first byte; silent close; default 60 s),
+  `set_header_timeout` (first byte to end of header; `408 Request
+  Timeout` with `Connection: close`, then close; 30 s),
+  `set_body_timeout` (inactivity while a body is read, buffered or
+  through `body_reader` / `multipart_reader`; `408`; 60 s) and
+  `set_send_timeout` (a blocked write; close; 60 s). Zero disables one.
+  Handler time and the gaps between a stream's chunks do not count. A
+  slow or idle client no longer holds a connection indefinitely, and a
+  stalled upload delays a graceful shutdown by at most the body timeout.
+  Expired timeouts are not reported to the hard error handler.
+  `http_status_for` maps `beast::error::timeout` to `408`.
+* Behaviour change: an idle keep-alive connection now closes after 60
+  seconds, and a request whose header takes more than 30 seconds is
+  answered `408`; raise or disable the timeouts for clients that need
+  longer.
 * MSVC: `path_arg` registration checks no longer reject every route whose
   matcher has a leaf before its `target ==` (such as
   `method == get && target == "/users/{id}"`) with "not present as a

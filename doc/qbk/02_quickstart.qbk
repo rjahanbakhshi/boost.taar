@@ -504,6 +504,17 @@ The server registers itself and every connection with `signals`, so
 `emit()` may be called from any thread. Running `io.run()` on several
 threads is supported: each connection lives on its own strand.
 
+[heading Timeouts]
+
+Slow or idle clients are bounded by the session's timeouts (defaults in
+parentheses; zero disables one). Only time spent waiting on the client
+counts, never the handler's own:
+
+    http_session.set_idle_timeout(std::chrono::seconds {60});    // between requests: close
+    http_session.set_header_timeout(std::chrono::seconds {30});  // first byte to end of header: 408
+    http_session.set_body_timeout(std::chrono::seconds {60});    // silence while reading a body: 408
+    http_session.set_send_timeout(std::chrono::seconds {60});    // a blocked write: close
+
 [endsect]
 
 [endsect]
