@@ -1,3 +1,89 @@
+cmake_minimum_required(VERSION 3.8...3.28)
+
+# Usage requirements shared by the Boost superproject and standalone builds.
+function(taar_interface_settings target)
+    # Boost.Asio requires _WIN32_WINNT to be defined on Windows.
+    if(WIN32)
+        target_compile_definitions(
+            ${target}
+            INTERFACE
+                _WIN32_WINNT=0x0A00
+                WIN32_LEAN_AND_MEAN
+                NOMINMAX
+        )
+    endif()
+
+    # MSVC needs the conforming preprocessor for boost.describe and other
+    # variadic-macro-heavy boost code, plus accurate __cplusplus reporting.
+    # /bigobj lifts the 65535-section COFF limit that heavy template
+    # instantiation in consumer TUs (boost.beast, asio coroutines, etc.)
+    # routinely exceeds, especially under Debug.
+    if(MSVC)
+        target_compile_options(
+            ${target}
+            INTERFACE
+                /bigobj
+                /Zc:preprocessor
+                /Zc:__cplusplus
+        )
+    endif()
+endfunction()
+
+#
+# Inside the Boost superproject (add_subdirectory from boost/CMakeLists.txt):
+# behave like a Boost library. The superproject scans the Boost::<lib> names
+# below (one per line) to resolve the dependencies of
+# BOOST_INCLUDE_LIBRARIES=taar, and installs the target with boost_install.
+#
+if(BOOST_SUPERPROJECT_VERSION AND NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    project(boost_taar VERSION "${BOOST_SUPERPROJECT_VERSION}" LANGUAGES CXX)
+
+    add_library(boost_taar INTERFACE)
+    add_library(Boost::taar ALIAS boost_taar)
+
+    target_include_directories(boost_taar INTERFACE include)
+
+    # Every Boost library the headers include directly.
+    target_link_libraries(boost_taar
+        INTERFACE
+            Boost::algorithm
+            Boost::asio
+            Boost::assert
+            Boost::beast
+            Boost::core
+            Boost::describe
+            Boost::json
+            Boost::mp11
+            Boost::optional
+            Boost::system
+            Boost::url
+    )
+
+    if(NOT CMAKE_VERSION VERSION_LESS 3.20)
+        target_compile_features(boost_taar INTERFACE cxx_std_23)
+    endif()
+
+    taar_interface_settings(boost_taar)
+
+    if(COMMAND boost_install AND NOT BOOST_SKIP_INSTALL_RULES)
+        boost_install(
+            TARGETS boost_taar
+            VERSION "${BOOST_SUPERPROJECT_VERSION}"
+            HEADER_DIRECTORY include)
+    endif()
+
+    if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/CMakeLists.txt")
+        set(ENABLE_UNITY_BUILD OFF)
+        add_subdirectory(test)
+    endif()
+
+    return()
+endif()
+
+#
+# Standalone build: Boost from find_package (Conan or an installed Boost),
+# with tests, examples and an install rule.
+#
 cmake_minimum_required(VERSION 3.28)
 
 if(NOT CMAKE_EXPORT_COMPILE_COMMANDS)
@@ -16,6 +102,7 @@ project(
 find_package(Boost 1.84 CONFIG COMPONENTS url json system REQUIRED)
 
 add_library(${PROJECT_NAME} INTERFACE)
+add_library(Boost::taar ALIAS ${PROJECT_NAME})
 set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 23)
 
 target_sources(
@@ -108,39 +195,9 @@ target_sources(
         include/boost/taar/type_traits/super_type.hpp
 )
 
-target_link_libraries(
-    ${PROJECT_NAME}
-    INTERFACE
-        Boost::boost
-        Boost::url
-        Boost::json
-)
+target_link_libraries(${PROJECT_NAME} INTERFACE Boost::boost Boost::url Boost::json)
 
-# Boost.Asio requires _WIN32_WINNT to be defined on Windows.
-if(WIN32)
-    target_compile_definitions(
-        ${PROJECT_NAME}
-        INTERFACE
-            _WIN32_WINNT=0x0A00
-            WIN32_LEAN_AND_MEAN
-            NOMINMAX
-    )
-endif()
-
-# MSVC needs the conforming preprocessor for boost.describe and other
-# variadic-macro-heavy boost code, plus accurate __cplusplus reporting.
-# /bigobj lifts the 65535-section COFF limit that heavy template
-# instantiation in consumer TUs (boost.beast, asio coroutines, etc.)
-# routinely exceeds, especially under Debug.
-if(MSVC)
-    target_compile_options(
-        ${PROJECT_NAME}
-        INTERFACE
-            /bigobj
-            /Zc:preprocessor
-            /Zc:__cplusplus
-    )
-endif()
+taar_interface_settings(${PROJECT_NAME})
 
 install(TARGETS ${PROJECT_NAME} FILE_SET HEADERS)
 

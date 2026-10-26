@@ -1,6 +1,9 @@
 project(boost-taar-test)
 
-find_package(Boost 1.84 CONFIG REQUIRED)
+# In the Boost superproject the Boost targets already exist.
+if(NOT BOOST_SUPERPROJECT_VERSION)
+    find_package(Boost 1.84 CONFIG REQUIRED)
+endif()
 find_package(OpenSSL REQUIRED)
 
 add_executable(${PROJECT_NAME})
@@ -91,8 +94,14 @@ target_sources(
 
 target_link_libraries(
     ${PROJECT_NAME}
-    PRIVATE boost-taar OpenSSL::SSL OpenSSL::Crypto
+    PRIVATE Boost::taar OpenSSL::SSL OpenSSL::Crypto
 )
+
+# Standalone builds get the Boost.Test headers with Boost::boost; the
+# superproject has a target per library.
+if(BOOST_SUPERPROJECT_VERSION)
+    target_link_libraries(${PROJECT_NAME} PRIVATE Boost::included_unit_test_framework)
+endif()
 
 add_test(
     NAME ${PROJECT_NAME}

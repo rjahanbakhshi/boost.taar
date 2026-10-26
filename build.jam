@@ -8,10 +8,17 @@
 
 require-b2 5.2 ;
 
+# Every Boost library the headers include directly.
 constant boost_dependencies :
+    /boost/algorithm//boost_algorithm
     /boost/asio//boost_asio
+    /boost/assert//boost_assert
     /boost/beast//boost_beast
+    /boost/core//boost_core
+    /boost/describe//boost_describe
     /boost/json//boost_json
+    /boost/mp11//boost_mp11
+    /boost/optional//boost_optional
     /boost/system//boost_system
     /boost/url//boost_url
     ;
@@ -28,11 +35,7 @@ explicit
         : # default-build
         : # usage-requirements
             <include>include
-            <library>/boost/asio//boost_asio
-            <library>/boost/beast//boost_beast
-            <library>/boost/json//boost_json
-            <library>/boost/system//boost_system
-            <library>/boost/url//boost_url
+            <library>$(boost_dependencies)
             <toolset>msvc:<define>_WIN32_WINNT=0x0A00
             <toolset>msvc:<define>WIN32_LEAN_AND_MEAN
             <toolset>msvc:<define>NOMINMAX

@@ -29,6 +29,15 @@
   seconds, and a request whose header takes more than 30 seconds is
   answered `408`; raise or disable the timeouts for clients that need
   longer.
+* Boost superproject CMake support: inside the superproject
+  (`BOOST_SUPERPROJECT_VERSION` defined) `CMakeLists.txt` defines the
+  INTERFACE target `boost_taar` with alias `Boost::taar`, lists its Boost
+  dependencies one per line (so `-DBOOST_INCLUDE_LIBRARIES=taar` pulls in
+  what it needs), installs through `boost_install`, and builds the tests
+  when `BUILD_TESTING` is on. Standalone builds also get the
+  `Boost::taar` alias. `build.jam` lists every Boost library the headers
+  include.
+* The examples moved from `examples/` to `example/`, the Boost layout.
 * MSVC: `path_arg` registration checks no longer reject every route whose
   matcher has a leaf before its `target ==` (such as
   `method == get && target == "/users/{id}"`) with "not present as a
