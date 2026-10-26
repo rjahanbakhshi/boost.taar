@@ -394,7 +394,7 @@ BOOST_AUTO_TEST_CASE(test_jsonrpc_endpoint_custom_error_mapper)
     rpc->set_error_mapper([&](taar::failure const& f) -> jsonrpc::error_info
     {
         ++mapper_calls;
-        if (auto const* x = f.as<division_by_zero>()) return {-32001, x->what(), json::value {{"retry", false}}};
+        if (auto const x = f.as<division_by_zero>()) return {-32001, x->what(), json::value {{"retry", false}}};
         return jsonrpc::default_error_mapper(f);
     });
 

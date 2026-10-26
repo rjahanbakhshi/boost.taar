@@ -139,7 +139,7 @@ taar::response_builder on_soft_error(taar::failure const& f)
     {
         return taar::response_builder(json::value {{"error", std::move(message)}}).set_status(status);
     };
-    if (auto const* x = f.as<not_found>())
+    if (auto const x = f.as<not_found>())
     {
         return reply(http::status::not_found, x->what());
     }

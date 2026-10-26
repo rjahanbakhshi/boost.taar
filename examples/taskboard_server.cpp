@@ -264,8 +264,8 @@ int main(int argc, char* argv[])
             res.prepare_payload();
             return res;
         };
-        if (auto const* e = f.as<not_authorized>()) return reply(http::status::forbidden, e->what());
-        if (auto const* e = f.as<std::out_of_range>()) return reply(http::status::not_found, e->what());
+        if (auto const e = f.as<not_authorized>()) return reply(http::status::forbidden, e->what());
+        if (auto const e = f.as<std::out_of_range>()) return reply(http::status::not_found, e->what());
         auto const status = taar::http_status_for(f);
         if (status != http::status::internal_server_error) return reply(status, f.text());
         return reply(http::status::internal_server_error, "internal error");
@@ -347,7 +347,7 @@ int main(int argc, char* argv[])
     rpc.method("tasks.complete", [&](int id) { return tasks.complete(id); }, rpc_arg("id"));
     rpc.set_error_mapper([](taar::failure const& f)
     {
-        if (auto const* e = f.as<not_authorized>()) return jsonrpc::error_info {-32001, e->what(), std::nullopt};
+        if (auto const e = f.as<not_authorized>()) return jsonrpc::error_info {-32001, e->what(), std::nullopt};
         return jsonrpc::default_error_mapper(f);
     });
     session.register_request_handler(method == http::verb::post && target == "/rpc", rpc.handler());

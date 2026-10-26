@@ -246,8 +246,8 @@ BOOST_AUTO_TEST_CASE(test_e2e_custom_soft_error_handler_keeps_connection)
     auto session = make_session();
     session.set_soft_error_handler([](taar::failure const& f)
     {
-        auto const* e = f.as<division_by_zero>();
-        if (e == nullptr) f.rethrow();
+        auto const e = f.as<division_by_zero>();
+        if (!e) f.rethrow();
         http::response<http::string_body> res {http::status::unprocessable_entity, 11};
         res.set(http::field::content_type, "application/json");
         res.body() = json::serialize(json::object {{"error", e->what()}});

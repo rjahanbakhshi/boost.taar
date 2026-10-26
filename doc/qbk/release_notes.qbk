@@ -14,6 +14,14 @@
   `method == get && target == "/users/{id}"`) with "not present as a
   placeholder in target template \"\"". The capture holding the
   template is now selected by type.
+* `failure::as<E>()` returns `std::optional<E>`, a copy of the kept
+  exception, instead of `E const*`. Whether `std::rethrow_exception`
+  copies the exception object is unspecified; MSVC copies it, so the
+  returned pointer referred to a copy destroyed on return (an access
+  violation in `test_failure_as`). `E` must be copy constructible.
+  Migration: `if (auto const* e = f.as<E>())` becomes
+  `if (auto const e = f.as<E>())`; `e->what()` and `if (f.as<E>())` read
+  as before; comparisons with `nullptr` become `.has_value()`.
 
 [heading 1.0.0]
 

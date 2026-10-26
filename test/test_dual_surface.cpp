@@ -61,7 +61,7 @@ int last(calc_session const& s) { return s.last; }
 
 http::response<http::string_body> soft_error(taar::failure const& f)
 {
-    if (auto const* e = f.as<division_by_zero>())
+    if (auto const e = f.as<division_by_zero>())
     {
         http::response<http::string_body> res {http::status::unprocessable_entity, 11};
         res.set(http::field::content_type, "application/json");
@@ -78,7 +78,7 @@ http::response<http::string_body> soft_error(taar::failure const& f)
 
 jsonrpc::error_info rpc_error(taar::failure const& f)
 {
-    if (auto const* e = f.as<division_by_zero>())
+    if (auto const e = f.as<division_by_zero>())
     {
         return {-32001, e->what(), std::nullopt};
     }

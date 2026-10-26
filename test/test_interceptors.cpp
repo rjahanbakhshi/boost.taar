@@ -365,7 +365,7 @@ BOOST_AUTO_TEST_CASE(test_interceptor_async_and_throwing)
     session.set_soft_error_handler([](taar::failure const& f)
     {
         http::response<http::string_body> res {http::status::internal_server_error, 11};
-        if (auto const* e = f.as<banned>())
+        if (auto const e = f.as<banned>())
         {
             res.result(http::status::forbidden);
             res.body() = e->what();

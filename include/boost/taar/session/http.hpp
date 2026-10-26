@@ -279,7 +279,7 @@ inline constexpr bool is_streaming_result =
 inline bool is_operation_aborted(failure const& f)
 {
     if (f.is(boost::asio::error::operation_aborted)) return true;
-    if (auto const* multiple = f.as<boost::asio::multiple_exceptions>())
+    if (auto const multiple = f.as<boost::asio::multiple_exceptions>())
     {
         return multiple->first_exception() &&
             is_operation_aborted(failure::from_exception(multiple->first_exception()));
@@ -1494,7 +1494,7 @@ public:
         @code
         session.set_soft_error_handler([](taar::failure const& f)
         {
-            if (auto const* e = f.as<not_found>())
+            if (auto const e = f.as<not_found>())
                 return taar::response_builder(e->what()).set_status(http::status::not_found);
             return taar::response_builder(f.text()).set_status(taar::http_status_for(f));
         });

@@ -452,7 +452,7 @@ BOOST_AUTO_TEST_CASE(test_mcp_custom_tool_error_handler)
     });
     e.rpc().set_error_mapper([](taar::failure const& f) -> jsonrpc::error_info
     {
-        if (auto const* x = f.as<division_by_zero>()) return {-32001, x->what(), std::nullopt};
+        if (auto const x = f.as<division_by_zero>()) return {-32001, x->what(), std::nullopt};
         return jsonrpc::default_error_mapper(f);
     });
     auto v = body_json(post(e, R"({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"divide","arguments":{"a":1,"b":0}}})"));

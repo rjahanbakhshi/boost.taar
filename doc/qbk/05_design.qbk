@@ -593,19 +593,23 @@ error in error handling cannot take a connection down unexpectedly.
 [heading Recognising your own exceptions]
 
 A hook recognises a domain exception without a try/catch ladder with
-`failure::as<E>()`, which returns the kept exception if it is an `E` (or
-derives from it) and `nullptr` otherwise:
+`failure::as<E>()`, which returns a copy of the kept exception as a
+`std::optional<E>` if it is an `E` (or derives from it) and
+`std::nullopt` otherwise. It returns a copy, not a pointer, because
+whether `std::rethrow_exception` copies the exception object is
+unspecified (MSVC copies it), so the address of a caught object cannot
+be handed out portably:
 
     session.set_soft_error_handler([](taar::failure const& f)
     {
-        if (auto const* e = f.as<not_found>())
+        if (auto const e = f.as<not_found>())
             return taar::response_builder(e->what()).set_status(http::status::not_found);
         return taar::response_builder(f.text()).set_status(taar::http_status_for(f));
     });
 
     rpc.set_error_mapper([](taar::failure const& f) -> taar::jsonrpc::error_info
     {
-        if (auto const* e = f.as<not_found>()) return {-32004, e->what(), std::nullopt};
+        if (auto const e = f.as<not_found>()) return {-32004, e->what(), std::nullopt};
         return taar::jsonrpc::default_error_mapper(f);
     });
 

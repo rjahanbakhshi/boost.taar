@@ -13,6 +13,7 @@
 #include <boost/system/errc.hpp>
 #include <boost/system/system_error.hpp>
 #include <boost/test/unit_test.hpp>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -236,24 +237,39 @@ BOOST_AUTO_TEST_CASE(test_failure_text)
 BOOST_AUTO_TEST_CASE(test_failure_as)
 {
     auto const wrapped = failure::from_exception(std::make_exception_ptr(std::out_of_range {"index"}));
-    auto const* oor = wrapped.as<std::out_of_range>();
-    BOOST_TEST_REQUIRE(oor != nullptr);
+    auto const oor = wrapped.as<std::out_of_range>();
+    BOOST_TEST_REQUIRE(oor.has_value());
     BOOST_TEST(std::string {oor->what()} == "index");
-    // Base classes match, unrelated types do not.
-    BOOST_TEST(wrapped.as<std::logic_error>() == oor);
-    BOOST_TEST(wrapped.as<std::runtime_error>() == nullptr);
-    BOOST_TEST(wrapped.as<user_error>() == nullptr);
+    // Base classes match (the copy keeps the standard exception's text),
+    // unrelated types do not.
+    auto const logic = wrapped.as<std::logic_error>();
+    BOOST_TEST_REQUIRE(logic.has_value());
+    BOOST_TEST(std::string {logic->what()} == "index");
+    BOOST_TEST(wrapped.as<std::exception>().has_value());
+    BOOST_TEST(!wrapped.as<std::runtime_error>().has_value());
+    BOOST_TEST(!wrapped.as<user_error>().has_value());
+
+    // The result is an independent copy: it stays valid after the failure
+    // that produced it is gone (on MSVC rethrow_exception copies the
+    // exception object, so a pointer into the caught object would dangle).
+    std::optional<std::out_of_range> survivor;
+    {
+        auto const temporary = failure::from_exception(std::make_exception_ptr(std::out_of_range {"kept"}));
+        survivor = temporary.as<std::out_of_range>();
+    }
+    BOOST_TEST_REQUIRE(survivor.has_value());
+    BOOST_TEST(std::string {survivor->what()} == "kept");
 
     // Found when nested, and through copies.
     failure outer {error::invalid_argument_format, "argument x (position 1)"};
     outer.with_cause(failure::from_exception(std::make_exception_ptr(user_error {})));
     failure const copy = outer;
-    BOOST_TEST(copy.as<user_error>() != nullptr);
-    BOOST_TEST(copy.as<user_error>() == outer.as<user_error>());
+    BOOST_TEST(copy.as<user_error>().has_value());
+    BOOST_TEST(outer.as<user_error>().has_value());
 
     // No kept exception.
-    BOOST_TEST(failure {error::argument_not_found}.as<std::exception>() == nullptr);
-    BOOST_TEST(failure {}.as<std::exception>() == nullptr);
+    BOOST_TEST(!failure {error::argument_not_found}.as<std::exception>().has_value());
+    BOOST_TEST(!failure {}.as<std::exception>().has_value());
 }
 
 BOOST_AUTO_TEST_CASE(test_http_status_for)

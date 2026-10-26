@@ -219,7 +219,7 @@ public:
         @code
         rpc.set_error_mapper([](taar::failure const& f) -> jsonrpc::error_info
         {
-            if (auto const* e = f.as<division_by_zero>()) return {-32001, e->what(), std::nullopt};
+            if (auto const e = f.as<division_by_zero>()) return {-32001, e->what(), std::nullopt};
             return jsonrpc::default_error_mapper(f);
         });
         @endcode

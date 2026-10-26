@@ -103,7 +103,7 @@ int main(int argc, char* argv[])
     // Domain exceptions become JSON-RPC errors; everything else keeps the default mapping.
     rpc.set_error_mapper([](taar::failure const& f) -> jsonrpc::error_info
     {
-        if (auto const* x = f.as<division_by_zero>()) return {-32001, x->what(), std::nullopt};
+        if (auto const x = f.as<division_by_zero>()) return {-32001, x->what(), std::nullopt};
         return jsonrpc::default_error_mapper(f);
     });
 

@@ -367,14 +367,14 @@ error; anything unrecognised escalates or becomes an internal error):
 
     http_session.set_soft_error_handler([](taar::failure const& f)
     {
-        if (auto const* e = f.as<not_found>())
+        if (auto const e = f.as<not_found>())
             return taar::response_builder(e->what()).set_status(http::status::not_found);
         return taar::response_builder(f.text()).set_status(taar::http_status_for(f));
     });
 
     rpc.set_error_mapper([](taar::failure const& f) -> taar::jsonrpc::error_info
     {
-        if (auto const* e = f.as<not_found>()) return {-32004, e->what(), std::nullopt};
+        if (auto const e = f.as<not_found>()) return {-32004, e->what(), std::nullopt};
         return taar::jsonrpc::default_error_mapper(f);
     });
 

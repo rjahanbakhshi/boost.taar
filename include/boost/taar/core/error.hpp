@@ -18,8 +18,10 @@
 #include <boost/beast/http/status.hpp>
 #include <boost/json/value.hpp>
 #include <boost/assert/source_location.hpp>
+#include <concepts>
 #include <exception>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -334,38 +336,46 @@ public:
         return out;
     }
 
-    /** The kept foreign exception (@ref exception) if it is an @a E.
+    /** A copy of the kept foreign exception (@ref exception) if it is an @a E.
 
         Lets a hook recognise its own domain exception without a
         try/catch ladder:
 
         @code
-        if (auto const* e = f.as<not_found>()) return reply(404, e->what());
+        if (auto const e = f.as<not_found>()) return reply(404, e->what());
         @endcode
 
-        @return A pointer to the exception object, valid while this
-                failure (or a copy sharing its chain) lives; `nullptr` if
-                there is no kept exception or it is not an @a E.
+        The result is a copy because the standard leaves it unspecified
+        whether `std::rethrow_exception` copies the exception object (MSVC
+        does), so the address of a caught object cannot be returned
+        portably. The copy is of the @a E subobject: ask for the type that
+        was thrown, or a base that carries what you need (the standard
+        exceptions keep their `what()` text; `std::exception` itself does
+        not, so test with `f.as<std::exception>().has_value()` rather than
+        reading it).
+
+        @tparam E A copy-constructible exception type.
+        @return The copy, or `std::nullopt` if there is no kept exception
+                or it is not an @a E.
     */
     template <typename E>
-    [[nodiscard]] E const* as() const noexcept
+        requires std::copy_constructible<E>
+    [[nodiscard]] std::optional<E> as() const
     {
         auto const eptr = exception();
-        if (!eptr) return nullptr;
+        if (!eptr) return std::nullopt;
         try
         {
             std::rethrow_exception(eptr);
         }
         catch (E const& e)
         {
-            // The exception object is owned by the exception_ptr kept in
-            // the chain, so the address outlives this handler.
-            return &e;
+            return e;
         }
         catch (...)
         {
         }
-        return nullptr;
+        return std::nullopt;
     }
 
     /** Throw the failure.
