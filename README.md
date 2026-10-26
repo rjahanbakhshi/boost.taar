@@ -5,20 +5,27 @@
 [![Docs](https://github.com/rjahanbakhshi/boost.taar/actions/workflows/docs.yml/badge.svg?branch=master)](https://github.com/rjahanbakhshi/boost.taar/actions/workflows/docs.yml)
 [![License: BSL-1.0](https://img.shields.io/badge/License-BSL--1.0-blue.svg)](https://www.boost.org/LICENSE_1_0.txt)
 
-A header-only library created to facilitate web server development
-built on top of other boost libraries like boost.beast, boost.asio, boost.url,
-boost.json, etc.
+A C++23 header-only library for building HTTP services on Boost.Asio,
+Boost.Beast, Boost.URL and Boost.JSON. Write a plain C++ function once and
+serve it as a **REST** route, a **JSON-RPC 2.0** method and an **MCP**
+(Model Context Protocol) tool, with an **OpenAPI** document generated from
+the same registrations.
+
+Documentation: <https://rjahanbakhshi.github.io/boost.taar/>
 
 <!--toc:start-->
 - [boost.taar](#boosttaar)
-  - [Overview](#overview)
-    - [Requirements](#requirements)
-    - [Quick Look](#quick-look)
-      - [REST API handler with stock response](#rest-api-handler-with-stock-response)
-      - [REST API handler with JSON response](#rest-api-handler-with-json-response)
-      - [REST API handler for POST method and automatic stock response](#rest-api-handler-for-post-method-and-automatic-stock-response)
-      - [Document handler for GET method serving documents from the specified root path](#document-handler-for-get-method-serving-documents-from-the-specified-root-path)
-      - [Custom handler for PUT method](#custom-handler-for-put-method)
+  - [Features](#features)
+  - [Requirements](#requirements)
+  - [Quick look](#quick-look)
+    - [A server](#a-server)
+    - [One function, three surfaces](#one-function-three-surfaces)
+    - [JSON-RPC 2.0](#json-rpc-20)
+    - [MCP](#mcp)
+    - [Static files](#static-files)
+    - [Streaming responses](#streaming-responses)
+    - [Authorization with an interceptor](#authorization-with-an-interceptor)
+  - [Examples](#examples)
   - [Configuring the build directory](#configuring-the-build-directory)
     - [No package manager](#no-package-manager)
     - [Using Conan 2 package manager](#using-conan-2-package-manager)
@@ -28,177 +35,209 @@ boost.json, etc.
   - [To build and run the examples](#to-build-and-run-the-examples)
   - [Conan: creating and uploading](#conan-creating-and-uploading)
   - [Tested compilers and platforms](#tested-compilers-and-platforms)
+  - [Roadmap](#roadmap)
   - [License](#license)
-  - [TODO](#todo)
 <!--toc:end-->
 
-## Overview
+## Features
 
-Boost.taar is a portable C++ header-only library which provides convenient tools
-for web server development. This library is built on top of other boost
-libraries, like Boost.ASIO, Boost.Beast, Boost.URL, and Boost.JSON, and Boost.system.
+- **HTTP server**: coroutine-based sessions over TCP and TLS, keep-alive and
+  pipelining, a composable matcher DSL (method, path templates with
+  placeholders, headers, cookies), `405` with `Allow`, `HEAD` served from
+  `GET`, multi-threaded `io_context` with a strand per connection, and
+  graceful shutdown.
+- **REST handlers**: arguments extracted from path, query, headers,
+  cookies and bodies (JSON, forms, multipart, streamed) and converted to the
+  callable's parameter types; return values converted to responses;
+  declarative validation with `constrained`; chunked and server-sent-event
+  streaming.
+- **JSON-RPC 2.0**: named and positional parameters, batches,
+  notifications, error mapping, request cancellation.
+- **MCP**: Streamable HTTP and stdio transports, stateful sessions, tools
+  with generated input and output schemas, resources and RFC 6570
+  templates, prompts and completion, subscriptions, progress, logging,
+  cancellation, server-to-client requests (sampling, elicitation, roots),
+  binary content, stream resumption.
+- **OpenAPI 3.1**: documents generated from the registered routes,
+  including parameters, bodies, response schemas from `boost::describe`d
+  types, defaults, constraints and security schemes.
+- **Static files**: safe path resolution, MIME types, ETag and
+  Last-Modified with conditional requests, byte ranges, precompressed
+  variants, cache-control rules, SPA fallback, metadata and content caches.
+- **State and policy**: per-connection contexts, cookie or header keyed
+  sessions, interceptors and route guards for authorization, CORS.
+- **One error model**: `taar::failure` with nested causes, `taar::result<T>`
+  that throws on access, and per-surface mapping to HTTP status, JSON-RPC
+  errors and MCP results.
 
-### Requirements
+## Requirements
 
-- A C++ compiler supporting C++23 and above.
-- Other boost libraries like  Boost.ASIO, Boost.Beast, Boost.URL, and Boost.JSON,
-and Boost.system.
-- CMake 3.28 or a more recent version
-  - Note: Lower versions might also work but I'm not able to test that now.
+- A C++23 compiler (see [tested compilers](#tested-compilers-and-platforms)).
+- Boost 1.84 or newer (Asio, Beast, URL, JSON, System, Describe; 1.86 via
+  Conan). OpenSSL for TLS.
+- CMake 3.28 or newer.
 
-### Quick Look
+## Quick look
 
-Below are some short examples showcasing various use-cases for this library. For
-complete examples, look under the examples directory.
-
-#### REST API handler with stock response
-
-Accepts an HTTP GET request for specific target and respond with a stock text.
+The snippets assume:
 
 ```C++
-taar::session::http http_session;
-http_session.register_request_handler(
-    method == http::verb::get && target == "/api/version",
-    taar::handler::rest([]{ return "1.0"; }
-));
-
-taar::cancellation_signals cancellation_signals;
-co_spawn(
-    io_context,
-    taar::server::tcp(
-        "0.0.0.0",
-        "8090",
-        http_session,
-        cancellation_signals),
-    bind_cancellation_slot(cancellation_signals.slot(), taar::ignore_and_rethrow));
-
-io_context.run();
+namespace taar = boost::taar;
+namespace http = boost::beast::http;
+using taar::matcher::method;
+using taar::matcher::target;
 ```
 
-#### REST API handler with JSON response
+Complete programs are in [examples/](examples).
 
-Accepts an HTTP GET request with a path template, calculates the sum for two of
-the path arguments and respond with a JSON value.
+### A server
 
 ```C++
-taar::session::http http_session;
-http_session.register_request_handler(
-    method == http::verb::get && target == "/api/sum/{a}/{b}",
-    taar::handler::rest([](int a, int b)
+boost::asio::io_context io;
+
+taar::session::http session;
+session.register_request_handler(
+    method == http::verb::get && target == "/hello",
+    taar::handler::rest([] { return "Hello, world!"; }));
+
+taar::cancellation_signals signals;
+boost::asio::signal_set os_signals {io, SIGINT, SIGTERM};
+os_signals.async_wait([&](auto, auto) { signals.emit(); });   // graceful shutdown
+
+boost::asio::co_spawn(io,
+    taar::server::tcp("0.0.0.0", "8080", session, signals),
+    taar::ignore_and_rethrow);
+io.run();
+```
+
+### One function, three surfaces
+
+```C++
+int add(int a, int b) { return a + b; }
+
+// REST: GET /api/add/2/3 -> 5
+session.register_request_handler(
+    method == http::verb::get && target == "/api/add/{a}/{b}",
+    taar::handler::rest(&add, taar::handler::path_arg("a"), taar::handler::path_arg("b")),
+    openapi.describe("Add two numbers"));
+
+// JSON-RPC: {"jsonrpc":"2.0","id":1,"method":"add","params":{"a":2,"b":3}}
+rpc.method("add", &add, taar::jsonrpc::rpc_arg("a"), taar::jsonrpc::rpc_arg("b"));
+
+// MCP: a tool whose inputSchema is derived from the parameter types
+mcp.tool("add", "Add two numbers", &add,
+    taar::mcp::mcp_arg("a", "First addend"), taar::mcp::mcp_arg("b", "Second addend"));
+```
+
+### JSON-RPC 2.0
+
+```C++
+taar::jsonrpc::endpoint<> rpc;
+rpc.method("greet",
+    [](std::string name, std::optional<std::string> title)
     {
-        return boost::json::value {
-            {"a", a},
-            {"b", b},
-            {"result", a + b}
-        };
+        return title ? *title + " " + name : name;
     },
-    taar::handler::path_arg("a"),
-    taar::handler::path_arg("b")
-));
+    taar::jsonrpc::rpc_arg("name"), taar::jsonrpc::rpc_arg("title"));
 
-taar::cancellation_signals cancellation_signals;
-co_spawn(
-    io_context,
-    taar::server::tcp(
-        "0.0.0.0",
-        "8090",
-        http_session,
-        cancellation_signals),
-    bind_cancellation_slot(cancellation_signals.slot(), taar::ignore_and_rethrow));
-
-io_context.run();
+session.register_request_handler(
+    method == http::verb::post && target == "/rpc", rpc.handler());
 ```
 
-#### REST API handler for POST method and automatic stock response
+Batches, notifications (`202`), positional parameters, `-32602` for bad
+arguments and cancellation through `request_scope` are built in.
 
-Accepts an HTTP POST request for a specific target, expects that a query parameter
-called "test_arg" to be present and passes the value of it to the handler lambda.
+### MCP
 
 ```C++
-taar::session::http http_session;
-http_session.register_request_handler(
-    method == http::verb::post && target == "/api/store/",
-    taar::handler::rest([](const std::string& test_arg)
+struct notes { std::vector<std::string> items; };   // per-session state
+
+taar::mcp::endpoint<notes> mcp {{.name = "notes", .version = "1.0.0"}};
+mcp.tool("notes/add", "Append a note",
+    [](notes& n, std::string text) { n.items.push_back(text); return n.items.size(); },
+    taar::mcp::mcp_arg("text", "The note"));
+mcp.resource("notes://{index}", "text/plain", "One note",
+    [](notes const& n, std::size_t index) { return n.items.at(index); },
+    taar::mcp::uri_arg("index"));
+
+session.register_request_handler(method == http::verb::get && target == "/mcp", mcp.stream_handler());
+session.register_request_handler(target == "/mcp", mcp.handler());
+
+// or, for desktop clients that launch the server locally:
+boost::asio::co_spawn(io, mcp.serve_stdio(), boost::asio::detached);
+```
+
+A tool may be a coroutine, report progress and be cancelled through
+`request_scope`, ask the user with `co_await mcp.elicit(...)`, return images
+or embedded resources, and notify its own client.
+
+### Static files
+
+```C++
+taar::handler::htdocs_options options;
+options.root = "./dist";
+options.fallback_document = "index.html";                       // single-page apps
+options.cache_rules = taar::handler::cache_rules::immutable_hashed();
+
+session.register_request_handler(
+    method == http::verb::get && target == "/{*path}",
+    taar::handler::htdocs {std::move(options)});
+```
+
+### Streaming responses
+
+```C++
+session.register_request_handler(
+    method == http::verb::get && target == "/ticks",
+    taar::handler::rest([]() -> taar::chunked_response<std::string>
     {
-        std::cout << "Received test_arg = " << test_arg << '\n';
-    },
-    taar::handler::query_arg("test_arg")
-));
-
-taar::cancellation_signals cancellation_signals;
-co_spawn(
-    io_context,
-    taar::server::tcp(
-        "0.0.0.0",
-        "8090",
-        http_session,
-        cancellation_signals),
-    bind_cancellation_slot(cancellation_signals.slot(), taar::ignore_and_rethrow));
-
-io_context.run();
+        co_yield taar::set_header(http::field::content_type, "text/event-stream");
+        boost::asio::steady_timer timer {co_await boost::asio::this_coro::executor};
+        for (int i = 0; i < 10; ++i)
+        {
+            co_yield "data: " + std::to_string(i) + "\n\n";
+            timer.expires_after(std::chrono::seconds {1});
+            co_await timer.async_wait(taar::use_awaitable);
+        }
+    }));
 ```
 
-#### Document handler for GET method serving documents from the specified root path
-
-Accepts an HTTP GET request for all targets under the specified template and respond
-with the requested file content with a correct mime-type.
+### Authorization with an interceptor
 
 ```C++
-taar::session::http http_session;
-http_session.register_request_handler(
-    method == http::verb::get && target == "/{*}",
-    taar::handler::htdocs {argv[2]}
-);
-
-taar::cancellation_signals cancellation_signals;
-co_spawn(
-    io_context,
-    taar::server::tcp(
-        "0.0.0.0",
-        "8090",
-        http_session,
-        cancellation_signals),
-    bind_cancellation_slot(cancellation_signals.slot(), taar::ignore_and_rethrow));
-
-io_context.run();
-```
-
-#### Custom handler for PUT method
-
-Accepts an HTTP PUT request for all targets under the specified template and
-respond with a custom text message.
-
-```C++
-taar::session::http http_session;
-http_session.register_request_handler(
-    method == http::verb::put && target == "/special/{*}",
-    [](
-        const http::request<http::empty_body>& request,
-        const taar::matcher::context& context) -> http::message_generator
+session.add_interceptor(target != "/health",
+    [](http::request_header<> const& request, taar::matcher::context& ctx) -> taar::interceptor_result
     {
-        http::response<http::string_body> res {
-            boost::beast::http::status::ok,
-            request.version()};
-        res.set(boost::beast::http::field::content_type, "text/html");
-        res.keep_alive(request.keep_alive());
-        res.body() = "Special path is: " + context.path_args.at("*");
-        res.prepare_payload();
-        return res;
-    }
-);
+        auto auth = request.find(http::field::authorization);
+        if (auth == request.end() || !auth->value().starts_with("Bearer "))
+            return taar::reject(http::status::unauthorized);
+        ctx.attributes.set(principal {verify(auth->value().substr(7))});
+        return taar::proceed();
+    });
 
-taar::cancellation_signals cancellation_signals;
-co_spawn(
-    io_context,
-    taar::server::tcp(
-        "0.0.0.0",
-        "8090",
-        http_session,
-        cancellation_signals),
-    bind_cancellation_slot(cancellation_signals.slot(), taar::ignore_and_rethrow));
-
-io_context.run();
+// any handler, method or tool can then ask for it:
+taar::handler::rest([](principal const& who) { return who.name; },
+    taar::handler::attribute_arg<principal>());
 ```
+
+## Examples
+
+| Example | Shows |
+|---|---|
+| [hello_server](examples/hello_server.cpp) | the smallest server |
+| [rest_crud_server](examples/rest_crud_server.cpp) | a REST API with validation, multipart import and OpenAPI |
+| [jsonrpc_server](examples/jsonrpc_server.cpp) | JSON-RPC methods, batches, error mapping |
+| [mcp_server](examples/mcp_server.cpp) | an MCP server over Streamable HTTP |
+| [mcp_stdio_server](examples/mcp_stdio_server.cpp) | the same tools over stdio |
+| [taskboard_server](examples/taskboard_server.cpp) | one service on REST, JSON-RPC and MCP with interceptors |
+| [htdocs_server](examples/htdocs_server.cpp) | static files and a single-page app |
+| [streaming_server](examples/streaming_server.cpp) | chunked and SSE responses, streamed uploads |
+| [cancellation_server](examples/cancellation_server.cpp) | cancellation of streams, jobs and tools |
+| [cookie_session_server](examples/cookie_session_server.cpp) | cookie sessions |
+| [connection_state_server](examples/connection_state_server.cpp) | per-connection state |
+| [tls_server](examples/tls_server.cpp) | HTTPS |
+| [websocket_server](examples/websocket_server.cpp) | WebSocket upgrade through a raw handler |
+| [proxy_server](examples/proxy_server.cpp) | a forwarding proxy |
 
 ## Configuring the build directory
 
@@ -299,24 +338,15 @@ with Ubuntu 22.04
   - Use the CMake bundled with Visual Studio (3.31 in VS 2022, 4.2 in VS 2026);
     system CMake 3.27 is too old.
 
+## Roadmap
+
+Known gaps and deliberately out-of-scope features are tracked in
+[ROADMAP.md](ROADMAP.md); changes per release are in the
+[release notes](https://rjahanbakhshi.github.io/boost.taar/boost_taar/release_notes.html).
+
 ## License
 
 Copyright © 2021, 2024 Reza Jahanbakhshi
 
 Distributed under the Boost Software License, Version 1.0. (See accompanying
 file LICENSE or copy at [http://www.boost.org/LICENSE_1_0.txt](http://www.boost.org/LICENSE_1_0.txt))
-
-## TODO
-
-- http session needs full unit-test coverage.
-- curl -v 127.0.0.1:8082/api/sum/1/2 doesn't match
-- rest should only handle its own internal errors and leave the rest to the
-http handler.
-- rest_arg content-type interpretation could be wrong.
-- encoded and decoded option for rest arg providers.
-- metadata support for HTTP request handlers including name and other requirements
-like if it needs cookies or other things to be preparsed and put into contexts.
-- support for generating above metadata in rest handlers.
-- parse cookies only when it is requested in the metadata (currently rest handler
-reparse cookies everytime)
-- use std::reference_wrapper for handling function object reference parameters.
