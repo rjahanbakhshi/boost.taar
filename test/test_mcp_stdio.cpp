@@ -264,13 +264,15 @@ BOOST_AUTO_TEST_CASE(test_mcp_stdio_full_session_scenario)
         BOOST_TEST(saw_schema);
 
         co_await send(R"({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"notes/add","arguments":{"text":"milk"}}})");
-        BOOST_TEST((co_await receive()).at("result").at("structuredContent").at("result").as_int64() == 1);
+        auto const add_result = co_await receive();
+        BOOST_TEST(add_result.at("result").at("structuredContent").at("result").as_int64() == 1);
 
         // Logging honours the level the client sets.
         co_await send(R"({"jsonrpc":"2.0","id":4,"method":"logging/setLevel","params":{"level":"warning"}})");
         (void)co_await receive();
         co_await send(R"({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"logged"}})");
-        BOOST_TEST((co_await receive()).at("result").at("structuredContent").at("result").as_bool() == false);
+        auto const muted = co_await receive();
+        BOOST_TEST(muted.at("result").at("structuredContent").at("result").as_bool() == false);
         co_await send(R"({"jsonrpc":"2.0","id":6,"method":"logging/setLevel","params":{"level":"debug"}})");
         (void)co_await receive();
         co_await send(R"({"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"logged"}})");
@@ -295,13 +297,16 @@ BOOST_AUTO_TEST_CASE(test_mcp_stdio_full_session_scenario)
         auto request = co_await receive();
         BOOST_TEST(request.at("method").as_string() == "elicitation/create");
         co_await send(R"({"jsonrpc":"2.0","id":)" + json::serialize(request.at("id")) + R"(,"result":{"action":"accept","content":{"ok":true}}})");
-        BOOST_TEST((co_await receive()).at("result").at("content").as_array()[0].at("text").as_string() == "did it");
+        auto const confirmed = co_await receive();
+        BOOST_TEST(confirmed.at("result").at("content").as_array()[0].at("text").as_string() == "did it");
 
         // Completion and a templated resource with an optional query operator.
         co_await send(R"({"jsonrpc":"2.0","id":9,"method":"completion/complete","params":{"ref":{"type":"ref/prompt","name":"summarize"},"argument":{"name":"style","value":"b"}}})");
-        BOOST_TEST((co_await receive()).at("result").at("completion").at("values").as_array().size() == 2u);
+        auto const completion = co_await receive();
+        BOOST_TEST(completion.at("result").at("completion").at("values").as_array().size() == 2u);
         co_await send(R"({"jsonrpc":"2.0","id":10,"method":"resources/read","params":{"uri":"notes://0?format=upper"}})");
-        BOOST_TEST((co_await receive()).at("result").at("contents").as_array()[0].at("text").as_string() == "NOTE 0: milk");
+        auto const resource = co_await receive();
+        BOOST_TEST(resource.at("result").at("contents").as_array()[0].at("text").as_string() == "NOTE 0: milk");
 
         // A slow call cancelled mid-flight produces no response; the session goes on.
         co_await send(R"({"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"slow","arguments":{"ms":5000}}})");
