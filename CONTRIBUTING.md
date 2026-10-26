@@ -12,7 +12,7 @@ library.
 - Include the compiler and version, the operating system, the Boost version,
   the CMake command used to configure, and the command line used to build.
 - For bugs, please attach a minimal reproducer in the form of a single
-  translation unit, ideally one that fits inside `examples/`. A reproducer
+  translation unit, ideally one that fits inside `example/`. A reproducer
   that compiles against the current `master` is much easier to act on than a
   textual description.
 - For build problems, please paste the full `cmake` and compiler output, not
@@ -206,7 +206,7 @@ should be a separate commit from any behavioural change.
   (`build.jam`, the Doxygen input list in `doc/`, and `meta/libraries.json`
   if appropriate).
 - New test files go into `test/CMakeLists.txt` in alphabetical order.
-- New examples go into `examples/CMakeLists.txt`.
+- New examples go into `example/CMakeLists.txt`.
 
 ## Licence
 

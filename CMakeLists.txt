@@ -154,5 +154,5 @@ include(CTest)
 add_subdirectory(test)
 
 # examples
-add_subdirectory(examples)
+add_subdirectory(example)
 

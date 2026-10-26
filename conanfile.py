@@ -15,7 +15,7 @@ class BoostTaarConan(ConanFile):
     exports_sources = [
         "include/*",
         "cmake/*",
-        "examples/*",
+        "example/*",
         "test/*",
         "CMakeLists.txt",
         "LICENSE",

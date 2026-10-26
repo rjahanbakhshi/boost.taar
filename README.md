@@ -88,7 +88,7 @@ using taar::matcher::method;
 using taar::matcher::target;
 ```
 
-Complete programs are in [examples/](examples).
+Complete programs are in [example/](example).
 
 ### A server
 
@@ -224,20 +224,20 @@ taar::handler::rest([](principal const& who) { return who.name; },
 
 | Example | Shows |
 |---|---|
-| [hello_server](examples/hello_server.cpp) | the smallest server |
-| [rest_crud_server](examples/rest_crud_server.cpp) | a REST API with validation, multipart import and OpenAPI |
-| [jsonrpc_server](examples/jsonrpc_server.cpp) | JSON-RPC methods, batches, error mapping |
-| [mcp_server](examples/mcp_server.cpp) | an MCP server over Streamable HTTP |
-| [mcp_stdio_server](examples/mcp_stdio_server.cpp) | the same tools over stdio |
-| [taskboard_server](examples/taskboard_server.cpp) | one service on REST, JSON-RPC and MCP with interceptors |
-| [htdocs_server](examples/htdocs_server.cpp) | static files and a single-page app |
-| [streaming_server](examples/streaming_server.cpp) | chunked and SSE responses, streamed uploads |
-| [cancellation_server](examples/cancellation_server.cpp) | cancellation of streams, jobs and tools |
-| [cookie_session_server](examples/cookie_session_server.cpp) | cookie sessions |
-| [connection_state_server](examples/connection_state_server.cpp) | per-connection state |
-| [tls_server](examples/tls_server.cpp) | HTTPS |
-| [websocket_server](examples/websocket_server.cpp) | WebSocket upgrade through a raw handler |
-| [proxy_server](examples/proxy_server.cpp) | a forwarding proxy |
+| [hello_server](example/hello_server.cpp) | the smallest server |
+| [rest_crud_server](example/rest_crud_server.cpp) | a REST API with validation, multipart import and OpenAPI |
+| [jsonrpc_server](example/jsonrpc_server.cpp) | JSON-RPC methods, batches, error mapping |
+| [mcp_server](example/mcp_server.cpp) | an MCP server over Streamable HTTP |
+| [mcp_stdio_server](example/mcp_stdio_server.cpp) | the same tools over stdio |
+| [taskboard_server](example/taskboard_server.cpp) | one service on REST, JSON-RPC and MCP with interceptors |
+| [htdocs_server](example/htdocs_server.cpp) | static files and a single-page app |
+| [streaming_server](example/streaming_server.cpp) | chunked and SSE responses, streamed uploads |
+| [cancellation_server](example/cancellation_server.cpp) | cancellation of streams, jobs and tools |
+| [cookie_session_server](example/cookie_session_server.cpp) | cookie sessions |
+| [connection_state_server](example/connection_state_server.cpp) | per-connection state |
+| [tls_server](example/tls_server.cpp) | HTTPS |
+| [websocket_server](example/websocket_server.cpp) | WebSocket upgrade through a raw handler |
+| [proxy_server](example/proxy_server.cpp) | a forwarding proxy |
 
 ## Configuring the build directory
 
@@ -315,7 +315,8 @@ build/test/boost-taar-test
 ## To build and run the examples
 
 ```bash
-cmake --build build -j --target http_server && build/examples/http_server 8082 ./
+cmake --build build -j --target hello_server && build/example/hello_server 8082
+# all of them: cmake --build build -j --target examples
 ```
 
 ## Conan: creating and uploading

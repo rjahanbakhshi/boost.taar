@@ -83,7 +83,7 @@ codes) to the hard error handler, which sees the same failure; the
 connection is then closed. Transport errors go to the hard handler
 directly. Applications that throw their own exceptions from handlers
 install a soft error handler that recognises them with `f.as<E>()` (see
-`examples/rest_crud_server.cpp`).
+`example/rest_crud_server.cpp`).
 
 [endsect]
 
@@ -258,7 +258,7 @@ pending `co_await` and the connection is dropped.
 
 Cancellation reaches nested work on every path, and the frames it
 interrupts unwind (RAII runs); `test/test_cancellation.cpp` checks each
-one and `examples/cancellation_server.cpp` shows them side by side:
+one and `example/cancellation_server.cpp` shows them side by side:
 
 * /shutdown/ cancels a streaming handler wherever it is suspended: a
   timer between chunks, a helper coroutine several `co_await`s deep, a
@@ -267,7 +267,7 @@ one and `examples/cancellation_server.cpp` shows them side by side:
   handlers, including one reading a streamed request body, are shielded:
   they finish, and their answer carries `Connection: close`. A shielded
   body read waits for the client, at most the body timeout (see
-  [link taar.design.async.timeouts Timeouts]), so a client that stops
+  [link boost_taar.design.async.timeouts Timeouts]), so a client that stops
   sending mid-upload holds that connection for that long and is then
   answered `408`.
 * /client disconnect/ during a stream is noticed at the stream's next

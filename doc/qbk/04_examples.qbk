@@ -7,7 +7,7 @@
 
 [section:examples Examples]
 
-The `examples/` directory contains complete, buildable programs, one per
+The `example/` directory contains complete, buildable programs, one per
 common use case. The CMake target name matches the file name minus the
 extension (`cmake --build build --target rest_crud_server`), and
 `cmake --build build --target examples` builds them all. Each file starts
@@ -15,57 +15,57 @@ with the `curl` commands that exercise it.
 
 [table Examples shipped with the library
 [[Example][What it shows]]
-[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/hello_server.cpp hello_server.cpp]]
+[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/example/hello_server.cpp hello_server.cpp]]
  [The smallest complete server: two REST routes, a path argument, a query
  argument with a default, and graceful shutdown on `SIGINT`.]]
-[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/rest_crud_server.cpp rest_crud_server.cpp]]
+[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/example/rest_crud_server.cpp rest_crud_server.cpp]]
  [A JSON REST API: CRUD routes over an in-memory store, typed request
  bodies via `boost::describe`, a multipart import of a text file, a domain
  exception mapped to 404 by a soft error handler, and an OpenAPI 3.1
  document generated from the routes.]]
-[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/htdocs_server.cpp htdocs_server.cpp]]
+[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/example/htdocs_server.cpp htdocs_server.cpp]]
  [A single-page application behind `handler::htdocs`: hashed assets
  under `/static` cached as immutable with precompressed variants and
  download headers from `on_response`, and the application shell as the
  fallback for client-side routes, on a multi-threaded `io_context`.]]
-[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/connection_state_server.cpp connection_state_server.cpp]]
+[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/example/connection_state_server.cpp connection_state_server.cpp]]
  [Per-connection state with `basic_http<conn_state>`: handlers receive
  the connection's object by reference and use it for counting and a quota.]]
-[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/cookie_session_server.cpp cookie_session_server.cpp]]
+[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/example/cookie_session_server.cpp cookie_session_server.cpp]]
  [Cookie-keyed sessions with `context_store` and `with_session`: login,
  logout, `create_if_missing` versus `require`, and idle expiry.]]
-[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/streaming_server.cpp streaming_server.cpp]]
+[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/example/streaming_server.cpp streaming_server.cpp]]
  [Streaming in both directions: server-sent events from a timer, a JSON
  stream from an `async_generator`, files streamed from disk with spliced
  generators, and uploads consumed through `body_reader` and
  `multipart_reader` without buffering.]]
-[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/cancellation_server.cpp cancellation_server.cpp]]
+[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/example/cancellation_server.cpp cancellation_server.cpp]]
  [The cancellation model end to end: an event stream that stops when its
  client disconnects or the server shuts down, a JSON-RPC job that checks
  its `request_scope` and is cancelled by id through `endpoint::cancel`, an
  MCP tool with progress cancelled by `notifications/cancelled`, and a plain
  handler that finishes on `SIGINT` while the streams stop. RAII guards in
  the nested helpers log every interrupted frame.]]
-[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/proxy_server.cpp proxy_server.cpp]]
+[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/example/proxy_server.cpp proxy_server.cpp]]
  [Asynchronous handlers: a coroutine that fetches an upstream URL with
  Beast and returns the response, plus a timer-based delay route.]]
-[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/tls_server.cpp tls_server.cpp]]
+[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/example/tls_server.cpp tls_server.cpp]]
  [HTTPS with `session::https` and `server::tls`: certificate and key from
  PEM files, handlers registered as for plain HTTP.]]
-[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/websocket_server.cpp websocket_server.cpp]]
+[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/example/websocket_server.cpp websocket_server.cpp]]
  [Protocol upgrade to WebSocket via `register_raw_handler`, with an echo
  loop.]]
-[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/jsonrpc_server.cpp jsonrpc_server.cpp]]
+[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/example/jsonrpc_server.cpp jsonrpc_server.cpp]]
  [A JSON-RPC 2.0 calculator: named parameters, batches, notifications, a
  custom error mapper, and per-client state through `with_session`.]]
-[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/mcp_server.cpp mcp_server.cpp]]
+[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/example/mcp_server.cpp mcp_server.cpp]]
  [An MCP server over Streamable HTTP: tools with generated input schemas,
  resources and URI templates, a prompt, resource subscriptions,
  per-session state, a tool returning typed content with an embedded
  resource, a blob resource, a tool that notifies its own caller through
  `session_info`, a tool that asks the user to confirm through elicitation,
  CORS for browser clients, and Origin validation.]]
-[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/taskboard_server.cpp taskboard_server.cpp]]
+[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/example/taskboard_server.cpp taskboard_server.cpp]]
  [One task board exposed over REST (cookie sessions, constrained
  arguments, OpenAPI with a bearer scheme and components), JSON-RPC and
  MCP (annotated tools, templated resources, prompt completion,
@@ -73,7 +73,7 @@ with the `curl` commands that exercise it.
  CORS, a request-id interceptor, an admin-token interceptor scoped to
  one route that hands a principal to the handler through `attribute_arg`,
  and a multi-threaded `io_context` with graceful shutdown.]]
-[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/examples/mcp_stdio_server.cpp mcp_stdio_server.cpp]]
+[[[@https://github.com/rjahanbakhshi/boost.taar/blob/master/example/mcp_stdio_server.cpp mcp_stdio_server.cpp]]
  [The same MCP tools served over stdio, the transport desktop clients
  launch locally.]]
 ]
