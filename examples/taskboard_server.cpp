@@ -416,8 +416,9 @@ int main(int argc, char* argv[])
             [](net::ip::tcp::endpoint const& endpoint) { std::clog << "taskboard on port " << endpoint.port() << '\n'; }),
         taar::ignore_and_rethrow);
 
-    std::vector<std::jthread> threads;
+    std::vector<std::thread> threads;
     for (unsigned i = 1; i < std::max(2u, std::thread::hardware_concurrency()); ++i) threads.emplace_back([&] { io.run(); });
     io.run();
+    for (auto& t : threads) t.join();
     return 0;
 }

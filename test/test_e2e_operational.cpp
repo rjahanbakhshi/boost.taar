@@ -11,6 +11,7 @@
 // multi-threaded operation over real connections.
 
 #include "e2e.hpp"
+#include "joining_thread.hpp"
 #include <boost/taar/session/http.hpp>
 #include <boost/taar/handler/rest.hpp>
 #include <boost/taar/handler/rest_arg.hpp>
@@ -517,7 +518,7 @@ BOOST_AUTO_TEST_CASE(test_e2e_multithreaded_concurrent_clients)
         }, net::detached);
     }
 
-    std::vector<std::jthread> pool;
+    std::vector<test_util::joining_thread> pool;
     for (int i = 0; i < threads; ++i)
     {
         pool.emplace_back([&] { io.run(); });
@@ -568,7 +569,7 @@ BOOST_AUTO_TEST_CASE(test_e2e_multithreaded_shutdown_from_foreign_thread)
         }, net::detached);
     }
 
-    std::vector<std::jthread> pool;
+    std::vector<test_util::joining_thread> pool;
     for (int i = 0; i < threads; ++i) pool.emplace_back([&] { io.run(); });
 
     // The main thread is not running the io_context: emission must still be safe.
@@ -649,7 +650,7 @@ BOOST_AUTO_TEST_CASE(test_e2e_explicit_connection_executor_serves_connections_in
     }
 
     auto const start = clock::now();
-    std::vector<std::jthread> pool;
+    std::vector<test_util::joining_thread> pool;
     for (int i = 0; i < threads; ++i) pool.emplace_back([&] { io.run(); });
     pool.clear();
     auto const total = clock::now() - start;

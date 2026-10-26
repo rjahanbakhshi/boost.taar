@@ -17,6 +17,7 @@ target_sources(
         type_traits/test_super_type.cpp
         type_traits/test_specialization_of.cpp
         e2e.hpp
+        joining_thread.hpp
         test.cpp
         test_accept_encoding.cpp
         test_async_channel.cpp

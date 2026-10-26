@@ -8,6 +8,7 @@
 //
 
 #include "e2e.hpp"
+#include "joining_thread.hpp"
 #include <boost/taar/core/http_date.hpp>
 #include <boost/taar/handler/htdocs.hpp>
 #include <boost/taar/matcher/method.hpp>
@@ -995,7 +996,7 @@ BOOST_AUTO_TEST_CASE(test_htdocs_shared_handler_on_many_threads)
     htdocs handler {o};
     std::atomic<int> failures {0};
     {
-        std::vector<std::jthread> threads;
+        std::vector<test_util::joining_thread> threads;
         for (int t = 0; t < 6; ++t)
         {
             threads.emplace_back([&, t]

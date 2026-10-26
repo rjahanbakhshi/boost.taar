@@ -7,6 +7,7 @@
 // Official repository: https://github.com/rjahanbakhshi/boost-taar
 //
 
+#include "joining_thread.hpp"
 #include <boost/taar/core/async_channel.hpp>
 #include <boost/taar/core/awaitable.hpp>
 #include <boost/asio/bind_cancellation_slot.hpp>
@@ -163,7 +164,7 @@ BOOST_AUTO_TEST_CASE(test_async_channel_pending_receive_keeps_io_context_alive)
     {
         got = co_await channel.async_receive(taar::use_awaitable);
     }, net::detached);
-    std::jthread producer {[&]
+    test_util::joining_thread producer {[&]
     {
         std::this_thread::sleep_for(std::chrono::milliseconds {50});
         channel.push(42);

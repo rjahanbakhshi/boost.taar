@@ -101,6 +101,7 @@ int main(int argc, char* argv[])
         taar::ignore_and_rethrow);
 
     // File I/O is blocking and runs on these threads: size the pool for the disk.
-    std::vector<std::jthread> threads;
+    std::vector<std::thread> threads;
     for (int i = 0; i < 4; ++i) threads.emplace_back([&] { io.run(); });
+    for (auto& t : threads) t.join();
 }

@@ -210,8 +210,9 @@ int main(int argc, char* argv[])
             [](net::ip::tcp::endpoint const& endpoint) { log("cancellation demo on port " + std::to_string(endpoint.port())); }),
         taar::ignore_and_rethrow);
 
-    std::vector<std::jthread> threads;
+    std::vector<std::thread> threads;
     for (unsigned i = 1; i < std::max(2u, std::thread::hardware_concurrency()); ++i) threads.emplace_back([&] { io.run(); });
     io.run();
+    for (auto& t : threads) t.join();
     return 0;
 }

@@ -10,6 +10,7 @@
 // application would combine them, end to end over TCP where it matters.
 
 #include "e2e.hpp"
+#include "joining_thread.hpp"
 #include <boost/taar/core/async_channel.hpp>
 #include <boost/taar/core/cancellation_signals.hpp>
 #include <boost/taar/core/chunked_response.hpp>
@@ -346,7 +347,7 @@ BOOST_AUTO_TEST_CASE(test_scenario_taskboard_all_surfaces_multithreaded)
         }, net::detached);
     }
 
-    std::vector<std::jthread> pool;
+    std::vector<test_util::joining_thread> pool;
     for (int i = 0; i < threads; ++i) pool.emplace_back([&] { io.run(); });
     while (finished < clients) std::this_thread::sleep_for(1ms);
 

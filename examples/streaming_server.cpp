@@ -196,6 +196,7 @@ int main(int argc, char* argv[])
             [](net::ip::tcp::endpoint const& ep) { std::clog << "Listening on " << ep << '\n'; }),
         taar::ignore_and_rethrow);
 
-    std::vector<std::jthread> threads;
+    std::vector<std::thread> threads;
     for (int i = 0; i < 4; ++i) threads.emplace_back([&] { io.run(); });
+    for (auto& t : threads) t.join();
 }

@@ -19,6 +19,7 @@
 // in test_scenarios.cpp.
 
 #include "e2e.hpp"
+#include "joining_thread.hpp"
 #include <boost/taar/core/async_generator.hpp>
 #include <boost/taar/core/chunked_response.hpp>
 #include <boost/taar/core/rebind_executor.hpp>
@@ -465,7 +466,7 @@ BOOST_AUTO_TEST_CASE(test_cancellation_shutdown_from_foreign_thread_multithreade
         }, net::detached);
     }
 
-    std::vector<std::jthread> pool;
+    std::vector<test_util::joining_thread> pool;
     for (int i = 0; i < threads; ++i) pool.emplace_back([&] { io.run(); });
 
     auto const deadline = clock_type::now() + 3s;
