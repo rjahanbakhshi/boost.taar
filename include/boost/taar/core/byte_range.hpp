@@ -77,7 +77,7 @@ inline range_set parse_range(std::string_view header, std::uint64_t size, std::s
     {
         if (s.empty()) return false;
         v = 0;
-        constexpr auto max = std::numeric_limits<std::uint64_t>::max();
+        constexpr auto max = (std::numeric_limits<std::uint64_t>::max)();
         for (char const c : s)
         {
             if (c < '0' || c > '9') return false;
@@ -118,7 +118,7 @@ inline range_set parse_range(std::string_view header, std::uint64_t size, std::s
                 if (!number(b, last)) return {};
                 if (last > 0 && size > 0)
                 {
-                    ranges.push_back({size - std::min(last, size), size - 1});
+                    ranges.push_back({size - (std::min)(last, size), size - 1});
                 }
             }
             else
@@ -126,7 +126,7 @@ inline range_set parse_range(std::string_view header, std::uint64_t size, std::s
                 if (!number(a, first)) return {};
                 if (b.empty())
                 {
-                    last = std::numeric_limits<std::uint64_t>::max();
+                    last = (std::numeric_limits<std::uint64_t>::max)();
                 }
                 else if (!number(b, last) || last < first)
                 {
@@ -134,7 +134,7 @@ inline range_set parse_range(std::string_view header, std::uint64_t size, std::s
                 }
                 if (first < size)
                 {
-                    ranges.push_back({first, std::min(last, size - 1)});
+                    ranges.push_back({first, (std::min)(last, size - 1)});
                 }
             }
         }
@@ -158,10 +158,10 @@ inline std::vector<byte_range> coalesce_ranges(std::vector<byte_range> ranges)
     std::vector<byte_range> out;
     for (auto const& r : ranges)
     {
-        if (!out.empty() && (out.back().last == std::numeric_limits<std::uint64_t>::max() ||
+        if (!out.empty() && (out.back().last == (std::numeric_limits<std::uint64_t>::max)() ||
             r.first <= out.back().last + 1))
         {
-            out.back().last = std::max(out.back().last, r.last);
+            out.back().last = (std::max)(out.back().last, r.last);
         }
         else
         {

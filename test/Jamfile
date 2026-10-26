@@ -85,6 +85,7 @@ run
     test_segmented_body.cpp
     test_tcp_server.cpp
     test_template_parser.cpp
+    test_windows_macros.cpp
     test_with_session.cpp
     type_traits/test_callable.cpp
     type_traits/test_specialization_of.cpp

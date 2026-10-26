@@ -453,7 +453,7 @@ public:
                 break;
             }
         }
-        auto const n = std::min(buffer.size(), pending_.size());
+        auto const n = (std::min)(buffer.size(), pending_.size());
         std::memcpy(buffer.data(), pending_.data(), n);
         pending_.erase(0, n);
         co_return n;

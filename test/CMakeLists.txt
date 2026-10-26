@@ -10,6 +10,10 @@ set_target_properties(
     ${PROJECT_NAME} PROPERTIES UNITY_BUILD
     ${ENABLE_UNITY_BUILD})
 
+# Defines min/max macros before including every header: keep it out of
+# unity batches so the macros cannot leak into other test files.
+set_source_files_properties(test_windows_macros.cpp PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
+
 target_sources(
     ${PROJECT_NAME}
     PRIVATE
@@ -78,6 +82,7 @@ target_sources(
         test_segmented_body.cpp
         test_tcp_server.cpp
         test_template_parser.cpp
+        test_windows_macros.cpp
         test_with_session.cpp
         to_response.h
 )

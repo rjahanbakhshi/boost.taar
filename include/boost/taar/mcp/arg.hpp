@@ -366,7 +366,7 @@ inline std::optional<std::unordered_map<std::string, std::string>> match_uri_tem
                 std::size_t pos = upos + 1;
                 while (pos < limit)
                 {
-                    std::size_t const amp = std::min(limit, uri.find('&', pos) == std::string_view::npos ? limit : uri.find('&', pos));
+                    std::size_t const amp = (std::min)(limit, uri.find('&', pos) == std::string_view::npos ? limit : uri.find('&', pos));
                     auto const pair = uri.substr(pos, amp - pos);
                     auto const eq = pair.find('=');
                     auto const key = pair.substr(0, eq);

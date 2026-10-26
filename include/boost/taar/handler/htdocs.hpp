@@ -822,7 +822,7 @@ private:
         auto info = std::make_shared<file_info>();
         auto modified = std::chrono::floor<std::chrono::seconds>(to_system(identity.mtime));
         // Never claim a modification later than now (RFC 9110 8.8.2.1).
-        modified = std::min(modified, std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()));
+        modified = (std::min)(modified, std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()));
         info->last_modified_time = modified;
         info->last_modified = format_http_date(modified);
         info->content_type = content_type_for(relative);
