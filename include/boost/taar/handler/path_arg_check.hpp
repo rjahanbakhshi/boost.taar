@@ -163,7 +163,12 @@ void validate_path_args_against_target(Operand const& op, Handler const& handler
         {
             ([&]<typename C>(C const& c)
             {
-                if constexpr (requires { c.template_str; })
+                // Selected by type: MSVC evaluates a requires-expression
+                // naming `c` once per lambda and reuses the answer for the
+                // other capture types, so a matcher whose first capture is
+                // not a target (method == ... && target == ...) saw no
+                // template at all.
+                if constexpr (std::is_same_v<C, matcher::target_constraint_value>)
                 {
                     if (!template_str.empty()) template_str += " | ";
                     template_str += c.template_str;

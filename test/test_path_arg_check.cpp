@@ -197,4 +197,47 @@ BOOST_AUTO_TEST_CASE(test_validate_matches_greedy_param_name_against_path_arg)
         boost::taar::exception);
 }
 
+BOOST_AUTO_TEST_CASE(test_validate_compound_matcher_with_other_leaves_first)
+{
+    // The target leaf is not the first capture: MSVC once memoised the
+    // capture test of the first leaf (the method) for all of them and saw
+    // an empty template, rejecting every path_arg of such a route.
+    operand op {method == http::verb::get && target == "/users/{id}"};
+    auto handler = rest([](std::string x) { return x; }, path_arg("id"));
+    BOOST_CHECK_NO_THROW(validate_path_args_against_target(op, handler));
+
+    auto bad = rest([](std::string x) { return x; }, path_arg("ud"));
+    try
+    {
+        validate_path_args_against_target(op, bad);
+        BOOST_FAIL("no throw");
+    }
+    catch (boost::taar::exception const& e)
+    {
+        BOOST_TEST(e.error().text() ==
+            "path_arg(\"ud\") is not present as a placeholder in target template \"/users/{id}\"");
+    }
+}
+
+BOOST_AUTO_TEST_CASE(test_validate_multi_target_after_other_leaves)
+{
+    // Two targets joined with ||, behind a method leaf: a placeholder from
+    // either template is accepted, and the message lists both.
+    operand op {method == http::verb::get && (target == "/a/{x}" || target == "/b/{y}")};
+    auto handler = rest([](std::string a, std::string b) { return a + b; }, path_arg("x"), path_arg("y"));
+    BOOST_CHECK_NO_THROW(validate_path_args_against_target(op, handler));
+
+    auto bad = rest([](std::string z) { return z; }, path_arg("z"));
+    try
+    {
+        validate_path_args_against_target(op, bad);
+        BOOST_FAIL("no throw");
+    }
+    catch (boost::taar::exception const& e)
+    {
+        BOOST_TEST(e.error().text() ==
+            "path_arg(\"z\") is not present as a placeholder in target template \"/a/{x} | /b/{y}\"");
+    }
+}
+
 } // namespace

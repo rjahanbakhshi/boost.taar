@@ -7,6 +7,14 @@
 
 [section:release_notes Release Notes]
 
+[heading Unreleased]
+
+* MSVC: `path_arg` registration checks no longer reject every route whose
+  matcher has a leaf before its `target ==` (such as
+  `method == get && target == "/users/{id}"`) with "not present as a
+  placeholder in target template \"\"". The capture holding the
+  template is now selected by type.
+
 [heading 1.0.0]
 
 * `handler::htdocs` rework, keeping `htdocs{root, default_doc}` source
