@@ -14,11 +14,8 @@
 #include <boost/taar/matcher/metadata.hpp>
 #include <boost/taar/matcher/operand.hpp>
 #include <boost/taar/matcher/template_parser.hpp>
-#include <boost/taar/matcher/detail/ranges_to.hpp>
-#include <boost/taar/matcher/detail/join_with.hpp>
 #include <boost/beast/http/message.hpp>
 #include <boost/url/url_view.hpp>
-#include <ranges>
 #include <string>
 #include <utility>
 #include <vector>
@@ -99,14 +96,16 @@ struct target_t
                         return;
                     }
 
-                    using namespace std::ranges;
-                    using namespace std::views;
-
-                    context.path_args.emplace(
-                        greedy_param_name,
-                        subrange(greedy_target_iter, target_iter) |
-                            detail::join_with('/') |
-                            detail::to<std::string>());
+                    std::string joined;
+                    for (auto it = greedy_target_iter; it != target_iter; ++it)
+                    {
+                        if (it != greedy_target_iter)
+                        {
+                            joined += '/';
+                        }
+                        joined += *it;
+                    }
+                    context.path_args.emplace(greedy_param_name, std::move(joined));
 
                     greedy_param_name.clear();
                 };

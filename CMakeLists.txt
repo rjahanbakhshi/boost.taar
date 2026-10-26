@@ -78,8 +78,6 @@ target_sources(
         include/boost/taar/jsonrpc/request_scope.hpp
         include/boost/taar/jsonrpc/response.hpp
         include/boost/taar/matcher/detail/callable_with.hpp
-        include/boost/taar/matcher/detail/join_with.hpp
-        include/boost/taar/matcher/detail/ranges_to.hpp
         include/boost/taar/matcher/context.hpp
         include/boost/taar/matcher/cookie.hpp
         include/boost/taar/matcher/header.hpp
