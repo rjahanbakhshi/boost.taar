@@ -109,9 +109,6 @@ Deliberate, not planned.
 
 ### Documentation and tooling
 
-- Pre-existing doxygen "unable to resolve reference" warnings and
-  duplicate DocBook ids in the generated reference (validity errors)
-  remain; the docs build succeeds but the reference has dead links.
 - GCC 16 reports -Wdangling-pointer false positives in test coroutine
   lambdas; tests are unaffected but the b2 log is noisy.
 
@@ -164,6 +161,11 @@ rather than planned.
   shutdown.
 - The session adds `Date` (RFC 9110 6.6.1) to every response that does
   not carry one, cached per second; `set_date_header(false)` disables it.
+- Reference documentation: the namespaces are documented (Doxygen
+  resolves no `@ref` to a namespace member otherwise), deduction guides
+  are hidden (BoostBook emitted their ids twice), and the remaining
+  references are qualified or rephrased. The docs build reports no
+  unresolved references and no duplicate ids.
 - Static files: `handler::htdocs` rework with `htdocs_options` (safe
   resolution of the route's greedy capture, MIME table, validators and
   RFC 9110 conditional requests, `Cache-Control` rules, single and

@@ -28,7 +28,7 @@ namespace boost::taar::matcher {
 /** The canonical wrapper around a request matcher.
 
     `operand` adapts an arbitrary callable into the unified matcher
-    interface that @ref boost::taar::session::http uses. The callable may
+    interface that @ref boost::taar::session::basic_http "session::http" uses. The callable may
     take any of the following parameter packs (after `request_type const&`
     and `context&`):
 
@@ -127,8 +127,8 @@ public:
         This constructor is available only when @a Metadata is
         @ref any_metadata, because the operand has no leaf-specific value
         to capture. Leaf matchers use the
-        @ref operand(callable_type, Metadata, captures_type) "metadata-aware
-        constructor" instead.
+        @ref operand(callable_type, Metadata, captures_type) "metadata-aware constructor"
+        instead.
     */
     operand(callable_type callable)
         requires std::same_as<Metadata, any_metadata>
@@ -142,10 +142,11 @@ public:
         @ref target_t) and by the composition operators to assemble a
         new operand whose metadata describes the combined constraint.
 
+        The unnamed second parameter is a value of @a Metadata. It carries
+        no information at run time; it is passed by value to drive CTAD on
+        the deduction guide.
+
         @param callable The wrapped predicate.
-        @param          A value of @a Metadata. Carries no information at
-                        run time; passed by value to drive CTAD on the
-                        deduction guide.
         @param captures The captured values for the leaves of @a Metadata.
     */
     operand(callable_type callable, Metadata, captures_type captures)
@@ -622,6 +623,9 @@ private:
     captures_type captures_;
 };
 
+// Deduction guides, hidden from Doxygen: BoostBook lists a guide both in
+// the class synopsis and as an entry of its own, with the same id.
+/// @cond
 template <typename ObjectType>
 operand(ObjectType) ->
     operand<
@@ -637,6 +641,7 @@ operand(ObjectType, MetaType, data_tuple_t<MetaType>) ->
             typename type_traits::callable<std::remove_cvref_t<ObjectType>
         >::template arg<0>
     >, ObjectType, MetaType>;
+/// @endcond
 
 // --- Operand-by-operand composition ----------------------------------------
 //

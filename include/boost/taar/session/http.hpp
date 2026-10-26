@@ -540,7 +540,7 @@ awaitable<bool> write_chunked_response(
     keep-alive, or cancellation is requested.
 
     Register routes with @ref register_request_handler. Each route is a
-    matcher (see @ref boost::taar::matcher) paired with a handler. The
+    matcher (see the `boost::taar::matcher` namespace) paired with a handler. The
     handler can be:
 
     @li A REST adapter produced by
@@ -560,13 +560,13 @@ awaitable<bool> write_chunked_response(
 
     Two error-reporting hooks are exposed:
 
-    @li @ref set_soft_error_handler: invoked when a handler throws.
+    @li @ref set_soft_error_handler, invoked when a handler throws.
         Receives the @ref boost::taar::failure made from the exception and
         returns the response to write. The default handler answers
         request errors (argument, body, constraint failures; oversized
         bodies) with the status of @ref boost::taar::http_status_for and
         the failure's text, and escalates anything else.
-    @li @ref set_hard_error_handler: invoked with a
+    @li @ref set_hard_error_handler, invoked with a
         @ref boost::taar::failure when the connection itself fails or a
         failure is escalated. The default discards it silently; a real
         server should at least log.
@@ -593,7 +593,7 @@ awaitable<bool> write_chunked_response(
                     in through leading parameters of type `Context&`,
                     `Context const&` or `std::shared_ptr<Context>`;
                     handlers without such a parameter are unaffected. The
-                    default alias, @ref http, uses @ref no_context and
+                    default alias, `http`, uses @ref no_context and
                     creates nothing per connection.
 */
 template <typename Context = no_context, typename Stream = boost::beast::tcp_stream>

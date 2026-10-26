@@ -56,7 +56,7 @@ namespace boost::taar {
     @ref error::late_chunk_metadata.
 
     A handler returning `chunked_response<T>` is dispatched through the
-    chunked-encoding path of @ref boost::taar::session::http, which writes
+    chunked-encoding path of @ref boost::taar::session::basic_http "session::http", which writes
     the headers, sets `Transfer-Encoding: chunked`, then streams each
     yielded value via @ref boost::taar::chunk_body_from.
 

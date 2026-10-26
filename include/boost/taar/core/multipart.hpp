@@ -150,16 +150,19 @@ public:
         , max_header_size_ {max_header_size}
     {}
 
+    /// Append @a bytes to the input.
     void feed(std::string_view bytes)
     {
         compact();
         buf_.append(bytes);
     }
 
+    /// Mark the end of the input.
     void finish() noexcept { eof_ = true; }
 
     bool finished() const noexcept { return state_ == state::finished; }
 
+    /// Scan for the next event.
     step next()
     {
         switch (state_)

@@ -241,10 +241,10 @@ concept has_built_in_response_from = requires (T&&... args)
 
 } // namespace detail
 
-/** True if @ref response_from accepts the argument pack @a T....
+/** True if @ref boost::taar::response_from accepts the argument pack @a T....
 
     Satisfied when either a user-defined `tag_invoke` overload exists for
-    @ref response_from_tag, or one of the built-in conversions applies.
+    @ref boost::taar::response_from_tag, or one of the built-in conversions applies.
 */
 template <typename... T>
 concept has_response_from =

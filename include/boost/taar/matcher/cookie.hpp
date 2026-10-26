@@ -25,7 +25,7 @@ namespace detail {
 
     `cookie_t` is not used directly; call its function-call operator with a
     cookie name to obtain a @ref cookie_item, then compose that with the
-    equality operators or with the free function @ref exist.
+    equality operators or with the free function `exist()`.
 
     The session is responsible for parsing the `Cookie` header into a
     @ref boost::taar::cookies map and passing it to the matcher. As a result

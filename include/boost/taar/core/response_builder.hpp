@@ -139,30 +139,35 @@ public:
     {}
 
     // Following overloads will be replaced when P0847R7 becomes widely available
+    /// Set the HTTP version (`10` or `11`).
     auto&& set_version(unsigned version) &
     {
         impl_->set_version(version);
         return *this;
     }
 
+    /// Set the HTTP version (`10` or `11`).
     auto&& set_version(unsigned version) &&
     {
         impl_->set_version(version);
         return std::move(*this);
     }
 
+    /// Set the response status.
     auto&& set_status(boost::beast::http::status status) &
     {
         impl_->set_status(status);
         return *this;
     }
 
+    /// Set the response status.
     auto&& set_status(boost::beast::http::status status) &&
     {
         impl_->set_status(status);
         return std::move(*this);
     }
 
+    /// Add a header field, keeping fields of the same name.
     auto&& insert_header(
         std::string_view name,
         std::string_view const& value) &
@@ -171,6 +176,7 @@ public:
         return *this;
     }
 
+    /// Add a header field, keeping fields of the same name.
     auto&& insert_header(
         std::string_view name,
         std::string_view const& value) &&
@@ -179,6 +185,7 @@ public:
         return std::move(*this);
     }
 
+    /// Add a header field, keeping fields of the same name.
     auto&& insert_header(
         boost::beast::http::field field,
             std::string_view const& value) &
@@ -187,6 +194,7 @@ public:
         return *this;
     }
 
+    /// Add a header field, keeping fields of the same name.
     auto&& insert_header(
         boost::beast::http::field field,
             std::string_view const& value) &&
@@ -195,6 +203,7 @@ public:
         return std::move(*this);
     }
 
+    /// Set a header field, replacing fields of the same name.
     auto&& set_header(
         std::string_view name,
         std::string_view const& value) &
@@ -203,6 +212,7 @@ public:
         return *this;
     }
 
+    /// Set a header field, replacing fields of the same name.
     auto&& set_header(
         std::string_view name,
         std::string_view const& value) &&
@@ -211,6 +221,7 @@ public:
         return std::move(*this);
     }
 
+    /// Set a header field, replacing fields of the same name.
     auto&& set_header(
         boost::beast::http::field field,
             std::string_view const& value) &
@@ -219,6 +230,7 @@ public:
         return *this;
     }
 
+    /// Set a header field, replacing fields of the same name.
     auto&& set_header(
         boost::beast::http::field field,
             std::string_view const& value) &&

@@ -35,7 +35,7 @@ struct is_member_function_of
 template<typename T, typename U>
 inline constexpr bool is_member_function_of_v = is_member_function_of<T, U>::value;
 
-/// Concept form of @ref is_member_function_of.
+/// Concept form of @ref boost::taar::is_member_function_of.
 template<typename T, typename U>
 concept member_function_of = is_member_function_of_v<T, U>;
 

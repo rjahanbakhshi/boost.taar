@@ -42,6 +42,9 @@ local doxygen-inputs =
     [ glob $(INCLUDES)/boost/taar/server/*.hpp ]
     [ glob $(INCLUDES)/boost/taar/session/*.hpp ]
     [ glob $(INCLUDES)/boost/taar/type_traits/*.hpp ]
+    # Namespace descriptions; without them Doxygen cannot resolve @ref to
+    # namespace members.
+    namespaces.hpp
     ;
 
 # Generate a BoostBook-flavoured XML reference from the Doxygen comments

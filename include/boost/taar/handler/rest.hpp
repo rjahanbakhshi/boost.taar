@@ -360,9 +360,9 @@ inline auto rest_for_memfn(
     @code
     struct conn_stats { int requests = 0; };
 
-    taar::session::basic_http<conn_stats> session;
+    taar::session::basic_http<conn_stats> http_session;
 
-    session.register_request_handler(
+    http_session.register_request_handler(
         method == http::verb::get && target == "/users/{id}",
         taar::handler::rest(
             [](conn_stats& stats, int id) { ++stats.requests; return load_user(id); },

@@ -129,7 +129,7 @@ inline std::string message_for(error code)
 
 /** A JSON-RPC 2.0 method registry mounted on one HTTP route.
 
-    Register methods with @ref method, then register @ref handler() on a
+    Register methods with @ref method, then register @ref boost::taar::jsonrpc::endpoint::handler "handler()" on a
     session route. The endpoint parses the request body, dispatches each
     envelope (single or batch) to the matching method, converts results
     and exceptions into response envelopes, and answers notifications with

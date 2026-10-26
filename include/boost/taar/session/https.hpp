@@ -33,11 +33,11 @@ using tls_stream = boost::beast::ssl_stream<boost::beast::tcp_stream>;
     tls.use_certificate_chain_file("cert.pem");
     tls.use_private_key_file("key.pem", boost::asio::ssl::context::pem);
 
-    taar::session::https session;
-    session.register_request_handler(method == http::verb::get && target == "/hello",
+    taar::session::https https_session;
+    https_session.register_request_handler(method == http::verb::get && target == "/hello",
         taar::handler::rest([] { return "hello over TLS"; }));
 
-    boost::asio::co_spawn(io, taar::server::tls("0.0.0.0", "8443", tls, session, signals),
+    boost::asio::co_spawn(io, taar::server::tls("0.0.0.0", "8443", tls, https_session, signals),
         boost::asio::detached);
     @endcode
 */

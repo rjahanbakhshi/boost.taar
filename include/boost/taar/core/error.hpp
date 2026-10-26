@@ -37,7 +37,7 @@ namespace boost::taar {
     `is_error_code_enum` specialisation at the bottom of this header.
 
     Many of these are reported as *soft* errors by
-    @ref boost::taar::session::http through its soft-error handler, which
+    @ref boost::taar::session::basic_http "session::http" through its soft-error handler, which
     by default turns them into 400/404/415 HTTP responses.
 */
 enum class error
@@ -389,7 +389,7 @@ public:
 
     /** Wrap an exception as a failure.
 
-        @li @ref boost::taar::exception: its failure, unwrapped.
+        @li A @ref boost::taar::exception yields its failure, unwrapped.
         @li `boost::system::system_error` and `std::system_error`: the
             exception's code, its text without the code's own text as the
             message, the exception kept.

@@ -27,7 +27,7 @@ template <template <typename...> class TemplateType, typename SpecializationType
 inline constexpr bool is_specialization_of_v =
     is_specialization_of<TemplateType, SpecializationType>::value;
 
-/// Concept form of @ref is_specialization_of.
+/// Concept form of @ref boost::taar::type_traits::is_specialization_of.
 template <template <typename...> class TemplateType, typename SpecializationType>
 concept specialization_of =
     is_specialization_of_v<TemplateType, SpecializationType>;

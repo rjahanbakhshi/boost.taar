@@ -100,7 +100,7 @@ concept has_built_in_chunk_body_from = requires (T&& arg)
 
 } // namespace detail
 
-/// True if @ref chunk_body_from accepts a value of type @a T.
+/// True if @ref boost::taar::chunk_body_from accepts a value of type @a T.
 template <typename T>
 concept has_chunk_body_from =
     detail::has_user_defined_chunk_body_from<T> ||

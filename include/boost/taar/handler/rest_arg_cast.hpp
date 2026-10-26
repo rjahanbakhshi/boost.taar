@@ -34,9 +34,12 @@
 
 namespace boost::taar::handler {
 
-// Forward declaration: defined after the detail namespace.
+// Forward declaration: defined after the detail namespace. Hidden from
+// Doxygen, which cannot match it to the definition (decltype(auto)).
+/// @cond
 template <typename ToType, typename FromType>
 inline constexpr decltype(auto) rest_arg_cast(FromType const& from);
+/// @endcond
 
 namespace detail {
 
@@ -340,10 +343,10 @@ concept has_built_in_rest_arg_cast = requires (FromType const& from)
 
 } // namespace detail
 
-/** True if @ref rest_arg_cast can convert @a FromType to @a ToType.
+/** True if @ref boost::taar::handler::rest_arg_cast can convert @a FromType to @a ToType.
 
     Satisfied when either a user-defined `tag_invoke` overload exists for
-    @ref rest_arg_cast_tag<ToType>, or one of the built-in conversions
+    `rest_arg_cast_tag<ToType>` (see @ref boost::taar::handler::rest_arg_cast_tag), or one of the built-in conversions
     applies.
 */
 template <typename FromType, typename ToType>

@@ -48,7 +48,7 @@ struct rest_param_info
     std::optional<bool> explode {};
 };
 
-/// Concept: handler exposes `params()` returning its @ref rest_param_info list.
+/// Concept: handler exposes `params()` returning its @ref boost::taar::handler::rest_param_info list.
 template <typename Handler>
 concept has_rest_params = requires(Handler const& h)
 {

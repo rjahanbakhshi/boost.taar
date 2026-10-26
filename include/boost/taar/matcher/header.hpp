@@ -23,7 +23,7 @@ namespace boost::taar::matcher {
     `header_t` is not used directly; call its function-call operator with a
     well-known `boost::beast::http::field` value or a string field name to
     obtain a @ref header_item, then compose that with the equality
-    operators or with the free function @ref exist.
+    operators or with the free function `exist()`.
 
     @code
     using boost::taar::matcher::header;

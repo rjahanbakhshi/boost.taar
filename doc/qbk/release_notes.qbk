@@ -38,6 +38,12 @@
   `Boost::taar` alias. `build.jam` lists every Boost library the headers
   include.
 * The examples moved from `examples/` to `example/`, the Boost layout.
+* Reference documentation: about 125 dead cross-references (Doxygen
+  "unable to resolve reference") and three duplicate DocBook ids are
+  gone. The namespaces are now documented (`doc/namespaces.hpp`, read
+  only by Doxygen), deduction guides are hidden from the reference, and
+  the response builder's setters and a few scanner members gained
+  descriptions.
 * MSVC: `path_arg` registration checks no longer reject every route whose
   matcher has a leaf before its `target ==` (such as
   `method == get && target == "/users/{id}"`) with "not present as a

@@ -496,7 +496,7 @@ inline std::string text_of(boost::json::value const& v)
 /** An MCP (Model Context Protocol) server endpoint over Streamable HTTP.
 
     Built on @ref jsonrpc::endpoint. Register tools and resources, then
-    register @ref handler() on a session route for `POST` (and `DELETE` in
+    register @ref boost::taar::mcp::endpoint::handler "handler()" on a session route for `POST` (and `DELETE` in
     stateful mode). The endpoint implements the protocol's lifecycle
     (`initialize`, `notifications/initialized`, `ping`), discovery
     (`tools/list`, `resources/list`, `resources/templates/list`) and the
@@ -542,8 +542,8 @@ inline std::string text_of(boost::json::value const& v)
         Messages queued with @ref notify or @ref broadcast are delivered
         as SSE `message` events on that stream.
     @li The same endpoint can serve the stdio transport with
-        @ref serve_stdio: newline-delimited JSON-RPC on stdin/stdout, one
-        implicit session, notifications written to stdout.
+        `serve_stdio()` (newline-delimited JSON-RPC on stdin/stdout, one
+        implicit session, notifications written to stdout).
 */
 template <typename Session = stateless, typename... Context>
 class endpoint
@@ -1005,6 +1005,7 @@ public:
         return n;
     }
 
+    /// Send the notification @a method with @a params to every session; returns how many sessions it was queued for.
     std::size_t broadcast(std::string_view method, boost::json::value params = {})
         requires stateful
     {
@@ -1019,7 +1020,7 @@ public:
 
     /** The HTTP handler for the `GET` event stream (stateful mode).
 
-        Register it on the same route as @ref handler for `GET`:
+        Register it on the same route as @ref boost::taar::mcp::endpoint::handler "handler()" for `GET`:
         @code
         session.register_request_handler(method == http::verb::get && target == "/mcp", mcp.stream_handler());
         session.register_request_handler(target == "/mcp", mcp.handler());

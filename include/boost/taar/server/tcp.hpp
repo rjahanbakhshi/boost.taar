@@ -170,7 +170,7 @@ awaitable<void> accept_loop(
     strand, made from @a connection_executor, so the `io_context` may be
     run by several threads and connections are served in parallel. The handler
     is responsible for the full lifetime of the connection, typically by
-    invoking a @ref boost::taar::session::http instance.
+    invoking a @ref boost::taar::session::basic_http "session::http" instance.
 
     The acceptor and every connection register themselves with @a signals,
     and `signals.emit()` may be called from any thread. A cancellation slot
@@ -191,7 +191,7 @@ awaitable<void> accept_loop(
                                  `socket` is a `boost::asio::ip::tcp::socket`
                                  already on the connection strand, and
                                  returning `awaitable<void>`. Usually a
-                                 @ref boost::taar::session::http instance by
+                                 @ref boost::taar::session::basic_http "session::http" instance by
                                  reference.
     @param signals               Cancellation pool. The same pool is shared
                                  with spawned sessions so a single
@@ -238,7 +238,7 @@ template <typename SessionHandler> // TODO: SessionHandler concept for callable 
     `io_context` (or thread pool) executor itself:
 
     @code
-    boost::asio::co_spawn(io, taar::server::tcp("0.0.0.0", "8080", session, signals),
+    boost::asio::co_spawn(io, taar::server::tcp("0.0.0.0", "8080", http_session, signals),
         boost::asio::detached);
     @endcode
 

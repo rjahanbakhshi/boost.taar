@@ -22,7 +22,7 @@ namespace boost::taar::matcher {
 
     Instances of `method_t` are not consumed directly. Apply one of the
     relational operators to obtain a matcher that the
-    @ref boost::taar::session::http session can use to dispatch a request:
+    @ref boost::taar::session::basic_http "session::http" session can use to dispatch a request:
 
     @code
     using boost::taar::matcher::method;

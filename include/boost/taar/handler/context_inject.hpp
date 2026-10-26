@@ -70,7 +70,7 @@ struct requested_context<std::shared_ptr<C> const&> { using type = std::remove_c
 template <typename Param>
 using requested_context_t = typename requested_context<Param>::type;
 
-/// Index of `std::shared_ptr<C>` within a @ref contexts tuple, or @ref npos.
+/// Index of `std::shared_ptr<C>` within a @ref contexts tuple, or `detail::npos`.
 template <typename C, typename Contexts> struct context_index;
 
 template <typename C>

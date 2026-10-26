@@ -277,9 +277,12 @@ struct with_default
     value_type default_value_;
 };
 
-// CTAD
+// CTAD. Hidden from Doxygen: BoostBook lists a deduction guide both in
+// the class synopsis and as an entry of its own, with the same id.
+/// @cond
 template <typename T, typename U>
 with_default(T, U) -> with_default<std::remove_cvref_t<T>, std::remove_cvref_t<U>>;
+/// @endcond
 
 /** Direct or lazy retrieval of REST arg value from the arg provider.
 
