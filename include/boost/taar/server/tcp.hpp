@@ -116,7 +116,12 @@ awaitable<void> accept_loop(
     rebind_executor<tcp::acceptor> acceptor {co_await this_coro::executor};
     boost::system::error_code sec;
     acceptor.open(query.begin()->endpoint().protocol(), sec);
+#if !defined(_WIN32)
+    // On Windows SO_REUSEADDR lets a socket bind a port another socket is
+    // already listening on (instead of failing with address_in_use), so it
+    // is set only where it means "rebind despite TIME_WAIT".
     if (!sec) acceptor.set_option(net::socket_base::reuse_address(true), sec);
+#endif
     if (!sec) acceptor.bind(query.begin()->endpoint(), sec);
     if (sec) fail(sec, "binding");
     acceptor.listen(net::socket_base::max_listen_connections, sec);
