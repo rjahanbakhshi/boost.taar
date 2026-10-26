@@ -15,6 +15,7 @@
 #include <boost/taar/core/chunked_response.hpp>
 #include <boost/taar/core/chunked_response_meta.hpp>
 #include <boost/taar/core/context_store.hpp>
+#include <boost/taar/core/detail/move_only_function.hpp>
 #include <boost/taar/core/error.hpp>
 #include <boost/taar/core/json_schema.hpp>
 #include <boost/taar/handler/context_inject.hpp>
@@ -1351,21 +1352,21 @@ private:
     struct tool_entry
     {
         tool_info info;
-        std::move_only_function<awaitable<boost::json::value>(
+        boost::taar::detail::move_only_function<awaitable<boost::json::value>(
             call_contexts const&, tool_call const&, matcher::context const&)> invoke;
     };
 
     struct resource_entry
     {
         resource_info info;
-        std::move_only_function<awaitable<boost::json::value>(
+        boost::taar::detail::move_only_function<awaitable<boost::json::value>(
             call_contexts const&, resource_call const&, matcher::context const&)> invoke;
     };
 
     struct prompt_entry
     {
         prompt_info info;
-        std::move_only_function<awaitable<boost::json::value>(
+        boost::taar::detail::move_only_function<awaitable<boost::json::value>(
             call_contexts const&, prompt_call const&, matcher::context const&)> invoke;
     };
 
@@ -2531,7 +2532,7 @@ private:
     std::unordered_map<std::string, prompt_entry> prompts_;
     std::unordered_map<std::string, completer_fn> completers_;
     std::vector<std::string> prompt_order_;
-    std::move_only_function<void(contexts_type const&, initialize_params const&)> on_initialize_;
+    boost::taar::detail::move_only_function<void(contexts_type const&, initialize_params const&)> on_initialize_;
     std::unordered_map<std::string, std::function<void(contexts_type const&, boost::json::value const&)>> client_notifications_;
     tool_error_handler tool_error_ = default_tool_error_handler;
     std::function<bool(std::string_view)> origin_validator_;

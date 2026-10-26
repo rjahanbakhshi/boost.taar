@@ -33,6 +33,7 @@
 #include <boost/taar/core/member_function_of.hpp>
 #include <boost/taar/core/cancellation_signals.hpp>
 #include <boost/taar/core/awaitable.hpp>
+#include <boost/taar/core/detail/move_only_function.hpp>
 #include <boost/taar/core/body_reader.hpp>
 #include <boost/taar/core/is_awaitable.hpp>
 #include <boost/taar/core/error.hpp>
@@ -550,14 +551,14 @@ public:
 
 private:
 /// @cond
-    using matcher_type = std::move_only_function<
+    using matcher_type = boost::taar::detail::move_only_function<
         bool(
             boost::beast::http::request_header<> const&,
             matcher::context&,
             boost::urls::url_view const&,
             cookies const&)>;
 
-    using request_handler_wrapper_type = std::move_only_function<
+    using request_handler_wrapper_type = boost::taar::detail::move_only_function<
         awaitable<bool>(
             basic_http&,
             matcher::context const&,
@@ -573,16 +574,16 @@ private:
         request_handler_wrapper_type handler;
     };
 
-    using soft_error_handler_wrapper_type = std::move_only_function<
+    using soft_error_handler_wrapper_type = boost::taar::detail::move_only_function<
         awaitable<bool>(
             failure const&,
             Stream&,
             boost::beast::http::request_header<>&,
             cancellation_signals&)>;
 
-    using hard_error_handler_type = std::move_only_function<void(failure const&)>;
+    using hard_error_handler_type = boost::taar::detail::move_only_function<void(failure const&)>;
 
-    using interceptor_type = std::move_only_function<
+    using interceptor_type = boost::taar::detail::move_only_function<
         awaitable<interceptor_result>(
             boost::beast::http::request_header<> const&,
             matcher::context&,

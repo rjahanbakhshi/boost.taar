@@ -16,6 +16,7 @@
 #include <boost/asio/cancellation_type.hpp>
 #include <boost/asio/executor_work_guard.hpp>
 #include <boost/asio/post.hpp>
+#include <boost/taar/core/detail/move_only_function.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -179,7 +180,7 @@ private:
     struct waiter
     {
         std::uint64_t id;
-        std::move_only_function<void(std::optional<T>)> complete;
+        boost::taar::detail::move_only_function<void(std::optional<T>)> complete;
     };
 
     struct state

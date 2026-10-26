@@ -11,6 +11,7 @@
 #define BOOST_TAAR_CORE_CONTEXT_STORE_HPP
 
 #include <boost/taar/core/awaitable.hpp>
+#include <boost/taar/core/detail/move_only_function.hpp>
 #include <boost/asio/associated_executor.hpp>
 #include <boost/asio/async_result.hpp>
 #include <boost/asio/post.hpp>
@@ -93,7 +94,7 @@ private:
 /// @cond
     mutable std::mutex mutex_;
     bool locked_ = false;
-    std::deque<std::move_only_function<void()>> waiters_;
+    std::deque<boost::taar::detail::move_only_function<void()>> waiters_;
 /// @endcond
 };
 

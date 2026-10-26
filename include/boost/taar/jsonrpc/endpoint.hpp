@@ -11,6 +11,7 @@
 #define BOOST_TAAR_JSONRPC_ENDPOINT_HPP
 
 #include <boost/taar/core/awaitable.hpp>
+#include <boost/taar/core/detail/move_only_function.hpp>
 #include <boost/taar/core/error.hpp>
 #include <boost/taar/core/json_schema.hpp>
 #include <boost/taar/handler/context_inject.hpp>
@@ -519,7 +520,7 @@ private:
     struct entry
     {
         method_info info;
-        std::move_only_function<awaitable<boost::json::value>(
+        boost::taar::detail::move_only_function<awaitable<boost::json::value>(
             call_contexts const&, call const&, matcher::context const&)> invoke;
     };
 

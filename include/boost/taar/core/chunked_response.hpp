@@ -12,6 +12,7 @@
 
 #include <boost/taar/core/awaitable.hpp>
 #include <boost/taar/core/chunked_response_meta.hpp>
+#include <boost/taar/core/detail/move_only_function.hpp>
 #include <boost/taar/core/error.hpp>
 #include <boost/system/error_code.hpp>
 #include <boost/asio/any_io_executor.hpp>
@@ -69,7 +70,7 @@ public:
     struct promise_type;
     using handle_type = std::coroutine_handle<promise_type>;
     using executor_type = boost::asio::any_io_executor;
-    using completion_handler_type = std::move_only_function<void(std::optional<T>)>;
+    using completion_handler_type = boost::taar::detail::move_only_function<void(std::optional<T>)>;
 
     struct promise_type
     {
