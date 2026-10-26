@@ -23,8 +23,13 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <cctype>
 #include <charconv>
 #include <concepts>
+#include <cstddef>
+#include <locale>
+#include <sstream>
+#include <system_error>
 #include <type_traits>
 
 namespace boost::taar::handler {
@@ -81,16 +86,58 @@ inline bool tag_invoke(rest_arg_cast_built_in_tag<bool>, std::string_view const&
         std::format("value '{}' is not a boolean", from)}};
 }
 
+// Whether the standard library provides std::from_chars for T. libc++ before
+// LLVM 20 (and Apple's libc++) declares no floating-point overloads.
+template <typename T>
+concept has_std_from_chars = requires (char const* p, T& value)
+{
+    std::from_chars(p, p, value);
+};
+
+// Fallback for floating-point types where std::from_chars is missing: parse
+// in the classic locale, rejecting what std::from_chars rejects up front
+// (leading whitespace and a leading '+').
+template <std::floating_point T>
+inline std::from_chars_result from_chars_fallback(char const* first, char const* last, T& value)
+{
+    if (first == last || *first == '+' || std::isspace(static_cast<unsigned char>(*first)))
+    {
+        return {first, std::errc::invalid_argument};
+    }
+
+    std::istringstream in {std::string {first, last}};
+    in.imbue(std::locale::classic());
+    T parsed {};
+    in >> parsed;
+    if (in.fail())
+    {
+        // On overflow num_get stores the largest finite value; otherwise 0.
+        return {first, parsed != T {} ? std::errc::result_out_of_range : std::errc::invalid_argument};
+    }
+
+    value = parsed;
+    auto const consumed = in.eof() ? last - first : static_cast<std::ptrdiff_t>(in.tellg());
+    return {first + consumed, std::errc {}};
+}
+
 // Helper function for from_chars-based conversions. It performs the conversion
 // and throws on error or partial conversion.
 template <typename ToType>
 inline ToType from_chars_conversion(char const* begin, std::size_t size)
 {
     ToType result {};
-    using std::cbegin;
-    using std::cend;
     auto end = std::next(begin, size);
-    auto [ptr, ec] = std::from_chars(begin, end, result);
+    auto [ptr, ec] = [&]
+    {
+        if constexpr (has_std_from_chars<ToType>)
+        {
+            return std::from_chars(begin, end, result);
+        }
+        else
+        {
+            return from_chars_fallback(begin, end, result);
+        }
+    }();
 
     if (ec != std::errc{})
     {
