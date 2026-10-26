@@ -32,9 +32,15 @@ using timeout_duration = std::chrono::steady_clock::duration;
 template <typename Stream>
 void expire_after(Stream& stream, timeout_duration d)
 {
-    auto& lowest = boost::beast::get_lowest_layer(stream);
-    if constexpr (requires { lowest.expires_after(d); lowest.expires_never(); })
+    // Requirements are spelled on types, not on the local names: MSVC has
+    // mis-evaluated requires-expressions that name function locals.
+    if constexpr (requires(Stream& s, timeout_duration t)
     {
+        boost::beast::get_lowest_layer(s).expires_after(t);
+        boost::beast::get_lowest_layer(s).expires_never();
+    })
+    {
+        auto& lowest = boost::beast::get_lowest_layer(stream);
         if (d > timeout_duration::zero())
             lowest.expires_after(d);
         else
@@ -46,10 +52,9 @@ void expire_after(Stream& stream, timeout_duration d)
 template <typename Stream>
 void expire_never(Stream& stream)
 {
-    auto& lowest = boost::beast::get_lowest_layer(stream);
-    if constexpr (requires { lowest.expires_never(); })
+    if constexpr (requires(Stream& s) { boost::beast::get_lowest_layer(s).expires_never(); })
     {
-        lowest.expires_never();
+        boost::beast::get_lowest_layer(stream).expires_never();
     }
 }
 
@@ -119,7 +124,7 @@ private:
     static void cancel(Stream& stream)
     {
         auto& lowest = boost::beast::get_lowest_layer(stream);
-        if constexpr (requires(boost::system::error_code& ec) { lowest.cancel(ec); })
+        if constexpr (requires(Stream& s, boost::system::error_code& ec) { boost::beast::get_lowest_layer(s).cancel(ec); })
         {
             boost::system::error_code ec;
             lowest.cancel(ec);
