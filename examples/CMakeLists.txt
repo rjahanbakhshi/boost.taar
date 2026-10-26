@@ -20,6 +20,11 @@ set(TAAR_EXAMPLES
     websocket_server
 )
 
+# The stdio transport needs POSIX stream descriptors.
+if(WIN32)
+    list(REMOVE_ITEM TAAR_EXAMPLES mcp_stdio_server)
+endif()
+
 foreach(example IN LISTS TAAR_EXAMPLES)
     add_executable(${example} EXCLUDE_FROM_ALL ${example}.cpp)
     set_target_properties(${example} PROPERTIES CXX_STANDARD 23 UNITY_BUILD ${ENABLE_UNITY_BUILD})
