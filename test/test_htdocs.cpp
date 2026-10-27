@@ -14,6 +14,7 @@
 #include <boost/taar/matcher/method.hpp>
 #include <boost/taar/matcher/target.hpp>
 #include <boost/taar/session/http.hpp>
+#include <boost/system/system_error.hpp>
 #include <boost/test/unit_test.hpp>
 #include <atomic>
 #include <chrono>
@@ -87,7 +88,9 @@ std::string drain(taar::segmented_body::value_type const& body)
     {
         out.append(static_cast<char const*>(chunk->first.data()), chunk->first.size());
     }
-    BOOST_TEST(!ec);
+    // Throws rather than BOOST_TEST: callers include worker threads, and
+    // Boost.Test assertions are not thread-safe.
+    if (ec) throw boost::system::system_error {ec};
     return out;
 }
 
@@ -1010,8 +1013,15 @@ BOOST_AUTO_TEST_CASE(test_htdocs_shared_handler_on_many_threads)
                 for (int n = 0; n < 200; ++n)
                 {
                     int const i = (t + n) % 8;
-                    auto r = get(handler, "/f" + std::to_string(i) + ".bin");
-                    if (r.body != contents[i]) ++failures;
+                    try
+                    {
+                        auto r = get(handler, "/f" + std::to_string(i) + ".bin");
+                        if (r.body != contents[i]) ++failures;
+                    }
+                    catch (...)
+                    {
+                        ++failures;
+                    }
                 }
             });
         }
