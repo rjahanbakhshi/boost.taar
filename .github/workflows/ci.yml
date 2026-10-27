@@ -21,26 +21,114 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: linux-gcc-14
+          # C++20, the minimum: the oldest toolchains we support.
+          - name: linux-gcc-13-cxx20
             os: ubuntu-24.04
-            cc: gcc-14
-            cxx: g++-14
-            apt: gcc-14 g++-14
+            cc: gcc-13
+            cxx: g++-13
+            cppstd: 20
 
-          - name: linux-clang-18
+          - name: linux-clang-18-cxx20
             os: ubuntu-24.04
             cc: clang-18
             cxx: clang++-18
             apt: clang-18
+            cppstd: 20
 
-          - name: windows-msvc-2022
+          - name: linux-clang-18-libcxx-cxx20
+            os: ubuntu-24.04
+            cc: clang-18
+            cxx: clang++-18
+            apt: clang-18 libc++-18-dev libc++abi-18-dev
+            libcxx: libc++
+            cppstd: 20
+
+          - name: windows-msvc-2022-cxx20
             os: windows-2022
             conan_profile: profiles/windows-vs2022.profile
+            cppstd: 20
 
-          - name: macos-clang
-            os: macos-14
-            cc: clang
-            cxx: clang++
+          # Experimental until the macOS-only runtime failures are fixed.
+          - name: macos-xcode-16.4-cxx20
+            os: macos-15
+            xcode: '16.4'
+            cppstd: 20
+            experimental: true
+
+          # C++23: current mainstream toolchains.
+          - name: linux-gcc-14-cxx23
+            os: ubuntu-24.04
+            cc: gcc-14
+            cxx: g++-14
+            cppstd: 23
+
+          - name: linux-clang-20-cxx23
+            os: ubuntu-24.04
+            cc: clang-20
+            cxx: clang++-20
+            apt: clang-20
+            cppstd: 23
+
+          - name: windows-msvc-2026-cxx23
+            os: windows-2025
+            conan_profile: profiles/windows-vs2026.profile
+            cppstd: 23
+
+          - name: macos-xcode-26.6-cxx23
+            os: macos-26
+            xcode: '26.6'
+            cppstd: 23
+            experimental: true
+
+          # C++26: the newest toolchains, as an early warning.
+          - name: linux-gcc-15-cxx26
+            os: ubuntu-26.04
+            cc: gcc-15
+            cxx: g++-15
+            cppstd: 26
+            experimental: true
+
+          - name: linux-clang-22-libcxx-cxx26
+            os: ubuntu-26.04
+            cc: clang-22
+            cxx: clang++-22
+            apt: clang-22 libc++-22-dev libc++abi-22-dev
+            libcxx: libc++
+            cppstd: 26
+            experimental: true
+
+          # Probes below the supported floor (GCC 13, Clang 18).
+          - name: linux-gcc-12-cxx20
+            os: ubuntu-24.04
+            cc: gcc-12
+            cxx: g++-12
+            cppstd: 20
+            experimental: true
+
+          - name: linux-clang-17-cxx20
+            os: ubuntu-24.04
+            cc: clang-17
+            cxx: clang++-17
+            apt: clang-17
+            cppstd: 20
+            experimental: true
+
+          # Sanitizers.
+          - name: linux-gcc-14-asan-ubsan
+            os: ubuntu-24.04
+            cc: gcc-14
+            cxx: g++-14
+            cppstd: 20
+            sanitize: address,undefined
+
+          # Experimental until its first clean run.
+          - name: linux-clang-18-tsan
+            os: ubuntu-24.04
+            cc: clang-18
+            cxx: clang++-18
+            apt: clang-18
+            cppstd: 20
+            sanitize: thread
             experimental: true
 
     env:
@@ -62,16 +150,21 @@ jobs:
           conan --version
 
       - name: Install Linux toolchain
-        if: runner.os == 'Linux' && matrix.apt
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ${{ matrix.apt }} ninja-build
+          sudo apt-get install -y --no-install-recommends ninja-build ${{ matrix.apt }}
           echo "CC=${{ matrix.cc }}"  >> "$GITHUB_ENV"
           echo "CXX=${{ matrix.cxx }}" >> "$GITHUB_ENV"
 
       - name: Install macOS toolchain
         if: runner.os == 'macOS'
-        run: brew install ninja
+        run: |
+          brew install ninja
+          sudo xcode-select -s "/Applications/Xcode_${{ matrix.xcode }}.app"
+          echo "CC=clang"    >> "$GITHUB_ENV"
+          echo "CXX=clang++" >> "$GITHUB_ENV"
+          clang++ --version
 
       - name: Set up MSVC environment
         if: runner.os == 'Windows'
@@ -89,14 +182,39 @@ jobs:
 
       - name: Detect default Conan profile (Linux/macOS)
         if: runner.os != 'Windows'
-        run: conan profile detect --force
+        run: |
+          conan profile detect --force
+          echo "CONAN_HOST_PROFILE=default" >> "$GITHUB_ENV"
+
+      # The flags go through Conan so they reach the toolchain file without
+      # replacing the ones Conan sets (-stdlib=libc++ and the like), and
+      # Boost is built instrumented too. TSan's shadow memory mapping fails
+      # with the runners' default ASLR entropy, hence the sysctl.
+      - name: Configure sanitizers
+        if: matrix.sanitize
+        run: |
+          san='"-fsanitize=${{ matrix.sanitize }}"'
+          cat > "$RUNNER_TEMP/sanitize.profile" <<EOF
+          include(default)
+          [conf]
+          tools.build:cxxflags=[$san, "-fno-omit-frame-pointer", "-fno-sanitize-recover=all", "-g"]
+          tools.build:exelinkflags=[$san]
+          tools.build:sharedlinkflags=[$san]
+          EOF
+          cat "$RUNNER_TEMP/sanitize.profile"
+          echo "CONAN_HOST_PROFILE=$RUNNER_TEMP/sanitize.profile" >> "$GITHUB_ENV"
+          echo "UBSAN_OPTIONS=print_stacktrace=1" >> "$GITHUB_ENV"
+          echo "TSAN_OPTIONS=halt_on_error=1 second_deadlock_stack=1" >> "$GITHUB_ENV"
+          sudo sysctl vm.mmap_rnd_bits=28
 
       - name: Conan install (Linux/macOS)
         if: runner.os != 'Windows'
         run: |
           conan install . -of=build \
+            -pr:h="$CONAN_HOST_PROFILE" -pr:b=default \
             -s build_type=$CMAKE_BUILD_TYPE \
-            -s compiler.cppstd=23 \
+            -s compiler.cppstd=${{ matrix.cppstd }} \
+            ${{ matrix.libcxx && format('-s compiler.libcxx={0}', matrix.libcxx) || '' }} \
             --build=missing
 
       - name: Conan install (Windows)
@@ -107,6 +225,7 @@ jobs:
             -pr:h=${{ matrix.conan_profile }} ^
             -pr:b=${{ matrix.conan_profile }} ^
             -s build_type=%CMAKE_BUILD_TYPE% ^
+            -s compiler.cppstd=${{ matrix.cppstd }} ^
             --build=missing
 
       - name: CMake configure (Linux/macOS)

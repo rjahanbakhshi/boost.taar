@@ -29,8 +29,18 @@ concurrency:
 
 jobs:
   b2-test:
-    name: b2 libs/taar/test
+    name: b2 ${{ matrix.toolset }} cxxstd=${{ matrix.cxxstd }}
     runs-on: ubuntu-24.04
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - toolset: gcc-13
+            cxxstd: 20
+          - toolset: clang-18
+            cxxstd: 23
+            apt: clang-18
 
     env:
       BOOST_BRANCH: develop
@@ -46,9 +56,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential gcc-14 g++-14 ninja-build
-          echo "CC=gcc-14"  >> "$GITHUB_ENV"
-          echo "CXX=g++-14" >> "$GITHUB_ENV"
+            build-essential ninja-build ${{ matrix.apt }}
 
       - name: Clone Boost super-project
         run: |
@@ -82,10 +90,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: boost-modular/bin.v2
-          key: b2-${{ runner.os }}-${{ hashFiles('boost-modular/.git/HEAD', 'taar/build.jam', 'taar/test/Jamfile') }}
+          key: b2-${{ matrix.toolset }}-${{ matrix.cxxstd }}-${{ hashFiles('boost-modular/.git/HEAD', 'taar/build.jam', 'taar/test/Jamfile') }}
           restore-keys: |
-            b2-${{ runner.os }}-
+            b2-${{ matrix.toolset }}-${{ matrix.cxxstd }}-
 
       - name: Build and run taar tests
         working-directory: boost-modular
-        run: ./b2 -j2 libs/taar/test cxxstd=23 toolset=gcc
+        run: ./b2 -j2 libs/taar/test cxxstd=${{ matrix.cxxstd }} toolset=${{ matrix.toolset }}
