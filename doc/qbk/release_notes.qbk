@@ -28,6 +28,15 @@
   one REST route and is also a b2 test. The `add_subdirectory` case now
   configures taar as a Boost library instead of looking for an installed
   Boost.
+* The standalone CMake build installs a CMake package:
+  `find_package(boost-taar)` after `cmake --install` provides the target
+  `boost-taar::boost-taar`, also reachable as `Boost::taar`.
+  `test/cmake_package_test` checks it in CI. Tests and examples are built
+  by default only when taar is the top-level project
+  (`BOOST_TAAR_BUILD_TESTS`, `BOOST_TAAR_BUILD_EXAMPLES`), so FetchContent
+  and CPM users get just the library. Adding taar that way before Boost is
+  found stops with a message saying to call `find_package(Boost ...)`
+  first.
 
 [heading 1.0.1]
 

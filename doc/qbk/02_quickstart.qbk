@@ -38,6 +38,35 @@ Taar is header-only. Drop the `include/` directory on your include path and
 link against the compiled Boost libraries that __Asio__, __Beast__,
 __Url__, __Json__, and __System__ already require for your application.
 
+With CMake, add the sources to your build with
+[@https://github.com/cpm-cmake/CPM.cmake CPM] or FetchContent, or install
+taar (`cmake --install`) and use the package it installs. Find Boost
+(1.84 or newer, with the compiled Boost.JSON and Boost.URL) first: taar uses
+the Boost targets it finds.
+
+    find_package(Boost 1.84 CONFIG REQUIRED COMPONENTS json url)
+
+    # CPM (after including CPM.cmake)
+    CPMAddPackage("gh:rjahanbakhshi/boost.taar#master")
+
+    # or FetchContent
+    include(FetchContent)
+    FetchContent_Declare(boost_taar
+        GIT_REPOSITORY https://github.com/rjahanbakhshi/boost.taar.git
+        GIT_TAG master)
+    FetchContent_MakeAvailable(boost_taar)
+
+    target_link_libraries(app PRIVATE Boost::taar)
+
+    # or, installed (the package finds Boost itself)
+    find_package(boost-taar CONFIG REQUIRED)
+    target_link_libraries(app PRIVATE boost-taar::boost-taar)
+
+Tests and examples are only built when taar is the top-level project.
+`Boost::taar` names the library in every setup: CPM, FetchContent, the
+installed package, and the Boost superproject. Programs that use TLS also
+link OpenSSL (`OpenSSL::SSL`).
+
 Inside a Boost super-project the library participates in the modular build
 through `build.jam`; no extra configuration is required.
 

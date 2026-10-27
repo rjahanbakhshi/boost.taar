@@ -247,3 +247,18 @@ jobs:
       - name: Build examples
         run: cmake --build --preset conan-release -j --target examples
         shell: bash
+
+      # Install the CMake package and build a consumer against it with
+      # find_package(boost-taar) (test/cmake_package_test). The Conan
+      # toolchain supplies Boost and the same compiler settings.
+      - name: Install and use the CMake package
+        if: runner.os != 'Windows' && !matrix.sanitize
+        run: |
+          prefix="$RUNNER_TEMP/taar-prefix"
+          cmake --install build/build/Release --prefix "$prefix"
+          cmake -S test/cmake_package_test -B build-package -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$PWD/build/build/Release/generators/conan_toolchain.cmake" \
+            -DCMAKE_PREFIX_PATH="$prefix" \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-package -j
+          cmake --build build-package --target check

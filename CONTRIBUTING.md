@@ -114,7 +114,7 @@ resolves a symlink to its target):
 ```bash
 # taar added with add_subdirectory next to its dependencies' sources
 cmake -S libs/taar/test/cmake_subdir_test -B /tmp/subdir
-cmake --build /tmp/subdir --target quick check
+cmake --build /tmp/subdir --target quick && cmake --build /tmp/subdir --target check
 
 # taar installed by the superproject and found with find_package
 cmake -S . -B /tmp/boost -DBOOST_INCLUDE_LIBRARIES=taar \
@@ -122,7 +122,19 @@ cmake -S . -B /tmp/boost -DBOOST_INCLUDE_LIBRARIES=taar \
 cmake --build /tmp/boost && cmake --install /tmp/boost
 cmake -S libs/taar/test/cmake_install_test -B /tmp/install \
     -DCMAKE_PREFIX_PATH=/tmp/boost-prefix
-cmake --build /tmp/install --target quick check
+cmake --build /tmp/install --target quick && cmake --build /tmp/install --target check
+```
+
+The standalone build's own CMake package (`find_package(boost-taar)`) has
+its consumer test too. With Boost from Conan, point it at the Conan
+toolchain of a configured standalone build:
+
+```bash
+cmake --install build --prefix /tmp/taar-prefix
+cmake -S test/cmake_package_test -B /tmp/package \
+    -DCMAKE_TOOLCHAIN_FILE="$PWD/build/conan/build/Debug/generators/conan_toolchain.cmake" \
+    -DCMAKE_PREFIX_PATH=/tmp/taar-prefix -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/package --target quick quick_alias && cmake --build /tmp/package --target check
 ```
 
 Build the documentation. The toolchain requirements:

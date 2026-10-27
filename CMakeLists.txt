@@ -40,6 +40,16 @@ endfunction()
 #
 if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR AND
    (BOOST_SUPERPROJECT_VERSION OR NOT Boost_FOUND))
+    # Neither inside the superproject nor next to the other Boost libraries'
+    # sources: most likely FetchContent or CPM without Boost found first.
+    if(NOT BOOST_SUPERPROJECT_VERSION AND
+       NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../asio/CMakeLists.txt")
+        message(FATAL_ERROR
+            "boost-taar needs Boost. Call "
+            "find_package(Boost 1.84 CONFIG REQUIRED COMPONENTS json url) "
+            "before adding boost-taar (FetchContent, CPM, add_subdirectory).")
+    endif()
+
     project(boost_taar VERSION "${BOOST_SUPERPROJECT_VERSION}" LANGUAGES CXX)
 
     add_library(boost_taar INTERFACE)
@@ -205,17 +215,50 @@ target_link_libraries(${PROJECT_NAME} INTERFACE Boost::boost Boost::url Boost::j
 
 taar_interface_settings(${PROJECT_NAME})
 
-install(TARGETS ${PROJECT_NAME} FILE_SET HEADERS)
+# Install the headers and a CMake package: find_package(boost-taar) provides
+# boost-taar::boost-taar, also reachable as Boost::taar.
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
+set(BOOST_TAAR_INSTALL_CMAKEDIR "${CMAKE_INSTALL_DATADIR}/cmake/${PROJECT_NAME}"
+    CACHE STRING "Install directory of the boost-taar CMake package files.")
+
+install(TARGETS ${PROJECT_NAME} EXPORT ${PROJECT_NAME}-targets FILE_SET HEADERS)
+install(
+    EXPORT ${PROJECT_NAME}-targets
+    NAMESPACE ${PROJECT_NAME}::
+    DESTINATION ${BOOST_TAAR_INSTALL_CMAKEDIR})
+
+configure_package_config_file(
+    cmake/${PROJECT_NAME}-config.cmake.in
+    ${PROJECT_NAME}-config.cmake
+    INSTALL_DESTINATION ${BOOST_TAAR_INSTALL_CMAKEDIR})
+write_basic_package_version_file(
+    ${PROJECT_NAME}-config-version.cmake
+    COMPATIBILITY SameMajorVersion
+    ARCH_INDEPENDENT)
+install(
+    FILES
+        ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}-config.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}-config-version.cmake
+    DESTINATION ${BOOST_TAAR_INSTALL_CMAKEDIR})
 
 if(ENABLE_CLANG_TIDY)
-    include(${CMAKE_SOURCE_DIR}/cmake/clang-tidy.cmake)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/clang-tidy.cmake)
     enable_clang_tidy_for(${PROJECT_NAME})
 endif()
 
-# enable testing
-include(CTest)
-add_subdirectory(test)
+# Tests and examples are built by default only when taar is the top-level
+# project, not when a parent project pulls it in (FetchContent, CPM).
+option(BOOST_TAAR_BUILD_TESTS "Build the boost-taar tests." ${PROJECT_IS_TOP_LEVEL})
+option(BOOST_TAAR_BUILD_EXAMPLES "Build the boost-taar examples." ${PROJECT_IS_TOP_LEVEL})
 
-# examples
-add_subdirectory(example)
+if(BOOST_TAAR_BUILD_TESTS)
+    include(CTest)
+    add_subdirectory(test)
+endif()
+
+if(BOOST_TAAR_BUILD_EXAMPLES)
+    add_subdirectory(example)
+endif()
 

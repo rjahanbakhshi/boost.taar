@@ -1,0 +1,13 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(Boost 1.84 CONFIG COMPONENTS json url)
+
+include("${CMAKE_CURRENT_LIST_DIR}/boost-taar-targets.cmake")
+
+# The name add_subdirectory and Boost superproject builds provide.
+if(NOT TARGET Boost::taar)
+    add_library(Boost::taar ALIAS boost-taar::boost-taar)
+endif()
+
+check_required_components(boost-taar)

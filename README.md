@@ -240,6 +240,67 @@ taar::handler::rest([](principal const& who) { return who.name; },
 | [websocket_server](example/websocket_server.cpp) | WebSocket upgrade through a raw handler |
 | [proxy_server](example/proxy_server.cpp) | a forwarding proxy |
 
+## Using taar in your project
+
+taar is header-only. It needs Boost 1.84 or newer with the compiled
+Boost.JSON and Boost.URL, and a C++20 compiler. Find Boost **before** adding
+taar: taar uses the Boost targets it finds.
+
+### With CPM or FetchContent (no install step)
+
+The quickest way: [CPM](https://github.com/cpm-cmake/CPM.cmake) fetches taar
+at configure time. Tests and examples are only built when taar is the
+top-level project, so only the library is added to your build.
+
+```cmake
+cmake_minimum_required(VERSION 3.28)
+project(app LANGUAGES CXX)
+
+find_package(Boost 1.84 CONFIG REQUIRED COMPONENTS json url)
+
+file(DOWNLOAD
+    https://github.com/cpm-cmake/CPM.cmake/releases/download/v0.43.2/CPM.cmake
+    ${CMAKE_BINARY_DIR}/cmake/CPM.cmake)
+include(${CMAKE_BINARY_DIR}/cmake/CPM.cmake)
+
+CPMAddPackage("gh:rjahanbakhshi/boost.taar#master") # or a release tag newer than 1.0.1
+
+add_executable(app main.cpp)
+target_link_libraries(app PRIVATE Boost::taar)
+```
+
+Plain FetchContent works the same way:
+
+```cmake
+find_package(Boost 1.84 CONFIG REQUIRED COMPONENTS json url)
+
+include(FetchContent)
+FetchContent_Declare(boost_taar
+    GIT_REPOSITORY https://github.com/rjahanbakhshi/boost.taar.git
+    GIT_TAG master) # or a release tag newer than 1.0.1
+FetchContent_MakeAvailable(boost_taar)
+
+target_link_libraries(app PRIVATE Boost::taar)
+```
+
+### Installed
+
+```bash
+cmake -B build -S . -DBOOST_TAAR_BUILD_TESTS=OFF -DBOOST_TAAR_BUILD_EXAMPLES=OFF
+cmake --install build --prefix /opt/taar
+```
+
+```cmake
+find_package(boost-taar CONFIG REQUIRED) # finds Boost itself
+target_link_libraries(app PRIVATE boost-taar::boost-taar)
+```
+
+Run CMake with `-DCMAKE_PREFIX_PATH=/opt/taar` (plus wherever Boost is).
+
+`Boost::taar` names the library in every setup, including the installed
+package and the Boost superproject. Programs that use TLS also link
+`OpenSSL::SSL`.
+
 ## Configuring the build directory
 
 Execute the following commands from the project's root directory to configure
