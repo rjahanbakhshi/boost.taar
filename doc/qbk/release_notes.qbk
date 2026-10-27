@@ -17,6 +17,14 @@
   and Apple Clang 17; C++23 on GCC 14, Clang 20, MSVC 2026 and Apple
   Clang 21; C++26 on GCC 15 and Clang 22 with libc++; and runs ASan,
   UBSan and TSan jobs.
+* Boost CMake integration tests, as in other Boost libraries:
+  `test/cmake_subdir_test` consumes taar with `add_subdirectory` next to
+  its dependencies' sources, and `test/cmake_install_test` with
+  `find_package(Boost CONFIG COMPONENTS taar)` after the superproject's
+  `cmake --install`. Both build `test/quick.cpp`, which serves and requests
+  one REST route and is also a b2 test. The `add_subdirectory` case now
+  configures taar as a Boost library instead of looking for an installed
+  Boost.
 
 [heading 1.0.1]
 

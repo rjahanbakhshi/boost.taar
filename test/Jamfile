@@ -97,3 +97,7 @@ run
     : # requirements
     : boost_taar_test
     ;
+
+# The consumer program the CMake integration tests (cmake_subdir_test,
+# cmake_install_test) build.
+run quick.cpp ;

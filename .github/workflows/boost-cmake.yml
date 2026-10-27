@@ -1,0 +1,104 @@
+name: Boost CMake
+
+# The Boost CMake integration tests: taar consumed with add_subdirectory
+# next to its dependencies' sources (test/cmake_subdir_test), and after
+# `cmake --install` from the superproject with find_package
+# (test/cmake_install_test).
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'CMakeLists.txt'
+      - 'include/**'
+      - 'test/quick.cpp'
+      - 'test/cmake_subdir_test/**'
+      - 'test/cmake_install_test/**'
+      - '.github/workflows/boost-cmake.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'CMakeLists.txt'
+      - 'include/**'
+      - 'test/quick.cpp'
+      - 'test/cmake_subdir_test/**'
+      - 'test/cmake_install_test/**'
+      - '.github/workflows/boost-cmake.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: boost-cmake-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  cmake-test:
+    name: ${{ matrix.test }}
+    runs-on: ubuntu-24.04
+
+    strategy:
+      fail-fast: false
+      matrix:
+        test: [cmake_subdir_test, cmake_install_test]
+
+    env:
+      BOOST_BRANCH: develop
+      TAAR_LIB_DIR: ${{ github.workspace }}/boost-modular/libs/taar
+      CC: gcc-13
+      CXX: g++-13
+
+    steps:
+      - name: Checkout taar
+        uses: actions/checkout@v4
+        with:
+          path: taar
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build
+
+      - name: Clone Boost super-project
+        run: |
+          git clone -b "$BOOST_BRANCH" --depth=1 \
+            https://github.com/boostorg/boost.git boost-modular
+          cd boost-modular
+          git submodule update --init --depth=1 --jobs=8 \
+            libs/config libs/headers libs/predef \
+            tools/boostdep tools/boost_install tools/cmake
+
+      # The library must be a real directory under libs/: the tests reach
+      # the other libraries through ../../.. from their own directory.
+      - name: Slot taar into the super-project
+        run: |
+          rm -rf "$TAAR_LIB_DIR"
+          mv taar "$TAAR_LIB_DIR"
+
+      - name: Pull the submodules taar transitively needs
+        working-directory: boost-modular
+        run: |
+          python ./tools/boostdep/depinst/depinst.py \
+            --git_args "--jobs 8" taar
+
+      - name: Add_subdirectory test
+        if: matrix.test == 'cmake_subdir_test'
+        run: |
+          cmake -G Ninja -S "$TAAR_LIB_DIR/test/cmake_subdir_test" -B build \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j
+          cmake --build build --target check
+
+      - name: Install test
+        if: matrix.test == 'cmake_install_test'
+        run: |
+          prefix="$RUNNER_TEMP/boost-prefix"
+          cmake -G Ninja -S boost-modular -B build-boost \
+            -DBOOST_INCLUDE_LIBRARIES=taar \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$prefix"
+          cmake --build build-boost -j
+          cmake --install build-boost
+          cmake -G Ninja -S "$TAAR_LIB_DIR/test/cmake_install_test" -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$prefix"
+          cmake --build build -j
+          cmake --build build --target check

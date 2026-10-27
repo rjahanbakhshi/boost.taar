@@ -107,6 +107,24 @@ cd ~/src/boost-modular
 ./b2 libs/taar/test cxxstd=20
 ```
 
+Run the Boost CMake integration tests. They reach the other libraries
+through `../../..`, so taar must be a real directory under `libs/` (CMake
+resolves a symlink to its target):
+
+```bash
+# taar added with add_subdirectory next to its dependencies' sources
+cmake -S libs/taar/test/cmake_subdir_test -B /tmp/subdir
+cmake --build /tmp/subdir --target quick check
+
+# taar installed by the superproject and found with find_package
+cmake -S . -B /tmp/boost -DBOOST_INCLUDE_LIBRARIES=taar \
+    -DCMAKE_INSTALL_PREFIX=/tmp/boost-prefix
+cmake --build /tmp/boost && cmake --install /tmp/boost
+cmake -S libs/taar/test/cmake_install_test -B /tmp/install \
+    -DCMAKE_PREFIX_PATH=/tmp/boost-prefix
+cmake --build /tmp/install --target quick check
+```
+
 Build the documentation. The toolchain requirements:
 
 - `doxygen`: extracts the reference content from header comments.

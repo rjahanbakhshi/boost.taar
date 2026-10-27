@@ -30,12 +30,16 @@ function(taar_interface_settings target)
 endfunction()
 
 #
-# Inside the Boost superproject (add_subdirectory from boost/CMakeLists.txt):
-# behave like a Boost library. The superproject scans the Boost::<lib> names
-# below (one per line) to resolve the dependencies of
-# BOOST_INCLUDE_LIBRARIES=taar, and installs the target with boost_install.
+# Inside the Boost superproject (add_subdirectory from boost/CMakeLists.txt),
+# or added with add_subdirectory next to the other Boost libraries' sources
+# (no Boost package found): behave like a Boost library. The superproject
+# scans the Boost::<lib> names below (one per line) to resolve the
+# dependencies of BOOST_INCLUDE_LIBRARIES=taar, and installs the target with
+# boost_install. test/cmake_subdir_test and test/cmake_install_test exercise
+# both uses.
 #
-if(BOOST_SUPERPROJECT_VERSION AND NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR AND
+   (BOOST_SUPERPROJECT_VERSION OR NOT Boost_FOUND))
     project(boost_taar VERSION "${BOOST_SUPERPROJECT_VERSION}" LANGUAGES CXX)
 
     add_library(boost_taar INTERFACE)
