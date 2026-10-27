@@ -263,7 +263,7 @@ file(DOWNLOAD
     ${CMAKE_BINARY_DIR}/cmake/CPM.cmake)
 include(${CMAKE_BINARY_DIR}/cmake/CPM.cmake)
 
-CPMAddPackage("gh:rjahanbakhshi/boost.taar#master") # or a release tag newer than 1.0.1
+CPMAddPackage("gh:rjahanbakhshi/boost.taar@1.1.0")
 
 add_executable(app main.cpp)
 target_link_libraries(app PRIVATE Boost::taar)
@@ -277,7 +277,7 @@ find_package(Boost 1.84 CONFIG REQUIRED COMPONENTS json url)
 include(FetchContent)
 FetchContent_Declare(boost_taar
     GIT_REPOSITORY https://github.com/rjahanbakhshi/boost.taar.git
-    GIT_TAG master) # or a release tag newer than 1.0.1
+    GIT_TAG v1.1.0)
 FetchContent_MakeAvailable(boost_taar)
 
 target_link_libraries(app PRIVATE Boost::taar)

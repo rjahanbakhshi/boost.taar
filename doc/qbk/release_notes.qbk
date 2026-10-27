@@ -7,7 +7,7 @@
 
 [section:release_notes Release Notes]
 
-[heading Unreleased]
+[heading 1.1.0]
 
 * C++20 is now the minimum standard (was C++23); nothing in the library
   required C++23. CMake requests `cxx_std_20` as a usage requirement, so a

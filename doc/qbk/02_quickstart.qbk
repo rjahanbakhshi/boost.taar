@@ -47,13 +47,13 @@ the Boost targets it finds.
     find_package(Boost 1.84 CONFIG REQUIRED COMPONENTS json url)
 
     # CPM (after including CPM.cmake)
-    CPMAddPackage("gh:rjahanbakhshi/boost.taar#master")
+    CPMAddPackage("gh:rjahanbakhshi/boost.taar@1.1.0")
 
     # or FetchContent
     include(FetchContent)
     FetchContent_Declare(boost_taar
         GIT_REPOSITORY https://github.com/rjahanbakhshi/boost.taar.git
-        GIT_TAG master)
+        GIT_TAG v1.1.0)
     FetchContent_MakeAvailable(boost_taar)
 
     target_link_libraries(app PRIVATE Boost::taar)
