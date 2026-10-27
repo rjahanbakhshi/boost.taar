@@ -77,7 +77,7 @@ struct cors
             return;
         }
         bool const any = !allow_credentials &&
-            std::ranges::find(allowed_origins, "*") != allowed_origins.end();
+            std::ranges::find(allowed_origins, std::string_view {"*"}) != allowed_origins.end();
         if (any)
         {
             response.set(http::field::access_control_allow_origin, "*");

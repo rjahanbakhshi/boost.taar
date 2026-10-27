@@ -64,6 +64,7 @@
 #include <boost/url/url_view.hpp>
 #include <functional>
 #include <optional>
+#include <string_view>
 #include <memory>
 #include <type_traits>
 #include <vector>
@@ -1915,8 +1916,8 @@ private:
             }
         }
         if (head_from_get_ &&
-            std::ranges::find(methods, "GET") != methods.end() &&
-            std::ranges::find(methods, "HEAD") == methods.end())
+            std::ranges::find(methods, std::string_view {"GET"}) != methods.end() &&
+            std::ranges::find(methods, std::string_view {"HEAD"}) == methods.end())
         {
             methods.push_back("HEAD");
         }
