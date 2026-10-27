@@ -13,10 +13,13 @@
   required C++23. CMake requests `cxx_std_20` as a usage requirement, so a
   consumer can build with a newer standard. The Conan recipe checks for
   C++20 at least.
-* CI tests C++20 on GCC 13, Clang 18 (libstdc++ and libc++), MSVC 2022
-  and Apple Clang 17; C++23 on GCC 14, Clang 20, MSVC 2026 and Apple
-  Clang 21; C++26 on GCC 15 and Clang 22 with libc++; and runs ASan,
-  UBSan and TSan jobs.
+* CI tests C++20 on GCC 13, Clang 17 and 18 (libstdc++ and libc++),
+  MSVC 2022 and Apple Clang 17; C++23 on GCC 14, Clang 21, MSVC 2026 and
+  Apple Clang 21; C++26 on GCC 15 and Clang 22 with libc++; and runs
+  ASan, UBSan and TSan jobs. GCC 12 is not supported (no `<format>`).
+* Fixed: GCC 15 in C++26 mode rejected `std::ranges::find` of a string
+  literal in a vector of strings (the 405 `Allow` computation and the CORS
+  wildcard check).
 * Boost CMake integration tests, as in other Boost libraries:
   `test/cmake_subdir_test` consumes taar with `add_subdirectory` next to
   its dependencies' sources, and `test/cmake_install_test` with

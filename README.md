@@ -335,17 +335,23 @@ C++20 is the minimum. CI builds and runs the tests with:
 
 | Standard | Toolchains |
 |---|---|
-| C++20 | GCC 13, Clang 18 (libstdc++ and libc++), MSVC 2022 (v143), Apple Clang 17 (Xcode 16.4) |
-| C++23 | GCC 14, Clang 20, MSVC 2026 (v145), Apple Clang 21 (Xcode 26.6) |
+| C++20 | GCC 13, Clang 17, Clang 18 (libstdc++ and libc++), MSVC 2022 (v143), Apple Clang 17 (Xcode 16.4) |
+| C++23 | GCC 14, Clang 21, MSVC 2026 (v145), Apple Clang 21 (Xcode 26.6) |
 | C++26 | GCC 15, Clang 22 with libc++ (experimental) |
 
 plus AddressSanitizer/UndefinedBehaviorSanitizer (GCC 14) and
-ThreadSanitizer (Clang 18) jobs, experimental probes of GCC 12 and Clang 17
-below the supported floor, and the B2 build in the Boost superproject with
-GCC 13 (C++20) and Clang 18 (C++23). The macOS jobs are experimental while
-two macOS-only test failures are open.
+ThreadSanitizer (Clang 18) jobs, the B2 build in the Boost superproject
+with GCC 13 (C++20) and Clang 18 (C++23), and the Boost CMake integration
+tests. The macOS and TSan jobs are experimental until they have a record
+of clean runs.
 
 Notes:
+- GCC 12 and older are not supported: their libstdc++ has no `<format>`.
+- Clang 20.1 with libstdc++ 14 in C++23 mode cannot call `std::bind_front`
+  objects (a toolchain bug, not specific to taar); libstdc++ 15 or C++20
+  mode works.
+- Boost 1.86's Asio does not build against OpenSSL 4; use OpenSSL 3 for
+  TLS with that Boost.
 - CMake 3.28 or newer is required; Ubuntu 22.04 ships 3.22.
 - On Windows, use the CMake bundled with Visual Studio (3.31 in VS 2022, 4.2
   in VS 2026); system CMake 3.27 is too old.
