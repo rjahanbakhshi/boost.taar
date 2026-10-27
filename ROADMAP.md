@@ -116,7 +116,7 @@ Deliberate, not planned.
 
 - C++26 static reflection (P2996, with annotations from P3394) as the
   replacement for most of the hand-written introspection, behind a
-  feature check so C++23 builds keep the current machinery:
+  feature check so C++20 and C++23 builds keep the current machinery:
   - callable signature detection (`type_traits/callable.hpp`,
     `has_call_operator`) and the concepts built on it (`string_like`,
     `container_like`, `numeric_type`, `specialization_of`), which today

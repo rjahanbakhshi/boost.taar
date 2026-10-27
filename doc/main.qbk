@@ -11,7 +11,7 @@
     [quickbook 1.7]
     [version 1.0.1]
     [copyright 2021-2026 Reza Jahanbakhshi]
-    [purpose HTTP server building blocks for C++23.]
+    [purpose HTTP server building blocks for C++20.]
     [license
         Distributed under the Boost Software License, Version 1.0.
         (See accompanying file LICENSE_1_0.txt or copy at
@@ -40,7 +40,7 @@
 
 [heading Overview]
 
-Boost.Taar is a portable, header-only C++23 library that provides
+Boost.Taar is a portable, header-only C++20 library that provides
 ergonomic building blocks for writing HTTP servers on top of
 __Asio__, __Beast__, __Url__, and __Json__. It is licensed under the
 Boost Software License, Version 1.0.

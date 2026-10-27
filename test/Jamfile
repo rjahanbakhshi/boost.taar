@@ -18,7 +18,7 @@ project /boost/taar/test
         <library>/boost/test//boost_unit_test_framework
         <library>ssl
         <library>crypto
-        <cxxstd>23
+        <cxxstd>20
         <toolset>msvc:<cxxflags>/bigobj
         <toolset>msvc:<cxxflags>/Zc\:preprocessor
         <toolset>msvc:<cxxflags>/Zc\:__cplusplus

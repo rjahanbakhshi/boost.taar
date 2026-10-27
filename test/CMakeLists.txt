@@ -7,11 +7,13 @@ endif()
 find_package(OpenSSL REQUIRED)
 
 add_executable(${PROJECT_NAME})
-set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 23)
 
+# No C++20 modules here: skip the dependency scan, which needs
+# clang-scan-deps with Clang and Ninja.
 set_target_properties(
-    ${PROJECT_NAME} PROPERTIES UNITY_BUILD
-    ${ENABLE_UNITY_BUILD})
+    ${PROJECT_NAME} PROPERTIES
+    UNITY_BUILD ${ENABLE_UNITY_BUILD}
+    CXX_SCAN_FOR_MODULES OFF)
 
 # Defines min/max macros before including every header: keep it out of
 # unity batches so the macros cannot leak into other test files.

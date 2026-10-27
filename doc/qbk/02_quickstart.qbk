@@ -24,8 +24,8 @@ you can write with it, and a tour of the idioms you will see again and again:
 
 [section:requirements Requirements]
 
-* A C++23 conforming compiler. Boost.Taar is exercised on recent GCC, Clang
-  and MSVC toolchains.
+* A C++20 conforming compiler. Boost.Taar is tested as C++20, C++23 and
+  C++26 on GCC, Clang, Apple Clang and MSVC toolchains.
 * Boost 1.84 or later, with the __Asio__, __Beast__, __Url__, __Json__, and
   __System__ libraries available.
 * CMake 3.28 or later if you build against the bundled `CMakeLists.txt`.

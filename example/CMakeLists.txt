@@ -27,7 +27,7 @@ endif()
 
 foreach(example IN LISTS TAAR_EXAMPLES)
     add_executable(${example} EXCLUDE_FROM_ALL ${example}.cpp)
-    set_target_properties(${example} PROPERTIES CXX_STANDARD 23 UNITY_BUILD ${ENABLE_UNITY_BUILD})
+    set_target_properties(${example} PROPERTIES UNITY_BUILD ${ENABLE_UNITY_BUILD} CXX_SCAN_FOR_MODULES OFF)
     target_link_libraries(${example} PRIVATE boost-taar)
 endforeach()
 

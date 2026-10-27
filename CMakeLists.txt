@@ -59,8 +59,8 @@ if(BOOST_SUPERPROJECT_VERSION AND NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SO
             Boost::url
     )
 
-    if(NOT CMAKE_VERSION VERSION_LESS 3.20)
-        target_compile_features(boost_taar INTERFACE cxx_std_23)
+    if(NOT CMAKE_VERSION VERSION_LESS 3.12)
+        target_compile_features(boost_taar INTERFACE cxx_std_20)
     endif()
 
     taar_interface_settings(boost_taar)
@@ -103,7 +103,9 @@ find_package(Boost 1.84 CONFIG COMPONENTS url json system REQUIRED)
 
 add_library(${PROJECT_NAME} INTERFACE)
 add_library(Boost::taar ALIAS ${PROJECT_NAME})
-set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 23)
+# C++20 is the minimum; consumers (and CI) may build with a newer standard
+# through CMAKE_CXX_STANDARD or Conan's compiler.cppstd.
+target_compile_features(${PROJECT_NAME} INTERFACE cxx_std_20)
 
 target_sources(
     ${PROJECT_NAME}

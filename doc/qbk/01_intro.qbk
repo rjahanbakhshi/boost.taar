@@ -7,7 +7,7 @@
 
 [section:intro Introduction]
 
-Boost.Taar is a portable, header-only C++23 library that provides building
+Boost.Taar is a portable, header-only C++20 library that provides building
 blocks for writing HTTP servers on top of __Asio__, __Beast__,
 __Url__, and __Json__.
 

@@ -26,8 +26,8 @@ class BoostTaarConan(ConanFile):
     def requirements(self):
         self.requires("boost/1.86.0")
 
-#    def validate(self):
-#        check_min_cppstd(self, 23)
+    def validate(self):
+        check_min_cppstd(self, 20)
 
     def layout(self):
         cmake_layout(self)

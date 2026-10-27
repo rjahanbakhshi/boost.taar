@@ -5,7 +5,7 @@
 [![Docs](https://github.com/rjahanbakhshi/boost.taar/actions/workflows/docs.yml/badge.svg?branch=master)](https://github.com/rjahanbakhshi/boost.taar/actions/workflows/docs.yml)
 [![License: BSL-1.0](https://img.shields.io/badge/License-BSL--1.0-blue.svg)](https://www.boost.org/LICENSE_1_0.txt)
 
-A C++23 header-only library for building HTTP services on Boost.Asio,
+A C++20 header-only library for building HTTP services on Boost.Asio,
 Boost.Beast, Boost.URL and Boost.JSON. Write a plain C++ function once and
 serve it as a **REST** route, a **JSON-RPC 2.0** method and an **MCP**
 (Model Context Protocol) tool, with an **OpenAPI** document generated from
@@ -72,7 +72,8 @@ Documentation: <https://rjahanbakhshi.github.io/boost.taar/>
 
 ## Requirements
 
-- A C++23 compiler (see [tested compilers](#tested-compilers-and-platforms)).
+- A C++20 compiler (see [tested compilers](#tested-compilers-and-platforms));
+  newer standards are supported and tested in CI.
 - Boost 1.84 or newer (Asio, Beast, URL, JSON, System, Describe; 1.86 via
   Conan). OpenSSL for TLS.
 - CMake 3.28 or newer.
@@ -271,7 +272,8 @@ Two project-local profiles are provided:
 - `profiles/windows-vs2026.profile`: Visual Studio 2026, MSVC v145
   (`compiler.version=195`).
 
-Both target `compiler.cppstd=23` and force the Ninja generator for Conan
+Both target `compiler.cppstd=20` (pass `-s compiler.cppstd=23` for a newer
+standard) and force the Ninja generator for Conan
 dependency builds. From a Visual Studio Developer Command Prompt for the
 matching VS version:
 
@@ -287,7 +289,7 @@ ctest --preset conan-release
 
 Notes:
 - `conancenter` does not currently have prebuilt Boost binaries for
-  `compiler.cppstd=23` on these MSVC versions, so the first
+  every `compiler.cppstd` on these MSVC versions, so the first
   `conan install` will build Boost from source. Subsequent runs reuse
   the cached package.
 - The CMake on the system `PATH` must be at least 3.28 and recent enough
@@ -329,15 +331,24 @@ conan upload "boost-taar/$version" --only-recipe --remote your_conan_remote
 
 ## Tested compilers and platforms
 
-- GCC 14.1.1 on Arch Linux
-- GCC 13.2.0 on Ubuntu 24.04
-- GCC 11.2.0 on Ubuntu 22.04
-  - Note: The required CMake version is 3.28 which is newer than 3.22 shipped
-with Ubuntu 22.04
-- MSVC 19.44 (Visual Studio 2022 Professional 17.14, toolset v143) on Windows 10
-- MSVC 19.50 (Visual Studio 2026 Community, toolset v145) on Windows 10
-  - Use the CMake bundled with Visual Studio (3.31 in VS 2022, 4.2 in VS 2026);
-    system CMake 3.27 is too old.
+C++20 is the minimum. CI builds and runs the tests with:
+
+| Standard | Toolchains |
+|---|---|
+| C++20 | GCC 13, Clang 18 (libstdc++ and libc++), MSVC 2022 (v143), Apple Clang 17 (Xcode 16.4) |
+| C++23 | GCC 14, Clang 20, MSVC 2026 (v145), Apple Clang 21 (Xcode 26.6) |
+| C++26 | GCC 15, Clang 22 with libc++ (experimental) |
+
+plus AddressSanitizer/UndefinedBehaviorSanitizer (GCC 14) and
+ThreadSanitizer (Clang 18) jobs, experimental probes of GCC 12 and Clang 17
+below the supported floor, and the B2 build in the Boost superproject with
+GCC 13 (C++20) and Clang 18 (C++23). The macOS jobs are experimental while
+two macOS-only test failures are open.
+
+Notes:
+- CMake 3.28 or newer is required; Ubuntu 22.04 ships 3.22.
+- On Windows, use the CMake bundled with Visual Studio (3.31 in VS 2022, 4.2
+  in VS 2026); system CMake 3.27 is too old.
 
 ## Roadmap
 

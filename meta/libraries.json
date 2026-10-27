@@ -7,11 +7,11 @@
     "maintainers": [
         "Reza Jahanbakhshi <reza.jahanbakhshi -at- gmail.com>"
     ],
-    "description": "A C++23 header-only HTTP server framework on Boost.Asio, Boost.Beast, Boost.URL and Boost.JSON: composable request matchers, REST handlers with automatic argument extraction, static files, streaming requests and responses, TLS, and JSON-RPC 2.0 and MCP endpoints sharing the same handlers.",
+    "description": "A C++20 header-only HTTP server framework on Boost.Asio, Boost.Beast, Boost.URL and Boost.JSON: composable request matchers, REST handlers with automatic argument extraction, static files, streaming requests and responses, TLS, and JSON-RPC 2.0 and MCP endpoints sharing the same handlers.",
     "category": [
         "IO",
         "Concurrent",
         "String"
     ],
-    "cxxstd": "23"
+    "cxxstd": "20"
 }

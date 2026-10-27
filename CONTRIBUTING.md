@@ -104,7 +104,7 @@ Run the tests with B2:
 
 ```bash
 cd ~/src/boost-modular
-./b2 libs/taar/test cxxstd=23
+./b2 libs/taar/test cxxstd=20
 ```
 
 Build the documentation. The toolchain requirements:
@@ -146,9 +146,11 @@ should be a separate commit from any behavioural change.
 
 ### Language and headers
 
-- Boost.Taar is a header-only C++23 library. New code must compile cleanly
-  under the supported compilers (see the README), with `-Wall -Wextra` or
-  the MSVC equivalent.
+- Boost.Taar is a header-only C++20 library. New code must compile cleanly
+  as C++20, C++23 and C++26 under the supported compilers (see the README),
+  with `-Wall -Wextra` or the MSVC equivalent. Newer language or library
+  features are allowed only behind a feature-test macro with a C++20
+  fallback.
 - Every header lives under `include/boost/taar/<module>/<name>.hpp`. The
   include guard mirrors the path, e.g.
   `BOOST_TAAR_MATCHER_TARGET_HPP`.

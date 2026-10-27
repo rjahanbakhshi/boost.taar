@@ -3,7 +3,7 @@
 
 function(taar_compile_probe name must_fail)
     add_library(compile_probe_${name} OBJECT EXCLUDE_FROM_ALL ${name}.cpp)
-    set_target_properties(compile_probe_${name} PROPERTIES CXX_STANDARD 23)
+    set_target_properties(compile_probe_${name} PROPERTIES CXX_SCAN_FOR_MODULES OFF)
     target_link_libraries(compile_probe_${name} PRIVATE Boost::taar)
     add_test(
         NAME compile_fail.${name}

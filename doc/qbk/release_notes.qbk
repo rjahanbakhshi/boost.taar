@@ -7,6 +7,17 @@
 
 [section:release_notes Release Notes]
 
+[heading Unreleased]
+
+* C++20 is now the minimum standard (was C++23); nothing in the library
+  required C++23. CMake requests `cxx_std_20` as a usage requirement, so a
+  consumer can build with a newer standard. The Conan recipe checks for
+  C++20 at least.
+* CI tests C++20 on GCC 13, Clang 18 (libstdc++ and libc++), MSVC 2022
+  and Apple Clang 17; C++23 on GCC 14, Clang 20, MSVC 2026 and Apple
+  Clang 21; C++26 on GCC 15 and Clang 22 with libc++; and runs ASan,
+  UBSan and TSan jobs.
+
 [heading 1.0.1]
 
 * Connection timeouts, modelled on nginx: `basic_http::set_idle_timeout`
