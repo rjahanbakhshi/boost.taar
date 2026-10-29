@@ -22,7 +22,8 @@ be RPC or MCP results; REST and MCP sessions are separate stores.
 Deliberate, not planned.
 
 * HTTP/2 and HTTP/3: Beast is HTTP/1.1 only. Terminate h2/h3 in a reverse
-  proxy in front of the server.
+  proxy in front of the server; see
+  [link boost_taar.design.http_version Why HTTP/1.1 only?].
 * On-the-fly response compression (gzip, br, zstd): needs a compression
   dependency. Serve precompressed files (`htdocs` picks `file.br` /
   `file.gz` by `Accept-Encoding`) or compress in a proxy.

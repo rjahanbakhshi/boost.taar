@@ -26,6 +26,8 @@ reference documentation alone.
   responses.
 * [link boost_taar.design.layers Layers, not a framework]: how REST,
   JSON-RPC, MCP and OpenAPI sit on one HTTP transport.
+* [link boost_taar.design.http_version Why HTTP/1.1 only?]: why there is
+  no HTTP/2 or HTTP/3 transport, and how to deploy behind one.
 * [link boost_taar.design.contexts Contexts and keyed state]: the three
   scopes of state a handler can ask for, and how `context_store` keeps
   them safe.
@@ -392,6 +394,50 @@ int)` serve all three surfaces unchanged. Providers that read the
 HTTP request (`header_arg`, `cookie_arg`, `query_arg`) are accepted on
 every surface as well, because every call type carries the request it
 arrived on.
+
+[endsect]
+
+[section:http_version Why HTTP/1.1 only?]
+
+Taar's transport is a __Beast__ HTTP/1.1 session, and Beast implements
+HTTP/1.1 only. HTTP/2 and HTTP/3 are out of scope on purpose:
+
+* HTTP/2 needs its own framing, HPACK header compression, stream
+  multiplexing and flow control. Building that inside Taar would make it
+  an HTTP/2 implementation first and a handler library second.
+* HTTP/3 runs over QUIC, which is a transport stack of its own (UDP,
+  loss recovery, congestion control, TLS 1.3 integration). That belongs
+  in a networking library, not in a library built on top of one.
+
+The intended deployment terminates TLS and HTTP/2 or HTTP/3 in a reverse
+proxy or load balancer (nginx, Envoy, HAProxy, a cloud load balancer)
+and forwards to the Taar server over HTTP/1.1 with keep-alive. Clients
+still get what the newer protocols are for: multiplexing many requests
+over one connection, header compression, and faster connection setup.
+On the short hop between proxy and server, a pool of keep-alive
+connections costs little. Most HTTP/1.1 servers run this way in
+production, and it also keeps certificate management, rate limiting and
+compression in one place.
+
+Everything Taar serves works over HTTP/1.1:
+
+* REST and JSON-RPC are request/response;
+* MCP's Streamable HTTP transport is POST plus server-sent events;
+* streaming responses use chunked transfer encoding or server-sent
+  events;
+* WebSocket uses the HTTP/1.1 upgrade (`register_raw_handler`). A proxy
+  that accepts WebSocket over HTTP/2 (RFC 8441) still forwards it as an
+  HTTP/1.1 upgrade.
+
+The cases a proxy does not cover are protocols that need HTTP/2 end to
+end, such as gRPC. Taar does not implement them.
+
+The handler, JSON-RPC, MCP and OpenAPI layers depend on Beast's message
+types, not on how the bytes arrive (see
+[link boost_taar.design.layers Layers, not a framework]). If an HTTP/2
+transport that produces the same request and response types becomes
+available, in Beast or another Boost library, the same handlers could be
+served over it without changes to user code.
 
 [endsect]
 

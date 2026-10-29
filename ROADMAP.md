@@ -10,7 +10,8 @@ tackled one at a time; the order is a suggestion, not a promise.
 Deliberate, not planned.
 
 - HTTP/2 and HTTP/3: Beast is HTTP/1.1 only. Terminate h2/h3 in a reverse
-  proxy in front of the server.
+  proxy in front of the server; the design notes explain why
+  ([Why HTTP/1.1 only?](https://rjahanbakhshi.github.io/boost.taar/boost_taar/design.html#boost_taar.design.http_version)).
 - On-the-fly response compression (gzip, br, zstd): needs a compression
   dependency. Serve precompressed files (`htdocs` picks `file.br` /
   `file.gz` by `Accept-Encoding`) or compress in a proxy.
