@@ -62,6 +62,10 @@ the Boost targets it finds.
     find_package(boost-taar CONFIG REQUIRED)
     target_link_libraries(app PRIVATE boost-taar::boost-taar)
 
+With [@https://vcpkg.io vcpkg], install the `taar` port (`vcpkg install
+taar`, or list it in `vcpkg.json`); it brings Boost and provides the same
+installed package.
+
 Tests and examples are only built when taar is the top-level project.
 `Boost::taar` names the library in every setup: CPM, FetchContent, the
 installed package, and the Boost superproject. Programs that use TLS also

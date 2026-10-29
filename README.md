@@ -283,6 +283,22 @@ FetchContent_MakeAvailable(boost_taar)
 target_link_libraries(app PRIVATE Boost::taar)
 ```
 
+### With vcpkg
+
+taar is in the vcpkg registry as the `taar` port. It brings Boost with it.
+
+```bash
+vcpkg install taar
+```
+
+Or list `taar` under `dependencies` in your `vcpkg.json`, then configure
+with the vcpkg toolchain:
+
+```cmake
+find_package(boost-taar CONFIG REQUIRED)
+target_link_libraries(app PRIVATE boost-taar::boost-taar)
+```
+
 ### Installed
 
 ```bash
