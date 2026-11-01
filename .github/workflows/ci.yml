@@ -27,6 +27,7 @@ jobs:
             cc: gcc-13
             cxx: g++-13
             cppstd: 20
+            separate: true
 
           - name: linux-clang-17-cxx20
             os: ubuntu-24.04
@@ -54,6 +55,7 @@ jobs:
             os: windows-2022
             conan_profile: profiles/windows-vs2022.profile
             cppstd: 20
+            separate: true
 
           # Experimental until the macOS-only runtime failures are fixed.
           - name: macos-xcode-16.4-cxx20
@@ -77,6 +79,7 @@ jobs:
             cxx: clang++-21
             apt: clang-21
             cppstd: 23
+            separate: true
 
           - name: windows-msvc-2026-cxx23
             os: windows-2025
@@ -247,6 +250,13 @@ jobs:
       - name: Build examples
         run: cmake --build --preset conan-release -j --target examples
         shell: bash
+
+      - name: Test with separate compilation
+        if: matrix.separate
+        run: |
+          cmake --preset conan-release -DBOOST_TAAR_TEST_SEPARATE_COMPILATION=ON
+          cmake --build --preset conan-release -j --target boost-taar-test
+          ctest --preset conan-release --output-on-failure -R boost-taar-test
 
       # Install the CMake package and build a consumer against it with
       # find_package(boost-taar) (test/cmake_package_test). The Conan

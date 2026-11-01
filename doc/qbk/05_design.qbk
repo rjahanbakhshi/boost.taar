@@ -41,13 +41,24 @@ reference documentation alone.
 
 [section:why_header_only Why header-only?]
 
-Every public type in Taar is a template that instantiates differently for
-each user-supplied handler signature, request body, response body, and
-executor. There is no implementation that would benefit from being
-precompiled into a library: separating declaration from definition would
-force users to instantiate every combination explicitly. A header-only
-distribution keeps the build simple and matches the rest of the
-matcher/handler ecosystem on top of Boost.Beast and Boost.Asio.
+The binding layer has to be templates. `rest(f, path_arg("id"),
+json_body_arg())` is generated from the user's function signature: each
+argument is bound to its source and converted to the parameter's type,
+and the JSON Schema and OpenAPI description come from the same types.
+That is what lets one plain function serve REST, JSON-RPC and MCP without
+macros, code generation or hand-written schemas. It costs little: about
+0.1 s of compile time per route.
+
+The transport underneath is different. The session's read and write
+path and the TCP and TLS servers instantiate __Beast__ and __Asio__ over
+the same stream and body types in every program, and that is most of the
+compile time of a file that registers routes. Header-only stays the
+default, because it keeps the build simple; defining
+`BOOST_TAAR_SEPARATE_COMPILATION` compiles that part once instead, the
+way __Asio__ and __Beast__ offer separate compilation (see
+[link boost_taar.quickstart.separate_compilation Separate compilation]).
+It covers the default context: a session with a user context type
+(`basic_http<Context>`) is still instantiated where it is used.
 
 [endsect]
 

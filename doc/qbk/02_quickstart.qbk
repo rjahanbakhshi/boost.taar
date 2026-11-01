@@ -15,6 +15,8 @@ you can write with it, and a tour of the idioms you will see again and again:
   compilers, Boost components, and CMake version.
 * [link boost_taar.quickstart.installation Installation]: header-only
   drop-in, Boost super-project, and CMake/Conan integration.
+* [link boost_taar.quickstart.separate_compilation Separate compilation]:
+  compile the session and servers once instead of in every source file.
 * [link boost_taar.quickstart.hello A Hello World HTTP Server]: a
   complete program serving a single GET endpoint.
 * [link boost_taar.quickstart.tour A Whirlwind Tour]: stock responses,
@@ -73,6 +75,36 @@ link OpenSSL (`OpenSSL::SSL`).
 
 Inside a Boost super-project the library participates in the modular build
 through `build.jam`; no extra configuration is required.
+
+[endsect]
+
+[section:separate_compilation Separate compilation]
+
+Taar is header-only by default. Most of the compile time of a file that
+registers routes is the session's __Beast__ read and write path and the
+server loop, which are the same in every program. Separate compilation
+builds that part once:
+
+# Define `BOOST_TAAR_SEPARATE_COMPILATION` for the whole program.
+# Include `<boost/taar/src.hpp>` in exactly one source file.
+# If the program uses TLS, also include `<boost/taar/src_tls.hpp>` in one
+  source file.
+
+    // taar_src.cpp
+    #include <boost/taar/src.hpp>
+    #include <boost/taar/src_tls.hpp> // only with session::https / server::tls
+
+With CMake:
+
+    target_compile_definitions(app PRIVATE BOOST_TAAR_SEPARATE_COMPILATION)
+    target_sources(app PRIVATE taar_src.cpp)
+
+The other source files then use explicit instantiation declarations
+instead of instantiating `session::http`, `session::https`,
+`server::tcp` and `server::tls` themselves. The handler binding stays in
+the headers, since it is generated from your function signatures; a
+session with a user context type (`basic_http<Context>`) is also
+instantiated where it is used.
 
 [endsect]
 

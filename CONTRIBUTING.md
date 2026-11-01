@@ -52,6 +52,16 @@ directly.
    cmake --build build
    build/test/boost-taar-test
    ```
+
+   Changes to the session, the servers or the response writers should
+   also pass with separate compilation, where the tests see the explicit
+   instantiation declarations:
+
+   ```bash
+   cmake -B build-sep -S . -DCMAKE_BUILD_TYPE=Debug -DBOOST_TAAR_TEST_SEPARATE_COMPILATION=ON
+   cmake --build build-sep --target boost-taar-test
+   build-sep/test/boost-taar-test
+   ```
 5. Make sure the examples still build:
 
    ```bash

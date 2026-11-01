@@ -49,4 +49,8 @@ using https = basic_https<>;
 
 } // namespace boost::taar::session
 
+#ifdef BOOST_TAAR_SEPARATE_COMPILATION
+#include <boost/taar/session/detail/https_instantiations.hpp>
+#endif
+
 #endif // BOOST_TAAR_SESSION_HTTPS_HPP

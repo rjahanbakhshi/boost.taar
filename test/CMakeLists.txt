@@ -105,6 +105,14 @@ if(BOOST_SUPERPROJECT_VERSION)
     target_link_libraries(${PROJECT_NAME} PRIVATE Boost::included_unit_test_framework)
 endif()
 
+# Build the tests with BOOST_TAAR_SEPARATE_COMPILATION.
+option(BOOST_TAAR_TEST_SEPARATE_COMPILATION "Build the tests with BOOST_TAAR_SEPARATE_COMPILATION" OFF)
+if(BOOST_TAAR_TEST_SEPARATE_COMPILATION)
+    target_sources(${PROJECT_NAME} PRIVATE separate_compilation_src.cpp)
+    set_source_files_properties(separate_compilation_src.cpp PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE BOOST_TAAR_SEPARATE_COMPILATION)
+endif()
+
 add_test(
     NAME ${PROJECT_NAME}
     COMMAND ${PROJECT_NAME}

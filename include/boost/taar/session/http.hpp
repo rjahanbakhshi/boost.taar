@@ -1520,8 +1520,7 @@ private:
 /// @endcond
 };
 
-// Out-of-class definitions, so these large members are not implicitly
-// inline.
+// Out of class, so extern template suppresses them on GCC too.
 
 template <typename Context, typename Stream>
 basic_http<Context, Stream>::basic_http()
@@ -1985,5 +1984,9 @@ awaitable<boost::system::error_code> basic_http<Context, Stream>::read_body(
 using http = basic_http<>;
 
 } // namespace boost::taar::session
+
+#ifdef BOOST_TAAR_SEPARATE_COMPILATION
+#include <boost/taar/session/detail/http_instantiations.hpp>
+#endif
 
 #endif // BOOST_TAAR_SESSION_HTTP_HPP

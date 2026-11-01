@@ -7,6 +7,18 @@
 
 [section:release_notes Release Notes]
 
+[heading Unreleased]
+
+* Separate compilation: define `BOOST_TAAR_SEPARATE_COMPILATION` and
+  include `<boost/taar/src.hpp>` (and `<boost/taar/src_tls.hpp>` for TLS)
+  in one source file to compile `session::http`, `session::https`,
+  `server::tcp` and `server::tls` once instead of in every source file.
+  Header-only remains the default. See
+  [link boost_taar.quickstart.separate_compilation Separate compilation].
+* The session's constructor, connection loop and error-writing members
+  are now defined outside the class, so they are no longer implicitly
+  inline; behaviour is unchanged.
+
 [heading 1.1.0]
 
 * C++20 is now the minimum standard (was C++23); nothing in the library

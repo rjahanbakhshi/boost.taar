@@ -317,6 +317,27 @@ Run CMake with `-DCMAKE_PREFIX_PATH=/opt/taar` (plus wherever Boost is).
 package and the Boost superproject. Programs that use TLS also link
 `OpenSSL::SSL`.
 
+### Separate compilation
+
+taar is header-only by default. To compile the session and the servers
+once instead of in every file that registers routes, define
+`BOOST_TAAR_SEPARATE_COMPILATION` for the whole program and include
+`<boost/taar/src.hpp>` in one source file (plus `<boost/taar/src_tls.hpp>`
+if the program uses TLS), as with Asio and Beast:
+
+```cpp
+// taar_src.cpp
+#include <boost/taar/src.hpp>
+```
+
+```cmake
+target_compile_definitions(app PRIVATE BOOST_TAAR_SEPARATE_COMPILATION)
+target_sources(app PRIVATE taar_src.cpp)
+```
+
+The handler binding stays in the headers, since it is generated from your
+function signatures.
+
 ## Configuring the build directory
 
 Execute the following commands from the project's root directory to configure

@@ -274,4 +274,8 @@ template <typename SessionHandler>
 
 } // namespace boost::taar::server
 
+#ifdef BOOST_TAAR_SEPARATE_COMPILATION
+#include <boost/taar/server/detail/tcp_instantiations.hpp>
+#endif
+
 #endif // BOOST_TAAR_SERVER_TCP_HPP

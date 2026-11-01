@@ -197,10 +197,17 @@ target_sources(
         include/boost/taar/mcp/endpoint.hpp
         include/boost/taar/mcp/error.hpp
         include/boost/taar/openapi/generator.hpp
+        include/boost/taar/server/detail/tcp_instantiations.hpp
+        include/boost/taar/server/detail/tls_instantiations.hpp
         include/boost/taar/server/tcp.hpp
         include/boost/taar/server/tls.hpp
+        include/boost/taar/session/detail/http_instantiations.hpp
+        include/boost/taar/session/detail/https_instantiations.hpp
+        include/boost/taar/session/detail/instantiate.hpp
         include/boost/taar/session/http.hpp
         include/boost/taar/session/https.hpp
+        include/boost/taar/src.hpp
+        include/boost/taar/src_tls.hpp
         include/boost/taar/type_traits/always_false.hpp
         include/boost/taar/type_traits/callable.hpp
         include/boost/taar/type_traits/container_like.hpp
