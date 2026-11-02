@@ -242,7 +242,8 @@ taar::handler::rest([](principal const& who) { return who.name; },
 
 ## Using taar in your project
 
-taar is header-only. It needs Boost 1.84 or newer with the compiled
+taar is header-only by default ([separate compilation](#separate-compilation)
+is optional). It needs Boost 1.84 or newer with the compiled
 Boost.JSON and Boost.URL, and a C++20 compiler. Find Boost **before** adding
 taar: taar uses the Boost targets it finds.
 
@@ -336,7 +337,10 @@ target_sources(app PRIVATE taar_src.cpp)
 ```
 
 The handler binding stays in the headers, since it is generated from your
-function signatures.
+function signatures. For example, `hello_server` compiles in 4.6 s instead
+of 13.2 s (GCC 16, Debug); the
+[documentation](https://rjahanbakhshi.github.io/boost.taar/boost_taar/quickstart.html#boost_taar.quickstart.separate_compilation)
+has the full table.
 
 ## Configuring the build directory
 

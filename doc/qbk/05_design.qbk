@@ -10,8 +10,8 @@
 This chapter records the design decisions that are not obvious from the
 reference documentation alone.
 
-* [link boost_taar.design.why_header_only Why header-only?]: what would
-  be different if Taar were a compiled library.
+* [link boost_taar.design.why_header_only Why header-only?]: why the
+  binding stays in headers, and what separate compilation compiles once.
 * [link boost_taar.design.tag_invoke Tag invoke as the extension story]:
   why `tag_invoke` overloads instead of virtual functions or template
   specialisations.

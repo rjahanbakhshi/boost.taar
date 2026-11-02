@@ -33,7 +33,10 @@ callables and the same state objects: a JSON-RPC 2.0 endpoint, a Model
 Context Protocol (MCP) server endpoint, and an OpenAPI document generator.
 
 The library is header-only and does not require linking against a Taar
-binary. It does depend on the compiled Boost libraries that __Asio__,
+binary; an optional
+[link boost_taar.quickstart.separate_compilation separate compilation]
+mode compiles the session and servers once instead of in every source
+file. It does depend on the compiled Boost libraries that __Asio__,
 __Beast__, __Url__, __Json__, and __System__ require.
 
 [section:matchers Matchers]

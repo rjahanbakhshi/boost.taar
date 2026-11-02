@@ -36,7 +36,10 @@ you can write with it, and a tour of the idioms you will see again and again:
 
 [section:installation Installation]
 
-Taar is header-only. Drop the `include/` directory on your include path and
+Taar is header-only by default (see
+[link boost_taar.quickstart.separate_compilation Separate compilation] for
+compiling the session and servers once). Drop the `include/` directory on
+your include path and
 link against the compiled Boost libraries that __Asio__, __Beast__,
 __Url__, __Json__, and __System__ already require for your application.
 
@@ -105,6 +108,27 @@ instead of instantiating `session::http`, `session::https`,
 the headers, since it is generated from your function signatures; a
 session with a user context type (`basic_http<Context>`) is also
 instantiated where it is used.
+
+Compile time of one example source file, header-only and with separate
+compilation (Linux, Debug with `-g`, Boost 1.86; one machine, so treat
+the numbers as relative):
+
+[table
+    [[Example] [GCC 16] [GCC 16, separate] [Clang 23] [Clang 23, separate]]
+    [[`hello_server`]     [13.2 s] [4.6 s] [8.1 s]  [3.7 s]]
+    [[`rest_crud_server`] [18.4 s] [9.2 s] [10.7 s] [6.2 s]]
+    [[`mcp_server`]       [20.7 s] [9.6 s] [12.7 s] [6.9 s]]
+]
+
+The source file with `<boost/taar/src.hpp>` takes about 18 s (GCC) or
+10 s (Clang) and `<boost/taar/src_tls.hpp>` about 37 s or 20 s, but they
+are rebuilt only when taar, Boost or the compiler options change. The
+saving is in every other file and on every rebuild of the files that
+register routes; a one-file program built once is not faster.
+
+What remains in each file is mostly parsing the __Asio__ and __Beast__
+headers, plus the handler binding: about 0.1 s per route, whatever the
+handler's signature or return type.
 
 [endsect]
 
