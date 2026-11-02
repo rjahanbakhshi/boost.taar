@@ -648,35 +648,7 @@ private:
 
 /// @endcond
 public:
-    basic_http()
-    {
-        // The wrapper outlives moves of this object, so it captures the
-        // shared filter rather than `this`.
-        wrapped_soft_error_handler_ =
-            [settings = settings_](
-                failure const& f,
-                Stream& stream,
-                boost::beast::http::request_header<>& req,
-                cancellation_signals&) -> awaitable<bool>
-            {
-                // Request errors are answered; anything that maps to 500
-                // (a user exception, an internal or transport code) is
-                // escalated to the hard error handler with the same failure.
-                auto const status = http_status_for(f);
-                if (status == boost::beast::http::status::internal_server_error)
-                {
-                    throw taar::exception {f};
-                }
-                auto response = response_from(f.text());
-                response.result(status);
-                detail::finish_response(response, req.version(), detail::header_keep_alive(req), false);
-                detail::finish_header(*settings, req, response);
-                bool keep_alive = response.keep_alive();
-                co_await detail::write_response(
-                    stream, std::move(response), req.method() == boost::beast::http::verb::head, settings->send_timeout);
-                co_return keep_alive;
-            };
-    }
+    basic_http();
 
     /** Answer `405 Method Not Allowed` (with an `Allow` header) instead of
         `404` when no route matches but some route accepts the path under
@@ -826,324 +798,7 @@ public:
         template parameter, `boost::beast::tcp_stream` by default). On exit a TLS stream receives `close_notify` before the
         TCP shutdown.
     */
-    awaitable<void> operator()(Stream stream, cancellation_signals& signals)
-    {
-        namespace net = boost::asio;
-        namespace http = boost::beast::http;
-        namespace this_coro = net::this_coro;
-        using boost::beast::flat_buffer;
-
-        // Per-connection context. Created once on accept and carried
-        // across every keep-alive request on this connection. For the
-        // `no_context` specialisation the tuple is empty.
-        detail::contexts_for<Context> conn_ctx;
-        if constexpr (!std::is_same_v<Context, no_context>)
-        {
-            std::get<0>(conn_ctx) = std::make_shared<Context>();
-        }
-
-        // One buffer per connection: bytes of a pipelined request that arrive
-        // together with the previous one must survive into the next iteration.
-        flat_buffer buffer;
-
-        try
-        {
-            for (auto cs = co_await this_coro::cancellation_state;
-                cs.cancelled() == net::cancellation_type::none;
-                cs = co_await this_coro::cancellation_state)
-            {
-                // A write that hit the send timeout closed the socket.
-                if (!boost::beast::get_lowest_layer(stream).socket().is_open())
-                {
-                    break;
-                }
-
-                // Idle phase: wait for the first byte of the next request,
-                // unless pipelined bytes are already buffered. The stream's
-                // expiry closes an idle connection silently.
-                if (buffer.size() == 0)
-                {
-                    ::boost::taar::detail::expire_after(stream, idle_timeout_);
-                    auto [idle_ec, idle_sz] = co_await stream.async_read_some(
-                        buffer.prepare(first_read_size), use_awaitable_tuple);
-                    buffer.commit(idle_sz);
-                    ::boost::taar::detail::expire_never(stream);
-                    if (idle_ec)
-                    {
-                        if (idle_ec == boost::beast::error::timeout ||
-                            detail::is_clean_close(idle_ec) ||
-                            !boost::beast::get_lowest_layer(stream).socket().is_open())
-                        {
-                            // Idle timeout, peer closed, or shutdown.
-                            break;
-                        }
-                        throw taar::exception {failure {idle_ec}};
-                    }
-                }
-
-                // Read and parse the header and use the target to find the handler.
-                http::request_parser<http::buffer_body> header_parser;
-                header_parser.header_limit(request_header_limit_);
-                // The body limit is applied when the body is read (the
-                // matched handler decides whether it buffers or streams),
-                // not at header time, so a streaming route can accept a
-                // Content-Length beyond the limit.
-                header_parser.body_limit(boost::none);
-
-                // Header phase: from the first byte to the end of the header.
-                boost::system::error_code header_ec;
-                {
-                    ::boost::taar::detail::read_deadline<Stream> deadline {stream, header_timeout_};
-                    auto [read_ec, header_sz] = co_await http::async_read_header(
-                        stream,
-                        buffer,
-                        header_parser,
-                        use_awaitable_tuple);
-                    (void)header_sz;
-                    header_ec = read_ec;
-                    if (header_ec && deadline.expired()) header_ec = boost::beast::error::timeout;
-                }
-
-                if (header_ec == boost::beast::error::timeout)
-                {
-                    // Not an error of the server: answer 408 and close.
-                    co_await write_protocol_error(stream, failure {header_ec}, header_parser.get());
-                    break;
-                }
-
-                if (header_ec)
-                {
-                    if (detail::is_clean_close(header_ec))
-                    {
-                        // Idle keep-alive connection closed by the peer, or shutdown.
-                        break;
-                    }
-                    failure const f {header_ec};
-                    if (!detail::is_transport_error(header_ec))
-                    {
-                        co_await write_protocol_error(stream, f, header_parser.get());
-                    }
-                    // Invoke the hard error handler for server-side visibility.
-                    throw taar::exception {f};
-                }
-
-                auto& req_header = header_parser.get();
-                matcher::context context;
-                boost::urls::url_view parsed_target;
-                cookies parsed_cookies;
-
-                if (needs_parsed_target_)
-                {
-                    parsed_target = boost::urls::url_view(req_header.target());
-                }
-
-                if (needs_parsed_cookies_)
-                {
-                    auto r = req_header.equal_range(boost::beast::http::field::cookie);
-                    for (; r.first != r.second; ++r.first)
-                    {
-                        parse_cookies(r.first->value(), parsed_cookies);
-                    }
-                }
-
-                // Interceptors decide on the header alone: before a route is
-                // chosen, before 405/404 and HEAD handling, before any body
-                // byte is read. A rejection or a failure answers the request.
-                if (!interceptors_.empty())
-                {
-                    auto const answered = co_await run_interceptors(
-                        stream, header_parser, context, parsed_target, parsed_cookies, signals, conn_ctx);
-                    if (answered)
-                    {
-                        if (!*answered) break;
-                        continue;
-                    }
-                }
-
-                // Only the path arguments are reset between candidate
-                // routes: attributes set by interceptors must survive.
-                auto iter = std::ranges::find_if(matcher_handlers_,
-                    [&](auto&& matcher_handler) -> bool
-                    {
-                        context.path_args.clear();
-                        return matcher_handler.matcher(
-                            req_header,
-                            context,
-                            parsed_target,
-                            parsed_cookies);
-                    });
-
-                if (iter != matcher_handlers_.cend())
-                {
-                    if (!co_await iter->handler(
-                        *this,
-                        context,
-                        stream,
-                        buffer,
-                        header_parser,
-                        signals,
-                        conn_ctx))
-                    {
-                        // Handler instructed to close the session.
-                        break;
-                    }
-
-                    // Done with this request. Proceeding with the next one.
-                    continue;
-                }
-
-                // No handler found. A HEAD request may be served by a GET
-                // route (the handler sees HEAD; only the header is written).
-                if (head_from_get_ && req_header.method() == http::verb::head)
-                {
-                    req_header.method(http::verb::get);
-                    iter = std::ranges::find_if(matcher_handlers_,
-                        [&](auto&& matcher_handler) -> bool
-                        {
-                            context.path_args.clear();
-                            return matcher_handler.matcher(
-                                req_header,
-                                context,
-                                parsed_target,
-                                parsed_cookies);
-                        });
-                    req_header.method(http::verb::head);
-                    if (iter != matcher_handlers_.cend())
-                    {
-                        if (!co_await iter->handler(
-                            *this,
-                            context,
-                            stream,
-                            buffer,
-                            header_parser,
-                            signals,
-                            conn_ctx))
-                        {
-                            break;
-                        }
-                        continue;
-                    }
-                }
-
-                // 405 when some route knows this path under another method,
-                // otherwise 404. Either way the body must be consumed first.
-                auto const allow = method_not_allowed_enabled_
-                    ? allowed_methods(req_header, parsed_target, parsed_cookies)
-                    : std::string {};
-                auto keep_alive = req_header.keep_alive();
-                auto version = req_header.version();
-                if (req_header.has_content_length() || req_header.chunked())
-                {
-                    boost::system::error_code req_ec;
-                    std::size_t req_sz = 0;
-                    if (detail::declares_body_beyond(header_parser, request_body_limit_))
-                    {
-                        req_ec = http::error::body_limit;
-                    }
-                    http::request_parser<http::string_body> body_parser {std::move(header_parser)};
-                    body_parser.body_limit(request_body_limit_);
-                    if (!req_ec)
-                    {
-                        req_ec = co_await read_body(stream, buffer, body_parser);
-                    }
-                    (void)req_sz;
-
-                    if (req_ec)
-                    {
-                        failure const f {req_ec};
-                        if (!detail::is_transport_error(req_ec))
-                        {
-                            co_await write_protocol_error(stream, f, body_parser.get().base());
-                        }
-                        if (req_ec == boost::beast::error::timeout)
-                        {
-                            // Answered 408: the connection simply ends.
-                            break;
-                        }
-                        // Invoke the hard error handler for server-side visibility.
-                        throw taar::exception {f};
-                    }
-                    // Drain the body so the connection stays in keep-alive
-                    // state; the body itself is discarded.
-                    (void)body_parser.get();
-                }
-
-                http::response<http::empty_body> response {
-                    allow.empty() ? http::status::not_found : http::status::method_not_allowed, version};
-                if (!allow.empty())
-                {
-                    response.set(http::field::allow, allow);
-                }
-                response.keep_alive(keep_alive);
-                detail::finish_header(*settings_, req_header, response);
-                response.prepare_payload();
-                ::boost::taar::detail::expire_after(stream, settings_->send_timeout);
-                auto [resp_ec, resp_sz] = co_await http::async_write(
-                    stream,
-                    response,
-                    use_awaitable_tuple);
-                ::boost::taar::detail::expire_never(stream);
-
-                if (resp_ec == boost::beast::error::timeout)
-                {
-                    // The send timeout closed the connection: not an error.
-                    break;
-                }
-
-                if (resp_ec)
-                {
-                    // Invoke the hard error handler for server-side visibility.
-                    throw taar::exception {failure {resp_ec}};
-                }
-
-                if (!keep_alive)
-                {
-                    // Keep alive is not requested.
-                    break;
-                }
-            }
-        }
-        catch (...)
-        {
-            // Unrecoverable error. A taar::exception (a transport error, an
-            // escalated failure) is unwrapped as is; anything else is
-            // wrapped here, once.
-            hard_error_handler_(failure::from_exception(std::current_exception()));
-        }
-
-        // A raw handler may have taken the stream (a WebSocket upgrade):
-        // nothing is left to close here.
-        if (!boost::beast::get_lowest_layer(stream).socket().is_open())
-        {
-            co_return;
-        }
-        // The loop may have ended because shutdown was requested; the
-        // close sequence itself must still run to completion.
-        co_await this_coro::reset_cancellation_state();
-        co_await this_coro::throw_if_cancelled(false);
-
-        // Close the TLS layer first, if there is one, then half-close TCP.
-        if constexpr (requires { stream.async_shutdown(use_awaitable_tuple); })
-        {
-            boost::beast::get_lowest_layer(stream).expires_after(std::chrono::seconds {5});
-            auto [sec] = co_await stream.async_shutdown(use_awaitable_tuple);
-            (void)sec;
-        }
-        boost::system::error_code ec;
-        boost::beast::get_lowest_layer(stream).socket().shutdown(net::ip::tcp::socket::shutdown_send, ec); // NOLINT
-
-        // Lingering close: a request body left unread would otherwise make
-        // the kernel reset the connection and possibly discard the response
-        // still in flight. Read and discard, briefly, until the peer closes.
-        boost::beast::get_lowest_layer(stream).expires_after(std::chrono::milliseconds {250});
-        std::array<char, 4096> sink {};
-        for (std::size_t drained = 0; drained < 1024 * 1024;)
-        {
-            auto [rec, n] = co_await boost::beast::get_lowest_layer(stream).async_read_some(net::buffer(sink), use_awaitable_tuple);
-            if (rec) break;
-            drained += n;
-        }
-    }
+    awaitable<void> operator()(Stream stream, cancellation_signals& signals);
 
     template <typename MatcherType, typename RequestHandler>
     auto register_request_handler(
@@ -1765,78 +1420,13 @@ private:
         boost::urls::url_view const& parsed_target,
         cookies const& parsed_cookies,
         cancellation_signals& signals,
-        detail::contexts_for<Context> const& conn_ctx)
-    {
-        namespace http = boost::beast::http;
-        auto& req_header = header_parser.get();
-        bool const body_done = header_parser.is_done();
-
-        // Shielded like a plain handler: a shutdown lets them finish.
-        interceptor_result rejection;
-        std::exception_ptr eptr;
-        co_await detail::shield_from_cancellation();
-        try
-        {
-            for (auto& interceptor : interceptors_)
-            {
-                rejection = co_await interceptor(req_header, context, parsed_target, parsed_cookies, conn_ctx);
-                if (rejection) break;
-            }
-        }
-        catch (...)
-        {
-            eptr = std::current_exception();
-        }
-        bool const shutting_down = co_await detail::observe_shutdown();
-
-        if (!rejection && !eptr)
-        {
-            // The shutdown was observed here, so the handler will not see
-            // it: its answer must close the connection.
-            if (shutting_down) req_header.keep_alive(false);
-            co_return std::nullopt;
-        }
-
-        if (!body_done)
-        {
-            // The body was not read: the answer must announce the close.
-            req_header.keep_alive(false);
-        }
-
-        if (eptr)
-        {
-            bool const ka = co_await wrapped_soft_error_handler_(
-                failure::from_exception(eptr), stream, req_header, signals);
-            co_return ka && !shutting_down && body_done;
-        }
-
-        auto response = std::move(*rejection);
-        detail::finish_response(response, req_header.version(), req_header.keep_alive(), shutting_down);
-        detail::finish_header(*settings_, req_header, response);
-        bool const ka = response.keep_alive();
-        co_await detail::write_response(
-            stream, std::move(response), req_header.method() == http::verb::head, settings_->send_timeout);
-        co_return ka;
-    }
+        detail::contexts_for<Context> const& conn_ctx);
 
     /// Answer a protocol-level failure (malformed request, header or body too large) before closing.
     awaitable<void> write_protocol_error(
         Stream& stream,
         failure const& f,
-        boost::beast::http::request_header<> const& header)
-    {
-        namespace http = boost::beast::http;
-        unsigned const version = header.version() == 10 ? 10u : 11u;
-        http::response<http::empty_body> err_response {detail::protocol_error_status(f), version};
-        err_response.keep_alive(false);
-        err_response.prepare_payload();
-        detail::finish_header(*settings_, header, err_response);
-        ::boost::taar::detail::expire_after(stream, settings_->send_timeout);
-        auto [wec, wsz] = co_await http::async_write(stream, err_response, use_awaitable_tuple);
-        ::boost::taar::detail::expire_never(stream);
-        (void)wec;
-        (void)wsz;
-    }
+        boost::beast::http::request_header<> const& header);
 
     /** Read the rest of a request body into @a parser, waiting at most the
         body timeout for each piece.
@@ -1849,19 +1439,7 @@ private:
     awaitable<boost::system::error_code> read_body(
         Stream& stream,
         boost::beast::flat_buffer& buffer,
-        Parser& parser)
-    {
-        namespace http = boost::beast::http;
-        while (!parser.is_done())
-        {
-            ::boost::taar::detail::read_deadline<Stream> deadline {stream, body_timeout_};
-            auto [ec, n] = co_await http::async_read_some(stream, buffer, parser, use_awaitable_tuple);
-            (void)n;
-            if (ec && deadline.expired()) co_return boost::beast::error::timeout;
-            if (ec) co_return ec;
-        }
-        co_return boost::system::error_code {};
-    }
+        Parser& parser);
 
     /// Methods a route accepts, with a matcher for its path alone (for 405 and HEAD).
     struct route_methods_type
@@ -1942,6 +1520,461 @@ private:
 /// @endcond
 };
 
+// Out of class, so extern template suppresses them on GCC too.
+
+template <typename Context, typename Stream>
+basic_http<Context, Stream>::basic_http()
+{
+    // The wrapper outlives moves of this object, so it captures the
+    // shared filter rather than `this`.
+    wrapped_soft_error_handler_ =
+        [settings = settings_](
+            failure const& f,
+            Stream& stream,
+            boost::beast::http::request_header<>& req,
+            cancellation_signals&) -> awaitable<bool>
+        {
+            // Request errors are answered; anything that maps to 500
+            // (a user exception, an internal or transport code) is
+            // escalated to the hard error handler with the same failure.
+            auto const status = http_status_for(f);
+            if (status == boost::beast::http::status::internal_server_error)
+            {
+                throw taar::exception {f};
+            }
+            auto response = response_from(f.text());
+            response.result(status);
+            detail::finish_response(response, req.version(), detail::header_keep_alive(req), false);
+            detail::finish_header(*settings, req, response);
+            bool keep_alive = response.keep_alive();
+            co_await detail::write_response(
+                stream, std::move(response), req.method() == boost::beast::http::verb::head, settings->send_timeout);
+            co_return keep_alive;
+        };
+}
+
+template <typename Context, typename Stream>
+awaitable<void> basic_http<Context, Stream>::operator()(Stream stream, cancellation_signals& signals)
+{
+    namespace net = boost::asio;
+    namespace http = boost::beast::http;
+    namespace this_coro = net::this_coro;
+    using boost::beast::flat_buffer;
+
+    // Per-connection context. Created once on accept and carried
+    // across every keep-alive request on this connection. For the
+    // `no_context` specialisation the tuple is empty.
+    detail::contexts_for<Context> conn_ctx;
+    if constexpr (!std::is_same_v<Context, no_context>)
+    {
+        std::get<0>(conn_ctx) = std::make_shared<Context>();
+    }
+
+    // One buffer per connection: bytes of a pipelined request that arrive
+    // together with the previous one must survive into the next iteration.
+    flat_buffer buffer;
+
+    try
+    {
+        for (auto cs = co_await this_coro::cancellation_state;
+            cs.cancelled() == net::cancellation_type::none;
+            cs = co_await this_coro::cancellation_state)
+        {
+            // A write that hit the send timeout closed the socket.
+            if (!boost::beast::get_lowest_layer(stream).socket().is_open())
+            {
+                break;
+            }
+
+            // Idle phase: wait for the first byte of the next request,
+            // unless pipelined bytes are already buffered. The stream's
+            // expiry closes an idle connection silently.
+            if (buffer.size() == 0)
+            {
+                ::boost::taar::detail::expire_after(stream, idle_timeout_);
+                auto [idle_ec, idle_sz] = co_await stream.async_read_some(
+                    buffer.prepare(first_read_size), use_awaitable_tuple);
+                buffer.commit(idle_sz);
+                ::boost::taar::detail::expire_never(stream);
+                if (idle_ec)
+                {
+                    if (idle_ec == boost::beast::error::timeout ||
+                        detail::is_clean_close(idle_ec) ||
+                        !boost::beast::get_lowest_layer(stream).socket().is_open())
+                    {
+                        // Idle timeout, peer closed, or shutdown.
+                        break;
+                    }
+                    throw taar::exception {failure {idle_ec}};
+                }
+            }
+
+            // Read and parse the header and use the target to find the handler.
+            http::request_parser<http::buffer_body> header_parser;
+            header_parser.header_limit(request_header_limit_);
+            // The body limit is applied when the body is read (the
+            // matched handler decides whether it buffers or streams),
+            // not at header time, so a streaming route can accept a
+            // Content-Length beyond the limit.
+            header_parser.body_limit(boost::none);
+
+            // Header phase: from the first byte to the end of the header.
+            boost::system::error_code header_ec;
+            {
+                ::boost::taar::detail::read_deadline<Stream> deadline {stream, header_timeout_};
+                auto [read_ec, header_sz] = co_await http::async_read_header(
+                    stream,
+                    buffer,
+                    header_parser,
+                    use_awaitable_tuple);
+                (void)header_sz;
+                header_ec = read_ec;
+                if (header_ec && deadline.expired()) header_ec = boost::beast::error::timeout;
+            }
+
+            if (header_ec == boost::beast::error::timeout)
+            {
+                // Not an error of the server: answer 408 and close.
+                co_await write_protocol_error(stream, failure {header_ec}, header_parser.get());
+                break;
+            }
+
+            if (header_ec)
+            {
+                if (detail::is_clean_close(header_ec))
+                {
+                    // Idle keep-alive connection closed by the peer, or shutdown.
+                    break;
+                }
+                failure const f {header_ec};
+                if (!detail::is_transport_error(header_ec))
+                {
+                    co_await write_protocol_error(stream, f, header_parser.get());
+                }
+                // Invoke the hard error handler for server-side visibility.
+                throw taar::exception {f};
+            }
+
+            auto& req_header = header_parser.get();
+            matcher::context context;
+            boost::urls::url_view parsed_target;
+            cookies parsed_cookies;
+
+            if (needs_parsed_target_)
+            {
+                parsed_target = boost::urls::url_view(req_header.target());
+            }
+
+            if (needs_parsed_cookies_)
+            {
+                auto r = req_header.equal_range(boost::beast::http::field::cookie);
+                for (; r.first != r.second; ++r.first)
+                {
+                    parse_cookies(r.first->value(), parsed_cookies);
+                }
+            }
+
+            // Interceptors decide on the header alone: before a route is
+            // chosen, before 405/404 and HEAD handling, before any body
+            // byte is read. A rejection or a failure answers the request.
+            if (!interceptors_.empty())
+            {
+                auto const answered = co_await run_interceptors(
+                    stream, header_parser, context, parsed_target, parsed_cookies, signals, conn_ctx);
+                if (answered)
+                {
+                    if (!*answered) break;
+                    continue;
+                }
+            }
+
+            // Only the path arguments are reset between candidate
+            // routes: attributes set by interceptors must survive.
+            auto iter = std::ranges::find_if(matcher_handlers_,
+                [&](auto&& matcher_handler) -> bool
+                {
+                    context.path_args.clear();
+                    return matcher_handler.matcher(
+                        req_header,
+                        context,
+                        parsed_target,
+                        parsed_cookies);
+                });
+
+            if (iter != matcher_handlers_.cend())
+            {
+                if (!co_await iter->handler(
+                    *this,
+                    context,
+                    stream,
+                    buffer,
+                    header_parser,
+                    signals,
+                    conn_ctx))
+                {
+                    // Handler instructed to close the session.
+                    break;
+                }
+
+                // Done with this request. Proceeding with the next one.
+                continue;
+            }
+
+            // No handler found. A HEAD request may be served by a GET
+            // route (the handler sees HEAD; only the header is written).
+            if (head_from_get_ && req_header.method() == http::verb::head)
+            {
+                req_header.method(http::verb::get);
+                iter = std::ranges::find_if(matcher_handlers_,
+                    [&](auto&& matcher_handler) -> bool
+                    {
+                        context.path_args.clear();
+                        return matcher_handler.matcher(
+                            req_header,
+                            context,
+                            parsed_target,
+                            parsed_cookies);
+                    });
+                req_header.method(http::verb::head);
+                if (iter != matcher_handlers_.cend())
+                {
+                    if (!co_await iter->handler(
+                        *this,
+                        context,
+                        stream,
+                        buffer,
+                        header_parser,
+                        signals,
+                        conn_ctx))
+                    {
+                        break;
+                    }
+                    continue;
+                }
+            }
+
+            // 405 when some route knows this path under another method,
+            // otherwise 404. Either way the body must be consumed first.
+            auto const allow = method_not_allowed_enabled_
+                ? allowed_methods(req_header, parsed_target, parsed_cookies)
+                : std::string {};
+            auto keep_alive = req_header.keep_alive();
+            auto version = req_header.version();
+            if (req_header.has_content_length() || req_header.chunked())
+            {
+                boost::system::error_code req_ec;
+                std::size_t req_sz = 0;
+                if (detail::declares_body_beyond(header_parser, request_body_limit_))
+                {
+                    req_ec = http::error::body_limit;
+                }
+                http::request_parser<http::string_body> body_parser {std::move(header_parser)};
+                body_parser.body_limit(request_body_limit_);
+                if (!req_ec)
+                {
+                    req_ec = co_await read_body(stream, buffer, body_parser);
+                }
+                (void)req_sz;
+
+                if (req_ec)
+                {
+                    failure const f {req_ec};
+                    if (!detail::is_transport_error(req_ec))
+                    {
+                        co_await write_protocol_error(stream, f, body_parser.get().base());
+                    }
+                    if (req_ec == boost::beast::error::timeout)
+                    {
+                        // Answered 408: the connection simply ends.
+                        break;
+                    }
+                    // Invoke the hard error handler for server-side visibility.
+                    throw taar::exception {f};
+                }
+                // Drain the body so the connection stays in keep-alive
+                // state; the body itself is discarded.
+                (void)body_parser.get();
+            }
+
+            http::response<http::empty_body> response {
+                allow.empty() ? http::status::not_found : http::status::method_not_allowed, version};
+            if (!allow.empty())
+            {
+                response.set(http::field::allow, allow);
+            }
+            response.keep_alive(keep_alive);
+            detail::finish_header(*settings_, req_header, response);
+            response.prepare_payload();
+            ::boost::taar::detail::expire_after(stream, settings_->send_timeout);
+            auto [resp_ec, resp_sz] = co_await http::async_write(
+                stream,
+                response,
+                use_awaitable_tuple);
+            ::boost::taar::detail::expire_never(stream);
+
+            if (resp_ec == boost::beast::error::timeout)
+            {
+                // The send timeout closed the connection: not an error.
+                break;
+            }
+
+            if (resp_ec)
+            {
+                // Invoke the hard error handler for server-side visibility.
+                throw taar::exception {failure {resp_ec}};
+            }
+
+            if (!keep_alive)
+            {
+                // Keep alive is not requested.
+                break;
+            }
+        }
+    }
+    catch (...)
+    {
+        // Unrecoverable error. A taar::exception (a transport error, an
+        // escalated failure) is unwrapped as is; anything else is
+        // wrapped here, once.
+        hard_error_handler_(failure::from_exception(std::current_exception()));
+    }
+
+    // A raw handler may have taken the stream (a WebSocket upgrade):
+    // nothing is left to close here.
+    if (!boost::beast::get_lowest_layer(stream).socket().is_open())
+    {
+        co_return;
+    }
+    // The loop may have ended because shutdown was requested; the
+    // close sequence itself must still run to completion.
+    co_await this_coro::reset_cancellation_state();
+    co_await this_coro::throw_if_cancelled(false);
+
+    // Close the TLS layer first, if there is one, then half-close TCP.
+    if constexpr (requires { stream.async_shutdown(use_awaitable_tuple); })
+    {
+        boost::beast::get_lowest_layer(stream).expires_after(std::chrono::seconds {5});
+        auto [sec] = co_await stream.async_shutdown(use_awaitable_tuple);
+        (void)sec;
+    }
+    boost::system::error_code ec;
+    boost::beast::get_lowest_layer(stream).socket().shutdown(net::ip::tcp::socket::shutdown_send, ec); // NOLINT
+
+    // Lingering close: a request body left unread would otherwise make
+    // the kernel reset the connection and possibly discard the response
+    // still in flight. Read and discard, briefly, until the peer closes.
+    boost::beast::get_lowest_layer(stream).expires_after(std::chrono::milliseconds {250});
+    std::array<char, 4096> sink {};
+    for (std::size_t drained = 0; drained < 1024 * 1024;)
+    {
+        auto [rec, n] = co_await boost::beast::get_lowest_layer(stream).async_read_some(net::buffer(sink), use_awaitable_tuple);
+        if (rec) break;
+        drained += n;
+    }
+}
+
+/// @cond
+template <typename Context, typename Stream>
+awaitable<std::optional<bool>> basic_http<Context, Stream>::run_interceptors(
+    Stream& stream,
+    boost::beast::http::request_parser<boost::beast::http::buffer_body>& header_parser,
+    matcher::context& context,
+    boost::urls::url_view const& parsed_target,
+    cookies const& parsed_cookies,
+    cancellation_signals& signals,
+    detail::contexts_for<Context> const& conn_ctx)
+{
+    namespace http = boost::beast::http;
+    auto& req_header = header_parser.get();
+    bool const body_done = header_parser.is_done();
+
+    // Shielded like a plain handler: a shutdown lets them finish.
+    interceptor_result rejection;
+    std::exception_ptr eptr;
+    co_await detail::shield_from_cancellation();
+    try
+    {
+        for (auto& interceptor : interceptors_)
+        {
+            rejection = co_await interceptor(req_header, context, parsed_target, parsed_cookies, conn_ctx);
+            if (rejection) break;
+        }
+    }
+    catch (...)
+    {
+        eptr = std::current_exception();
+    }
+    bool const shutting_down = co_await detail::observe_shutdown();
+
+    if (!rejection && !eptr)
+    {
+        // The shutdown was observed here, so the handler will not see
+        // it: its answer must close the connection.
+        if (shutting_down) req_header.keep_alive(false);
+        co_return std::nullopt;
+    }
+
+    if (!body_done)
+    {
+        // The body was not read: the answer must announce the close.
+        req_header.keep_alive(false);
+    }
+
+    if (eptr)
+    {
+        bool const ka = co_await wrapped_soft_error_handler_(
+            failure::from_exception(eptr), stream, req_header, signals);
+        co_return ka && !shutting_down && body_done;
+    }
+
+    auto response = std::move(*rejection);
+    detail::finish_response(response, req_header.version(), req_header.keep_alive(), shutting_down);
+    detail::finish_header(*settings_, req_header, response);
+    bool const ka = response.keep_alive();
+    co_await detail::write_response(
+        stream, std::move(response), req_header.method() == http::verb::head, settings_->send_timeout);
+    co_return ka;
+}
+
+template <typename Context, typename Stream>
+awaitable<void> basic_http<Context, Stream>::write_protocol_error(
+    Stream& stream,
+    failure const& f,
+    boost::beast::http::request_header<> const& header)
+{
+    namespace http = boost::beast::http;
+    unsigned const version = header.version() == 10 ? 10u : 11u;
+    http::response<http::empty_body> err_response {detail::protocol_error_status(f), version};
+    err_response.keep_alive(false);
+    err_response.prepare_payload();
+    detail::finish_header(*settings_, header, err_response);
+    ::boost::taar::detail::expire_after(stream, settings_->send_timeout);
+    auto [wec, wsz] = co_await http::async_write(stream, err_response, use_awaitable_tuple);
+    ::boost::taar::detail::expire_never(stream);
+    (void)wec;
+    (void)wsz;
+}
+
+template <typename Context, typename Stream>
+template <typename Parser>
+awaitable<boost::system::error_code> basic_http<Context, Stream>::read_body(
+    Stream& stream,
+    boost::beast::flat_buffer& buffer,
+    Parser& parser)
+{
+    namespace http = boost::beast::http;
+    while (!parser.is_done())
+    {
+        ::boost::taar::detail::read_deadline<Stream> deadline {stream, body_timeout_};
+        auto [ec, n] = co_await http::async_read_some(stream, buffer, parser, use_awaitable_tuple);
+        (void)n;
+        if (ec && deadline.expired()) co_return boost::beast::error::timeout;
+        if (ec) co_return ec;
+    }
+    co_return boost::system::error_code {};
+}
+/// @endcond
+
 /** Default HTTP session with no per-connection context.
 
     Equivalent to `basic_http<no_context>`: no object is created on
@@ -1951,5 +1984,9 @@ private:
 using http = basic_http<>;
 
 } // namespace boost::taar::session
+
+#ifdef BOOST_TAAR_SEPARATE_COMPILATION
+#include <boost/taar/session/detail/http_instantiations.hpp>
+#endif
 
 #endif // BOOST_TAAR_SESSION_HTTP_HPP

@@ -52,6 +52,16 @@ directly.
    cmake --build build
    build/test/boost-taar-test
    ```
+
+   Changes to the session, the servers or the response writers should
+   also pass with separate compilation, where the tests see the explicit
+   instantiation declarations:
+
+   ```bash
+   cmake -B build-sep -S . -DCMAKE_BUILD_TYPE=Debug -DBOOST_TAAR_TEST_SEPARATE_COMPILATION=ON
+   cmake --build build-sep --target boost-taar-test
+   build-sep/test/boost-taar-test
+   ```
 5. Make sure the examples still build:
 
    ```bash
@@ -181,6 +191,11 @@ should be a separate commit from any behavioural change.
   with `-Wall -Wextra` or the MSVC equivalent. Newer language or library
   features are allowed only behind a feature-test macro with a C++20
   fallback.
+- Separate compilation lists the instantiations it compiles once in
+  `session/detail/instantiate.hpp` and `server/detail/*_instantiations.hpp`.
+  When a session or server signature changes, or the session gains a
+  response body type, update those lists and run the tests with
+  `BOOST_TAAR_TEST_SEPARATE_COMPILATION=ON`.
 - Every header lives under `include/boost/taar/<module>/<name>.hpp`. The
   include guard mirrors the path, e.g.
   `BOOST_TAAR_MATCHER_TARGET_HPP`.

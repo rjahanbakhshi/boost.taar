@@ -15,6 +15,8 @@ you can write with it, and a tour of the idioms you will see again and again:
   compilers, Boost components, and CMake version.
 * [link boost_taar.quickstart.installation Installation]: header-only
   drop-in, Boost super-project, and CMake/Conan integration.
+* [link boost_taar.quickstart.separate_compilation Separate compilation]:
+  compile the session and servers once instead of in every source file.
 * [link boost_taar.quickstart.hello A Hello World HTTP Server]: a
   complete program serving a single GET endpoint.
 * [link boost_taar.quickstart.tour A Whirlwind Tour]: stock responses,
@@ -34,7 +36,10 @@ you can write with it, and a tour of the idioms you will see again and again:
 
 [section:installation Installation]
 
-Taar is header-only. Drop the `include/` directory on your include path and
+Taar is header-only by default (see
+[link boost_taar.quickstart.separate_compilation Separate compilation] for
+compiling the session and servers once). Drop the `include/` directory on
+your include path and
 link against the compiled Boost libraries that __Asio__, __Beast__,
 __Url__, __Json__, and __System__ already require for your application.
 
@@ -73,6 +78,77 @@ link OpenSSL (`OpenSSL::SSL`).
 
 Inside a Boost super-project the library participates in the modular build
 through `build.jam`; no extra configuration is required.
+
+[endsect]
+
+[section:separate_compilation Separate compilation]
+
+Taar is header-only by default. Most of the compile time of a file that
+registers routes is the session's __Beast__ read and write path and the
+server loop, which are the same in every program. Separate compilation
+builds that part once:
+
+# Define `BOOST_TAAR_SEPARATE_COMPILATION` for the whole program.
+# Include `<boost/taar/src.hpp>` in exactly one source file.
+# If the program uses TLS, also include `<boost/taar/src_tls.hpp>` in one
+  source file.
+
+    // taar_src.cpp
+    #include <boost/taar/src.hpp>
+    #include <boost/taar/src_tls.hpp> // only with session::https / server::tls
+
+With CMake:
+
+    target_compile_definitions(app PRIVATE BOOST_TAAR_SEPARATE_COMPILATION)
+    target_sources(app PRIVATE taar_src.cpp)
+
+The other source files then use explicit instantiation declarations
+instead of instantiating `session::http`, `session::https`,
+`server::tcp` and `server::tls` themselves. The handler binding stays in
+the headers, since it is generated from your function signatures; a
+session with a user context type (`basic_http<Context>`) is also
+instantiated where it is used.
+
+Compile time of one example source file, header-only and with separate
+compilation (Linux, Debug with `-g`, Boost 1.86; one machine, so treat
+the numbers as relative):
+
+[table
+    [[Example] [GCC 16] [GCC 16, separate] [Clang 23] [Clang 23, separate]]
+    [[`hello_server`]     [13.2 s] [4.6 s] [8.1 s]  [3.7 s]]
+    [[`rest_crud_server`] [18.4 s] [9.2 s] [10.7 s] [6.2 s]]
+    [[`mcp_server`]       [20.7 s] [9.6 s] [12.7 s] [6.9 s]]
+]
+
+The source file with `<boost/taar/src.hpp>` takes about 18 s (GCC) or
+10 s (Clang) and `<boost/taar/src_tls.hpp>` about 37 s or 20 s, but they
+are rebuilt only when taar, Boost or the compiler options change. The
+saving is in every other file and on every rebuild of the files that
+register routes; a one-file program built once is not faster.
+
+What remains in each file is mostly parsing the __Asio__ and __Beast__
+headers, plus the handler binding: about 0.1 s per route, whatever the
+handler's signature or return type.
+
+Separate compilation trades some binary size for the compile time.
+`<boost/taar/src.hpp>` instantiates the whole session and server for
+the stream type, including response body types a program may not use,
+and the compiler can no longer inline across that file. Release builds
+(`-O2`, stripped, Boost 1.86):
+
+[table
+    [[Example] [GCC 16] [GCC 16, separate] [Clang 23] [Clang 23, separate]]
+    [[`hello_server`]     [1.8 MB] [2.5 MB] [2.3 MB] [3.4 MB]]
+    [[`rest_crud_server`] [2.5 MB] [3.0 MB] [3.0 MB] [3.9 MB]]
+    [[`mcp_server`]       [2.6 MB] [3.0 MB] [3.2 MB] [3.9 MB]]
+]
+
+Most of the difference is unused instantiations. Building with
+`-ffunction-sections` and linking with `--gc-sections` lets the linker
+drop them: `hello_server` with GCC and separate compilation then comes
+to 2.1 MB. The difference is fixed and does not grow with the number of
+routes, so separate compilation is a development-time choice. A release
+build can use header-only.
 
 [endsect]
 
