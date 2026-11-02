@@ -130,6 +130,26 @@ What remains in each file is mostly parsing the __Asio__ and __Beast__
 headers, plus the handler binding: about 0.1 s per route, whatever the
 handler's signature or return type.
 
+Separate compilation trades some binary size for the compile time.
+`<boost/taar/src.hpp>` instantiates the whole session and server for
+the stream type, including response body types a program may not use,
+and the compiler can no longer inline across that file. Release builds
+(`-O2`, stripped, Boost 1.86):
+
+[table
+    [[Example] [GCC 16] [GCC 16, separate] [Clang 23] [Clang 23, separate]]
+    [[`hello_server`]     [1.8 MB] [2.5 MB] [2.3 MB] [3.4 MB]]
+    [[`rest_crud_server`] [2.5 MB] [3.0 MB] [3.0 MB] [3.9 MB]]
+    [[`mcp_server`]       [2.6 MB] [3.0 MB] [3.2 MB] [3.9 MB]]
+]
+
+Most of the difference is unused instantiations. Building with
+`-ffunction-sections` and linking with `--gc-sections` lets the linker
+drop them: `hello_server` with GCC and separate compilation then comes
+to 2.1 MB. The difference is fixed and does not grow with the number of
+routes, so separate compilation is a development-time choice. A release
+build can use header-only.
+
 [endsect]
 
 [section:hello A Hello World HTTP Server]
