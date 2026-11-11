@@ -36,6 +36,7 @@
 #include <boost/json/parse.hpp>
 #include <boost/test/unit_test.hpp>
 #include <chrono>
+#include <functional>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -680,6 +681,128 @@ BOOST_AUTO_TEST_CASE(test_guard_with_const_matcher_context)
     auto const denied = call(false);
     BOOST_TEST(denied.result() == http::status::forbidden);
     BOOST_TEST(denied.body() == "admins only");
+}
+
+BOOST_AUTO_TEST_CASE(test_response_filter_sees_request_attributes)
+{
+    net::io_context io;
+    taar::session::http session;
+    session.set_request_body_limit(4);
+    session.set_request_header_limit(1024);
+    session.set_soft_error_handler([](taar::failure const&)
+    {
+        http::response<http::string_body> res {http::status::forbidden, 11};
+        res.prepare_payload();
+        return res;
+    });
+    session.add_interceptor([](http::request_header<> const& req, taar::matcher::context& ctx)
+    {
+        ctx.attributes.set(request_id {7});
+        if (req.count("X-Deny")) return taar::reject(http::status::unauthorized);
+        return taar::proceed();
+    });
+    session.set_response_filter(
+        [](http::request_header<> const& req, taar::request_attributes const& attributes, http::response_header<>& res)
+        {
+            auto const* id = attributes.find<request_id>();
+            res.set("X-Id", id ? std::to_string(id->value) : "none");
+            if (auto const echo = req["X-Echo"]; !echo.empty()) res.set("X-Echo", echo);
+        });
+
+    session.register_request_handler(method == http::verb::get && target == "/rest", rest([] { return std::string {"ok"}; }));
+    session.register_request_handler(method == http::verb::post && target == "/post", rest([] { return std::string {"ok"}; }));
+    session.register_request_handler(method == http::verb::get && target == "/throw",
+        rest([]() -> std::string { throw banned {"no"}; }));
+    session.register_request_handler(method == http::verb::get && target == "/stream",
+        rest([]() -> taar::chunked_response<std::string> { co_yield std::string {"a"}; }));
+    session.register_request_handler(method == http::verb::get && target == "/own",
+        [](http::request<http::string_body> const&, taar::matcher::context const& ctx)
+        {
+            ctx.attributes.set(request_id {9});
+            return std::string {"own"};
+        });
+
+    e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
+    {
+        auto denied = e2e::make_request(http::verb::get, "/rest");
+        denied.set("X-Deny", "1");
+        auto r = co_await e2e::send_all(port,
+            e2e::make_request(http::verb::get, "/rest"),
+            e2e::make_request(http::verb::get, "/nope"),
+            e2e::make_request(http::verb::put, "/rest"),
+            e2e::make_request(http::verb::get, "/throw"),
+            e2e::make_request(http::verb::get, "/stream"),
+            e2e::make_request(http::verb::get, "/own"),
+            denied);
+        BOOST_TEST(r[0].result() == http::status::ok);
+        BOOST_TEST(r[1].result() == http::status::not_found);
+        BOOST_TEST(r[2].result() == http::status::method_not_allowed);
+        BOOST_TEST(r[3].result() == http::status::forbidden);
+        BOOST_TEST(r[4].body() == "a");
+        BOOST_TEST(r[6].result() == http::status::unauthorized);
+        for (auto i : {0, 1, 2, 3, 4, 6}) BOOST_TEST(r[i]["X-Id"] == "7");
+        BOOST_TEST(r[5]["X-Id"] == "9");
+
+        auto const head = co_await raw_exchange(port,
+            "HEAD /rest HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+        BOOST_TEST(head.starts_with("HTTP/1.1 200 OK\r\n"));
+        BOOST_TEST(head.find("X-Id: 7\r\n") != std::string::npos);
+
+        // Body too large: the request was routed, so its attributes exist.
+        auto const too_large = co_await raw_exchange(port,
+            "POST /post HTTP/1.1\r\nHost: x\r\nContent-Length: 10\r\n\r\n0123456789");
+        BOOST_TEST(too_large.starts_with("HTTP/1.1 413 "));
+        BOOST_TEST(too_large.find("X-Id: 7\r\n") != std::string::npos);
+
+        // A 404 that had to read a body still shows the filter the request header.
+        auto const not_found = co_await raw_exchange(port,
+            "POST /nope HTTP/1.1\r\nHost: x\r\nX-Echo: e\r\nContent-Length: 3\r\nConnection: close\r\n\r\nabc");
+        BOOST_TEST(not_found.starts_with("HTTP/1.1 404 "));
+        BOOST_TEST(not_found.find("X-Echo: e\r\n") != std::string::npos);
+        BOOST_TEST(not_found.find("X-Id: 7\r\n") != std::string::npos);
+
+        // Header too large: no request context yet.
+        auto const bad_header = co_await raw_exchange(port,
+            "GET /rest HTTP/1.1\r\nHost: x\r\nX-Pad: " + std::string(2000, 'p') + "\r\n\r\n");
+        BOOST_TEST(bad_header.starts_with("HTTP/1.1 431 "));
+        BOOST_TEST(bad_header.find("X-Id: none\r\n") != std::string::npos);
+    });
+}
+
+BOOST_AUTO_TEST_CASE(test_response_filter_cleared_by_empty_values)
+{
+    using two_arg = std::function<void(http::request_header<> const&, http::response_header<>&)>;
+    auto const stamp = [](http::request_header<> const&, http::response_header<>& res) { res.set("X-F", "1"); };
+
+    auto filtered = [&](auto&& clear)
+    {
+        net::io_context io;
+        taar::session::http session;
+        session.set_response_filter(stamp);
+        clear(session);
+        session.register_request_handler(method == http::verb::get && target == "/", rest([] { return std::string {"ok"}; }));
+        bool has_header = true;
+        e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
+        {
+            auto r = co_await e2e::send_all(port, e2e::make_request(http::verb::get, "/"));
+            BOOST_TEST(r[0].result() == http::status::ok);
+            has_header = r[0].count("X-F") != 0;
+        });
+        return has_header;
+    };
+
+    BOOST_TEST(filtered([](auto&) {}));
+    BOOST_TEST(!filtered([](auto& s) { s.set_response_filter(two_arg {}); }));
+    BOOST_TEST(!filtered([](auto& s) { s.set_response_filter(nullptr); }));
+    BOOST_TEST(!filtered([](auto& s) { s.set_response_filter({}); }));
+
+    // A functor's own `operator bool` does not mean "empty".
+    struct disabled
+    {
+        explicit operator bool() const { return false; }
+        void operator()(http::request_header<> const&, http::response_header<>& res) const { res.set("X-F", "1"); }
+    };
+    BOOST_TEST(filtered([](auto& s) { s.set_response_filter(disabled {}); }));
 }
 
 } // namespace

@@ -553,7 +553,9 @@ strings. Routing resets only the path arguments between candidate routes;
 attributes survive it. An absent attribute is `argument_not_found`, so a
 `std::optional<T>` parameter or `with_default` makes it optional.
 `attribute_arg` is not a client input: OpenAPI, the JSON-RPC parameter
-list and the MCP `inputSchema` leave it out.
+list and the MCP `inputSchema` leave it out. A response filter taking
+`(request, request_attributes const&, response)` sees them too, for
+example to echo a request id on every answer.
 
 [heading Route guards]
 

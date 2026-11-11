@@ -81,10 +81,6 @@ Deliberate, not planned.
 
 ### Interceptors and guards
 
-- The response filter cannot see request attributes, so a value minted
-  by an interceptor (such as a request id) cannot be echoed by the filter
-  without being stored elsewhere. Approach: pass the request's
-  `matcher::context` (or its attributes) to the response filter.
 - `guard` runs its check on a copy of the request context (one copy of
   `path_args` per guarded request); changes to `path_args` by the check
   are discarded.
