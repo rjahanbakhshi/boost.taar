@@ -7,7 +7,7 @@
 
 [section:release_notes Release Notes]
 
-[heading Unreleased]
+[heading 1.2.1]
 
 * Fixed: answers made with `response_builder`, returned by a handler or
   the soft error handler, bypassed the session: no response filter (so
