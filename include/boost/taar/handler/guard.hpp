@@ -17,6 +17,7 @@
 #include <boost/taar/core/is_awaitable.hpp>
 #include <boost/taar/core/is_chunked_response.hpp>
 #include <boost/taar/core/is_http_response.hpp>
+#include <boost/taar/core/response_builder.hpp>
 #include <boost/taar/handler/context_inject.hpp>
 #include <boost/taar/handler/path_arg_check.hpp>
 #include <boost/taar/handler/rest_param.hpp>
@@ -52,6 +53,10 @@ Response rejection_as(boost::beast::http::response<boost::beast::http::string_bo
     else if constexpr (std::is_same_v<Response, http::message_generator>)
     {
         return http::message_generator {std::move(rejection)};
+    }
+    else if constexpr (std::is_same_v<Response, ::boost::taar::detail::built_response>)
+    {
+        return ::boost::taar::detail::session_response_from(response_builder {std::move(rejection)});
     }
     else
     {

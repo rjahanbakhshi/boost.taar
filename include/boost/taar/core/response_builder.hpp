@@ -12,7 +12,9 @@
 
 #include <boost/beast/http/message_generator.hpp>
 #include <boost/taar/core/response_from.hpp>
+#include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/fields.hpp>
+#include <boost/beast/http/message.hpp>
 #include <boost/beast/http/status.hpp>
 #include <memory>
 
@@ -48,15 +50,21 @@ public:
         boost::beast::http::field field,
             std::string_view const& value) = 0;
 
-    virtual boost::beast::http::message_generator get_response()&& = 0;
+    virtual boost::beast::http::response_header<>& base() = 0;
+    virtual bool keep_alive() const = 0;
+    virtual void keep_alive(bool value) = 0;
+
+    /// The message to write; with @a head_only, its header alone.
+    virtual boost::beast::http::message_generator get_response(bool head_only)&& = 0;
 };
 
 template <typename... T>
 class response_builder_impl : public response_builder_impl_base
 {
 public:
-    response_builder_impl(T const&... args)
-        : response_{response_from(args...)}
+    template <typename... U>
+    explicit response_builder_impl(U&&... args)
+        : response_{response_from(std::forward<U>(args)...)}
     {}
 
     void set_version(unsigned version) override
@@ -97,13 +105,68 @@ public:
         response_.set(field, value);
     }
 
-    boost::beast::http::message_generator get_response()&& override
+    boost::beast::http::response_header<>& base() override
     {
-        return boost::beast::http::message_generator{std::move(response_)};
+        return response_.base();
+    }
+
+    bool keep_alive() const override
+    {
+        return response_.keep_alive();
+    }
+
+    void keep_alive(bool value) override
+    {
+        response_.keep_alive(value);
+    }
+
+    boost::beast::http::message_generator get_response(bool head_only)&& override
+    {
+        namespace http = boost::beast::http;
+        if (head_only)
+        {
+            // No body follows, so no chunk framing either (RFC 9110 9.3.2).
+            http::response<http::empty_body> header {std::move(response_.base())};
+            if (header.chunked()) header.chunked(false);
+            return http::message_generator {std::move(header)};
+        }
+        return http::message_generator {std::move(response_)};
     }
 
 private:
     response_from_t<T...> response_;
+};
+
+/** A @ref boost::taar::response_builder answer as a session receives it:
+    the header stays reachable so it is finished like a typed response.
+*/
+class built_response
+{
+public:
+    explicit built_response(std::unique_ptr<response_builder_impl_base> impl) noexcept
+        : impl_ {std::move(impl)}
+    {}
+
+    boost::beast::http::response_header<>& base() { return impl_->base(); }
+    boost::beast::http::status result() const { return impl_->base().result(); }
+    unsigned version() const { return impl_->base().version(); }
+    void version(unsigned value) { impl_->base().version(value); }
+    bool keep_alive() const { return impl_->keep_alive(); }
+    void keep_alive(bool value) { impl_->keep_alive(value); }
+
+    /// The message to write; with @a head_only, its header alone.
+    boost::beast::http::message_generator to_generator(bool head_only = false) &&
+    {
+        return std::move(*impl_).get_response(head_only);
+    }
+
+    operator boost::beast::http::message_generator() &&
+    {
+        return std::move(*this).to_generator();
+    }
+
+private:
+    std::unique_ptr<response_builder_impl_base> impl_;
 };
 
 } // namespace detail
@@ -242,7 +305,7 @@ public:
     /// Consume the builder and return a Beast message generator.
     boost::beast::http::message_generator get_response() &&
     {
-        return std::move(*impl_).get_response();
+        return std::move(*impl_).get_response(false);
     }
 
     // Support for response_from
@@ -251,6 +314,14 @@ public:
         response_builder&& value)
     {
         return std::move(value).get_response();
+    }
+
+    // A session finishes the header before writing it.
+    friend detail::built_response tag_invoke(
+        detail::session_response_tag,
+        response_builder&& value)
+    {
+        return detail::built_response {std::move(value.impl_)};
     }
 
 private:

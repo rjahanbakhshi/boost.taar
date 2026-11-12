@@ -15,6 +15,7 @@
 #include <boost/taar/core/cors.hpp>
 #include <boost/taar/core/interceptor.hpp>
 #include <boost/taar/core/request_attributes.hpp>
+#include <boost/taar/core/response_builder.hpp>
 #include <boost/taar/handler/guard.hpp>
 #include <boost/taar/handler/rest.hpp>
 #include <boost/taar/handler/rest_arg.hpp>
@@ -520,6 +521,10 @@ BOOST_AUTO_TEST_CASE(test_guard_typed_and_streaming_inner)
             rest([](std::string id, principal const& p) { return id + ":" + p.user; },
                 taar::handler::path_arg("id"), attribute_arg<principal>())));
     session.register_request_handler(
+        method == http::verb::get && target == "/built",
+        guard(&require_admin,
+            rest([] { return taar::response_builder(std::string {"built"}).set_status(http::status::accepted); })));
+    session.register_request_handler(
         method == http::verb::get && target == "/stream",
         guard(&require_admin,
             rest([]() -> taar::chunked_response<std::string>
@@ -554,7 +559,9 @@ BOOST_AUTO_TEST_CASE(test_guard_typed_and_streaming_inner)
             e2e::make_request(http::verb::get, "/stream"),
             as_admin(e2e::make_request(http::verb::get, "/stream")),
             e2e::make_request(http::verb::get, "/gen"),
-            as_admin(e2e::make_request(http::verb::get, "/gen")));
+            as_admin(e2e::make_request(http::verb::get, "/gen")),
+            e2e::make_request(http::verb::get, "/built"),
+            as_admin(e2e::make_request(http::verb::get, "/built")));
 
         BOOST_TEST(r[0].result() == http::status::forbidden);
         BOOST_TEST(r[0].body() == "admins only");
@@ -570,6 +577,11 @@ BOOST_AUTO_TEST_CASE(test_guard_typed_and_streaming_inner)
 
         BOOST_TEST(r[4].result() == http::status::forbidden);
         BOOST_TEST(r[5].body() == "xy");
+
+        BOOST_TEST(r[6].result() == http::status::forbidden);
+        BOOST_TEST(r[6].body() == "admins only");
+        BOOST_TEST(r[7].result() == http::status::accepted);
+        BOOST_TEST(r[7].body() == "built");
     });
 }
 

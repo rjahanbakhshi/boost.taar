@@ -356,8 +356,9 @@ the handler or the response filter already set one, including error
 answers, `304`, HEAD responses, the header of chunked responses and the
 `400`/`408` protocol answers. The value is formatted at most once per
 second per thread, so it costs neither a lock nor a formatting per
-response. `set_date_header(false)` turns it off. A raw handler returning
-a `message_generator` writes what it produces.
+response. `set_date_header(false)` turns it off. A `response_builder`
+answer is finished like any typed response; a handler that builds its
+own `message_generator` writes what it produces.
 
 [heading Unmatched requests and HEAD]
 

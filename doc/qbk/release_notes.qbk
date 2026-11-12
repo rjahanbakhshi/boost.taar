@@ -7,6 +7,16 @@
 
 [section:release_notes Release Notes]
 
+[heading 1.2.1]
+
+* Fixed: answers made with `response_builder`, returned by a handler or
+  the soft error handler, bypassed the session: no response filter (so
+  no CORS headers), no `Date`, no alignment with the request's HTTP
+  version and keep-alive, and a HEAD request received the body. They are
+  now finished like any typed response. `response_from(response_builder)`
+  still returns a `message_generator`.
+* A `response_builder` made from an rvalue no longer copies it.
+
 [heading 1.2.0]
 
 * Separate compilation: define `BOOST_TAAR_SEPARATE_COMPILATION` and

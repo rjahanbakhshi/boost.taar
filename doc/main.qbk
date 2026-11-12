@@ -9,7 +9,7 @@
 
 [library Boost.Taar
     [quickbook 1.7]
-    [version 1.2.0]
+    [version 1.2.1]
     [copyright 2021-2026 Reza Jahanbakhshi]
     [purpose HTTP server building blocks for C++20.]
     [license

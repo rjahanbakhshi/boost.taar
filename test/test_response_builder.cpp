@@ -33,6 +33,7 @@ auto tag_invoke(boost::taar::response_from_tag<custom_type>, custom_type const& 
 BOOST_AUTO_TEST_CASE(test_result_response)
 {
     static_assert(has_response_from<decltype(response_builder{})>);
+    static_assert(std::same_as<boost::taar::response_from_t<response_builder>, boost::beast::http::message_generator>);
     BOOST_TEST(to_response<http::empty_body>(response_from(response_builder{})).result() == http::status::ok);
     BOOST_TEST(to_response<http::empty_body>(response_from(response_builder{})).count(http::field::content_type) == 0u);
 
