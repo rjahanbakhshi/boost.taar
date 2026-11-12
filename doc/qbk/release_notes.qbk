@@ -7,7 +7,7 @@
 
 [section:release_notes Release Notes]
 
-[heading Unreleased]
+[heading 1.2.0]
 
 * Separate compilation: define `BOOST_TAAR_SEPARATE_COMPILATION` and
   include `<boost/taar/src.hpp>` (and `<boost/taar/src_tls.hpp>` for TLS)
