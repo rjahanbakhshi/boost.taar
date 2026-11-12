@@ -194,9 +194,16 @@ awaitable<void> write_response(
             co_return;
         }
     }
+    auto&& message = [&]() -> decltype(auto)
+    {
+        if constexpr (std::same_as<R, ::boost::taar::detail::built_response>)
+            return std::move(response).to_generator(head_only);
+        else
+            return std::forward<Response>(response);
+    }();
     // Write errors surface on the next read; the response is best effort.
     auto [ec, n] = co_await ::boost::taar::session::detail::async_write(
-        stream, std::forward<Response>(response), use_awaitable_tuple);
+        stream, std::forward<decltype(message)>(message), use_awaitable_tuple);
     (void)ec;
     (void)n;
     ::boost::taar::detail::expire_never(stream);
@@ -352,7 +359,7 @@ inline void add_date(response_settings const& settings, boost::beast::http::resp
 
 /** Finish @a response's header before it is written: run the response
     filter, then add `Date` if neither the handler nor the filter set one.
-    A `message_generator` is opaque and left as it is.
+    A `message_generator` built by a handler is opaque and left as it is.
 */
 template <typename Response>
 void finish_header(
@@ -694,8 +701,8 @@ public:
 
         The handler runs with the original HEAD request and only the
         response header is written, so `Content-Length` reflects the GET
-        body. Handlers producing a `message_generator` write what they
-        produce; a streaming handler's chunked header is sent without
+        body. Handlers producing their own `message_generator` write what
+        they produce; a streaming handler's chunked header is sent without
         chunks. `GET` routes list `HEAD` in `Allow`.
     */
     void set_head_from_get(bool enabled)
@@ -706,8 +713,9 @@ public:
     /** Install a hook that runs on every response header before it is written.
 
         Applies to handler responses, interceptor rejections, soft-error
-        responses, the stock 404 and the header of chunked responses; raw handlers that return a
-        `message_generator` are opaque and bypass it. Use it for CORS
+        responses, the stock 404 and the header of chunked responses,
+        `response_builder` answers included; a `message_generator` built by
+        a handler is opaque and bypasses it. Use it for CORS
         (`taar::cors::response_filter()`), a `Server` header, or security
         headers.
 
@@ -754,8 +762,8 @@ public:
         interceptor rejections, soft-error and protocol-error answers,
         `404`/`405`, `408`, `304` and HEAD responses, the header of
         chunked responses) and runs after the filter, so a `Date` set by
-        the handler or the filter is kept. A `message_generator` is opaque
-        and written as produced. The value is formatted at most once per
+        the handler or the filter is kept. A `message_generator` built by a
+        handler is opaque and written as produced. The value is formatted at most once per
         second per thread.
     */
     void set_date_header(bool enabled)

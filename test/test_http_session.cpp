@@ -9,10 +9,13 @@
 
 #include "e2e.hpp"
 #include <boost/asio/buffers_iterator.hpp>
+#include <boost/asio/read.hpp>
 #include <boost/asio/read_until.hpp>
+#include <boost/asio/write.hpp>
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/string_body.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
+#include <boost/beast/core/tcp_stream.hpp>
 #include <boost/taar/session/http.hpp>
 #include <boost/taar/handler/rest.hpp>
 #include <boost/taar/matcher/method.hpp>
@@ -26,6 +29,7 @@
 #include <boost/asio/detached.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <boost/test/unit_test.hpp>
+#include <stdexcept>
 #include <string>
 
 namespace {
@@ -674,6 +678,78 @@ BOOST_AUTO_TEST_CASE(test_http_session_is_movable_after_registration)
         BOOST_TEST(res[0].body() == "hello");
         BOOST_TEST(res[1].body() == "soft");                           // installed before the move
         BOOST_TEST(res[2].result() == http::status::payload_too_large); // limit set before the move
+    });
+}
+
+/// Write @a raw on a new connection and read until the server closes it.
+taar::awaitable<std::string> raw_exchange(unsigned short port, std::string raw)
+{
+    namespace net = boost::asio;
+    // Reads until the server closes; the timeout fails a keep-alive regression.
+    taar::rebind_executor<boost::beast::tcp_stream> stream {co_await net::this_coro::executor};
+    stream.expires_after(std::chrono::seconds {10});
+    co_await stream.async_connect(net::ip::tcp::endpoint {net::ip::address_v4::loopback(), port});
+    co_await net::async_write(stream, net::buffer(raw));
+    std::string out;
+    auto [ec, n] = co_await net::async_read(stream, net::dynamic_buffer(out));
+    BOOST_TEST((!ec || ec == net::error::eof));
+    co_return out;
+}
+
+BOOST_AUTO_TEST_CASE(test_http_session_finishes_response_builder_answers)
+{
+    boost::asio::io_context io;
+    taar::session::http session;
+    session.set_response_filter([](http::request_header<> const&, http::response_header<>& res) { res.set("X-F", "1"); });
+    session.set_soft_error_handler([](taar::failure const&)
+    {
+        return taar::response_builder(std::string {"denied"}).set_status(http::status::forbidden);
+    });
+    session.register_request_handler(method == http::verb::get && target == "/built",
+        taar::handler::rest([] { return taar::response_builder(std::string {"hi"}).set_status(http::status::created); }));
+    session.register_request_handler(method == http::verb::get && target == "/chunked",
+        taar::handler::rest([]
+        {
+            http::response<http::string_body> res {http::status::ok, 11};
+            res.body() = "abc";
+            res.chunked(true);
+            return taar::response_builder(std::move(res));
+        }));
+    session.register_request_handler(method == http::verb::get && target == "/throw",
+        taar::handler::rest([]() -> std::string { throw std::runtime_error {"no"}; }));
+
+    e2e::run(io, session, [&](unsigned short port) -> taar::awaitable<void>
+    {
+        auto res = co_await e2e::send_all(port,
+            e2e::make_request(http::verb::get, "/built"),
+            e2e::make_request(http::verb::get, "/throw"),
+            e2e::make_request(http::verb::get, "/built"));
+        BOOST_TEST(res[0].result() == http::status::created);
+        BOOST_TEST(res[0].body() == "hi");
+        BOOST_TEST(res[1].result() == http::status::forbidden);
+        BOOST_TEST(res[2].result() == http::status::created);
+        for (auto const& r : res)
+        {
+            BOOST_TEST(r["X-F"] == "1");
+            BOOST_TEST(r.count(http::field::date) == 1u);
+        }
+
+        // HEAD: the header alone, so the pipelined answer that follows is intact.
+        for (std::string const path : {"/built", "/chunked"})
+        {
+            auto const out = co_await raw_exchange(port,
+                "HEAD " + path + " HTTP/1.1\r\nHost: x\r\n\r\n"
+                "GET /built HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+            auto const end = out.find("\r\n\r\n");
+            BOOST_TEST_REQUIRE(end != std::string::npos);
+            BOOST_TEST(out.substr(0, end).find("X-F: 1") != std::string::npos);
+            BOOST_TEST(out.substr(0, end).find("Transfer-Encoding") == std::string::npos);
+            BOOST_TEST(out.substr(end + 4).starts_with("HTTP/1.1 201 "));
+        }
+
+        // The answer follows the request's version and keep-alive.
+        auto const old = co_await raw_exchange(port, "GET /built HTTP/1.0\r\n\r\n");
+        BOOST_TEST(old.starts_with("HTTP/1.0 201 "));
     });
 }
 

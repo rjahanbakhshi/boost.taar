@@ -37,12 +37,15 @@
 namespace boost::taar {
 namespace detail {
 
+class built_response;
+
 template <typename T>
 concept is_response_from_result = requires
 {
     requires
         is_http_response<T> ||
-        std::same_as<T, boost::beast::http::message_generator>;
+        std::same_as<T, boost::beast::http::message_generator> ||
+        std::same_as<T, built_response>;
 };
 
 template <typename... T>
@@ -292,6 +295,32 @@ inline constexpr auto response_from(T&&... value)
 template <has_response_from... T>
 using response_from_t = std::invoke_result_t<decltype(response_from<T...>), T...>;
 
+namespace detail {
+
+struct session_response_tag {};
+
+// response_from for a value a session writes: a type may hand the session a
+// form it can still finish (response_builder keeps its header reachable).
+template <has_response_from T>
+constexpr auto session_response_from(T&& value)
+{
+    if constexpr (
+        !has_user_defined_response_from<T> &&
+        requires { tag_invoke(session_response_tag {}, std::forward<T>(value)); })
+    {
+        return tag_invoke(session_response_tag {}, std::forward<T>(value));
+    }
+    else
+    {
+        return response_from(std::forward<T>(value));
+    }
+}
+
+template <has_response_from T>
+using session_response_t = decltype(session_response_from(std::declval<T>()));
+
+} // namespace detail
+
 // response_from_invoke is always awaited for, so forwarding args is okay.
 template <typename CallableType, typename... ArgsType> requires (
     std::is_void_v<std::invoke_result_t<CallableType, ArgsType...>>)
@@ -315,9 +344,9 @@ inline auto response_from_invoke(
     CallableType&& callable,
     ArgsType&&... args) ->
 awaitable<
-    response_from_t<typename std::invoke_result_t<CallableType, ArgsType...>>>
+    detail::session_response_t<std::invoke_result_t<CallableType, ArgsType...>>>
 {
-    co_return response_from(std::invoke(
+    co_return detail::session_response_from(std::invoke(
         std::forward<CallableType>(callable),
         std::forward<ArgsType>(args)...));
 }
@@ -348,9 +377,9 @@ inline auto response_from_invoke(
     CallableType&& callable,
     ArgsType&&... args) ->
 awaitable<
-    response_from_t<typename std::invoke_result_t<CallableType, ArgsType...>::value_type>>
+    detail::session_response_t<typename std::invoke_result_t<CallableType, ArgsType...>::value_type>>
 {
-    co_return response_from(co_await std::invoke(
+    co_return detail::session_response_from(co_await std::invoke(
         std::forward<CallableType>(callable),
         std::forward<ArgsType>(args)...));
 }
