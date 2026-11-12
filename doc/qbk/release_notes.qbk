@@ -18,6 +18,12 @@
 * The session's constructor, connection loop and error-writing members
   are now defined outside the class, so they are no longer implicitly
   inline; behaviour is unchanged.
+* The response filter may take the request's attributes:
+  `filter(request, attributes, response)`. The attributes are empty only
+  for a protocol error answered before the request header was complete.
+  The two-argument form still works.
+* Fixed: the 404 and 405 answers to a request with a body passed the
+  response filter an emptied request header.
 
 [heading 1.1.0]
 

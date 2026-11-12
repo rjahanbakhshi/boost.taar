@@ -56,6 +56,7 @@ BOOST_TAAR_DETAIL_EXTERN template awaitable<bool> write_chunked_response(
     std::exception_ptr*,
     response_settings const*,
     ::boost::beast::http::request_header<> const*,
+    request_attributes const*,
     bool);
 
 } // namespace detail

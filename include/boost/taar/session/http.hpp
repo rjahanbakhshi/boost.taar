@@ -41,6 +41,7 @@
 #include <boost/taar/core/http_date.hpp>
 #include <boost/taar/core/detail/io_deadline.hpp>
 #include <boost/taar/type_traits/callable.hpp>
+#include <boost/taar/type_traits/specialization_of.hpp>
 #include <boost/beast/http/error.hpp>
 #include <boost/beast/http/read.hpp>
 #include <boost/beast/http/write.hpp>
@@ -74,6 +75,7 @@
 #include <chrono>
 #include <concepts>
 #include <exception>
+#include <cstddef>
 #include <cstdint>
 
 namespace boost::taar::session {
@@ -303,7 +305,28 @@ inline bool is_operation_aborted(failure const& f)
 /// Hook run on every response header before it is written (CORS, Server, security headers).
 using response_filter_type = std::function<void(
     boost::beast::http::request_header<> const&,
+    request_attributes const&,
     boost::beast::http::response_header<>&)>;
+
+template <typename Filter>
+concept attributes_response_filter = std::is_invocable_v<Filter&,
+    boost::beast::http::request_header<> const&,
+    request_attributes const&,
+    boost::beast::http::response_header<>&>;
+
+template <typename Filter>
+concept response_filter = std::copy_constructible<Filter> &&
+    (attributes_response_filter<Filter> ||
+     std::is_invocable_v<Filter&,
+        boost::beast::http::request_header<> const&,
+        boost::beast::http::response_header<>&>);
+
+/// The attributes seen by the filter before a request context exists.
+inline request_attributes const& no_request_attributes() noexcept
+{
+    static request_attributes const empty;
+    return empty;
+}
 
 /** What every response written by a session shares: the response filter,
     the `Date` header switch and the send timeout.
@@ -335,11 +358,12 @@ template <typename Response>
 void finish_header(
     response_settings const& settings,
     boost::beast::http::request_header<> const& request,
+    request_attributes const& attributes,
     Response& response)
 {
     if constexpr (requires { response.base(); })
     {
-        if (settings.filter) settings.filter(request, response.base());
+        if (settings.filter) settings.filter(request, attributes, response.base());
         add_date(settings, response.base());
     }
 }
@@ -443,6 +467,7 @@ awaitable<bool> write_chunked_response(
     std::exception_ptr* mid_stream_error = nullptr,
     response_settings const* settings = nullptr,
     ::boost::beast::http::request_header<> const* request = nullptr,
+    request_attributes const* attributes = nullptr,
     bool head_only = false)
 {
     namespace http = ::boost::beast::http;
@@ -466,7 +491,7 @@ awaitable<bool> write_chunked_response(
     header_response.set(http::field::content_type, default_chunk_content_type<T>());
     header_response.keep_alive(keep_alive);
     apply_chunked_metadata(generator, header_response);
-    if (settings && settings->filter && request) settings->filter(*request, header_response.base());
+    if (settings && settings->filter && request) settings->filter(*request, attributes ? *attributes : no_request_attributes(), header_response.base());
     if (settings) add_date(*settings, header_response.base());
     header_response.set(http::field::transfer_encoding, "chunked");
 
@@ -634,6 +659,7 @@ private:
             failure const&,
             Stream&,
             boost::beast::http::request_header<>&,
+            request_attributes const&,
             cancellation_signals&)>;
 
     using hard_error_handler_type = boost::taar::detail::move_only_function<void(failure const&)>;
@@ -684,10 +710,41 @@ public:
         `message_generator` are opaque and bypass it. Use it for CORS
         (`taar::cors::response_filter()`), a `Server` header, or security
         headers.
+
+        The filter is invoked as `filter(request, response)` or, if it
+        accepts them, `filter(request, attributes, response)`, where
+        `attributes` are the request's @ref boost::taar::request_attributes
+        (what interceptors, guards and handlers stored). They are empty for
+        a protocol error answered before the request header was complete.
+        An empty `std::function` or a null pointer removes the filter.
     */
-    void set_response_filter(detail::response_filter_type filter)
+    template <detail::response_filter Filter>
+    void set_response_filter(Filter filter)
     {
-        settings_->filter = std::move(filter);
+        if constexpr (std::is_pointer_v<Filter> || type_traits::specialization_of<std::function, Filter>)
+        {
+            if (!filter) return set_response_filter(nullptr);
+        }
+        if constexpr (detail::attributes_response_filter<Filter>)
+        {
+            settings_->filter = std::move(filter);
+        }
+        else
+        {
+            settings_->filter = [filter = std::move(filter)](
+                boost::beast::http::request_header<> const& request,
+                request_attributes const&,
+                boost::beast::http::response_header<>& response) mutable
+            {
+                filter(request, response);
+            };
+        }
+    }
+
+    /// Remove the response filter.
+    void set_response_filter(std::nullptr_t)
+    {
+        settings_->filter = nullptr;
     }
 
     /** Add a `Date` header (RFC 9110 6.6.1) to every response that does
@@ -912,7 +969,7 @@ public:
                             std::move(request_handler), conn_ctx, request, context);
                         shutting_down = co_await detail::observe_shutdown();
                         detail::finish_response(response, version, keep_alive && header_parser.is_done(), shutting_down);
-                        detail::finish_header(*self.settings_, header_parser.get(), response);
+                        detail::finish_header(*self.settings_, header_parser.get(), context.attributes, response);
                         bool const ka = response.keep_alive() && !shutting_down;
                         co_await detail::write_response(
                             stream, std::move(response), header_parser.get().method() == http::verb::head,
@@ -930,7 +987,7 @@ public:
                         header_parser.get().keep_alive(false);
                     }
                     failure const f = failure::from_exception(eptr);
-                    bool const ka = co_await self.wrapped_soft_error_handler_(f, stream, header_parser.get(), signals);
+                    bool const ka = co_await self.wrapped_soft_error_handler_(f, stream, header_parser.get(), context.attributes, signals);
                     co_return ka && !shutting_down && header_parser.is_done();
                 }
                 else
@@ -962,7 +1019,7 @@ public:
                     failure const f {req_ec};
                     if (!detail::is_transport_error(req_ec))
                     {
-                        co_await self.write_protocol_error(stream, f, body_parser.get().base());
+                        co_await self.write_protocol_error(stream, f, body_parser.get().base(), context.attributes);
                     }
                     if (req_ec == boost::beast::error::timeout)
                     {
@@ -997,7 +1054,7 @@ public:
                             context);
                         bool const ka = co_await detail::write_chunked_response(
                             generator, stream, version, keep_alive, cancellation_slot, &stream_error,
-                            self.settings_.get(), &body_parser.get(),
+                            self.settings_.get(), &body_parser.get(), &context.attributes,
                             body_parser.get().method() == http::verb::head);
                         if (stream_error) std::rethrow_exception(stream_error);
                         co_return ka;
@@ -1014,7 +1071,7 @@ public:
                         shutting_down = co_await detail::observe_shutdown();
 
                         detail::finish_response(response, version, keep_alive, shutting_down);
-                        detail::finish_header(*self.settings_, body_parser.get(), response);
+                        detail::finish_header(*self.settings_, body_parser.get(), context.attributes, response);
                         bool const ka = response.keep_alive() && !shutting_down;
                         co_await detail::write_response(
                             stream, std::move(response), body_parser.get().method() == http::verb::head,
@@ -1056,6 +1113,7 @@ public:
                     f,
                     stream,
                     body_parser.get(),
+                    context.attributes,
                     signals);
                 co_return ka && !shutting_down;
                 }
@@ -1353,12 +1411,13 @@ public:
                 failure const& f,
                 Stream& stream,
                 boost::beast::http::request_header<>& request_header,
+                request_attributes const& attributes,
                 cancellation_signals& signals) mutable
             -> awaitable<bool>
             {
                 auto response = co_await response_from_invoke(handler, f);
                 detail::finish_response(response, request_header.version(), detail::header_keep_alive(request_header), false);
-                detail::finish_header(*settings, request_header, response);
+                detail::finish_header(*settings, request_header, attributes, response);
                 bool keep_alive = response.keep_alive();
                 co_await detail::write_response(
                     stream, std::move(response), request_header.method() == boost::beast::http::verb::head,
@@ -1426,7 +1485,8 @@ private:
     awaitable<void> write_protocol_error(
         Stream& stream,
         failure const& f,
-        boost::beast::http::request_header<> const& header);
+        boost::beast::http::request_header<> const& header,
+        request_attributes const& attributes);
 
     /** Read the rest of a request body into @a parser, waiting at most the
         body timeout for each piece.
@@ -1532,6 +1592,7 @@ basic_http<Context, Stream>::basic_http()
             failure const& f,
             Stream& stream,
             boost::beast::http::request_header<>& req,
+            request_attributes const& attributes,
             cancellation_signals&) -> awaitable<bool>
         {
             // Request errors are answered; anything that maps to 500
@@ -1545,7 +1606,7 @@ basic_http<Context, Stream>::basic_http()
             auto response = response_from(f.text());
             response.result(status);
             detail::finish_response(response, req.version(), detail::header_keep_alive(req), false);
-            detail::finish_header(*settings, req, response);
+            detail::finish_header(*settings, req, attributes, response);
             bool keep_alive = response.keep_alive();
             co_await detail::write_response(
                 stream, std::move(response), req.method() == boost::beast::http::verb::head, settings->send_timeout);
@@ -1635,7 +1696,7 @@ awaitable<void> basic_http<Context, Stream>::operator()(Stream stream, cancellat
             if (header_ec == boost::beast::error::timeout)
             {
                 // Not an error of the server: answer 408 and close.
-                co_await write_protocol_error(stream, failure {header_ec}, header_parser.get());
+                co_await write_protocol_error(stream, failure {header_ec}, header_parser.get(), detail::no_request_attributes());
                 break;
             }
 
@@ -1649,7 +1710,7 @@ awaitable<void> basic_http<Context, Stream>::operator()(Stream stream, cancellat
                 failure const f {header_ec};
                 if (!detail::is_transport_error(header_ec))
                 {
-                    co_await write_protocol_error(stream, f, header_parser.get());
+                    co_await write_protocol_error(stream, f, header_parser.get(), detail::no_request_attributes());
                 }
                 // Invoke the hard error handler for server-side visibility.
                 throw taar::exception {f};
@@ -1760,6 +1821,8 @@ awaitable<void> basic_http<Context, Stream>::operator()(Stream stream, cancellat
                 : std::string {};
             auto keep_alive = req_header.keep_alive();
             auto version = req_header.version();
+            // Reading the body moves the header into its parser.
+            std::optional<http::request_parser<http::string_body>> body_parser;
             if (req_header.has_content_length() || req_header.chunked())
             {
                 boost::system::error_code req_ec;
@@ -1768,11 +1831,11 @@ awaitable<void> basic_http<Context, Stream>::operator()(Stream stream, cancellat
                 {
                     req_ec = http::error::body_limit;
                 }
-                http::request_parser<http::string_body> body_parser {std::move(header_parser)};
-                body_parser.body_limit(request_body_limit_);
+                body_parser.emplace(std::move(header_parser));
+                body_parser->body_limit(request_body_limit_);
                 if (!req_ec)
                 {
-                    req_ec = co_await read_body(stream, buffer, body_parser);
+                    req_ec = co_await read_body(stream, buffer, *body_parser);
                 }
                 (void)req_sz;
 
@@ -1781,7 +1844,7 @@ awaitable<void> basic_http<Context, Stream>::operator()(Stream stream, cancellat
                     failure const f {req_ec};
                     if (!detail::is_transport_error(req_ec))
                     {
-                        co_await write_protocol_error(stream, f, body_parser.get().base());
+                        co_await write_protocol_error(stream, f, body_parser->get().base(), context.attributes);
                     }
                     if (req_ec == boost::beast::error::timeout)
                     {
@@ -1791,9 +1854,6 @@ awaitable<void> basic_http<Context, Stream>::operator()(Stream stream, cancellat
                     // Invoke the hard error handler for server-side visibility.
                     throw taar::exception {f};
                 }
-                // Drain the body so the connection stays in keep-alive
-                // state; the body itself is discarded.
-                (void)body_parser.get();
             }
 
             http::response<http::empty_body> response {
@@ -1803,7 +1863,8 @@ awaitable<void> basic_http<Context, Stream>::operator()(Stream stream, cancellat
                 response.set(http::field::allow, allow);
             }
             response.keep_alive(keep_alive);
-            detail::finish_header(*settings_, req_header, response);
+            detail::finish_header(
+                *settings_, body_parser ? body_parser->get().base() : req_header, context.attributes, response);
             response.prepare_payload();
             ::boost::taar::detail::expire_after(stream, settings_->send_timeout);
             auto [resp_ec, resp_sz] = co_await http::async_write(
@@ -1923,13 +1984,13 @@ awaitable<std::optional<bool>> basic_http<Context, Stream>::run_interceptors(
     if (eptr)
     {
         bool const ka = co_await wrapped_soft_error_handler_(
-            failure::from_exception(eptr), stream, req_header, signals);
+            failure::from_exception(eptr), stream, req_header, context.attributes, signals);
         co_return ka && !shutting_down && body_done;
     }
 
     auto response = std::move(*rejection);
     detail::finish_response(response, req_header.version(), req_header.keep_alive(), shutting_down);
-    detail::finish_header(*settings_, req_header, response);
+    detail::finish_header(*settings_, req_header, context.attributes, response);
     bool const ka = response.keep_alive();
     co_await detail::write_response(
         stream, std::move(response), req_header.method() == http::verb::head, settings_->send_timeout);
@@ -1940,14 +2001,15 @@ template <typename Context, typename Stream>
 awaitable<void> basic_http<Context, Stream>::write_protocol_error(
     Stream& stream,
     failure const& f,
-    boost::beast::http::request_header<> const& header)
+    boost::beast::http::request_header<> const& header,
+    request_attributes const& attributes)
 {
     namespace http = boost::beast::http;
     unsigned const version = header.version() == 10 ? 10u : 11u;
     http::response<http::empty_body> err_response {detail::protocol_error_status(f), version};
     err_response.keep_alive(false);
     err_response.prepare_payload();
-    detail::finish_header(*settings_, header, err_response);
+    detail::finish_header(*settings_, header, attributes, err_response);
     ::boost::taar::detail::expire_after(stream, settings_->send_timeout);
     auto [wec, wsz] = co_await http::async_write(stream, err_response, use_awaitable_tuple);
     ::boost::taar::detail::expire_never(stream);
